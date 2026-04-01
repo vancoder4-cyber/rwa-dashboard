@@ -1,0 +1,2245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<title>Avenir Group — RWA Perps Analytics</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════════════
+   DESIGN TOKENS  (shadcn/ui-inspired)
+   ═══════════════════════════════════════════════════ */
+:root {
+  /* ── Base surfaces ── Lifted Coinbase dark, brighter & less cave-like */
+  --background:     #141519;
+  --background-alt: #191B22;
+  --card:           #1E2028;
+  --card-hover:     #252832;
+  --muted:          #282B37;
+  --muted-hover:    #2F3342;
+  --border:         #2E3245;
+  --border-hover:   #3A3F54;
+  --ring:           rgba(74,144,217,0.25);
+
+  /* ── Typography ── high-contrast Coinbase-style foregrounds */
+  --foreground:      #F0F1F4;
+  --foreground-sec:  #A0A7B5;
+  --foreground-muted:#8890A0;
+  --foreground-dim:  #5C6275;
+
+  /* ── Primary accent ── Avenir institutional blue (bridging #0052FF Coinbase + #4A90D9 logo) */
+  --accent:       #4A90D9;
+  --accent-dim:   rgba(74,144,217,0.10);
+  --accent-bright:#5BA0E8;
+
+  /* ── Semantic ── Coinbase-inspired green, softer red */
+  --positive:     #00D180;
+  --positive-dim: rgba(0,209,128,0.10);
+  --negative:     #E5484D;
+  --negative-dim: rgba(229,72,77,0.10);
+
+  /* ── Secondary palette ── muted, institutional tones */
+  --info:         #3B82F6;
+  --info-dim:     rgba(59,130,246,0.10);
+  --purple:       #8B8FE8;
+  --purple-dim:   rgba(139,143,232,0.10);
+  --cyan:         #3EC6D9;
+  --cyan-dim:     rgba(62,198,217,0.10);
+  --pink:         #D98CAF;
+  --pink-dim:     rgba(217,140,175,0.10);
+  --orange:       #E8913A;
+  --orange-dim:   rgba(232,145,58,0.10);
+  --gold:         #D4A853;
+  --gold-dim:     rgba(212,168,83,0.08);
+
+  /* ── Venue brand colors ── */
+  --tradexyz:     #D4A853;
+  --tradexyz-dim: rgba(212,168,83,0.10);
+  --bitget:       #00D180;
+  --bitget-dim:   rgba(0,209,128,0.10);
+
+  /* ── Radius ── */
+  --radius-sm: 6px;
+  --radius:    8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* ── Shadows ── softer to match brighter surfaces */
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.18), 0 1px 2px rgba(0,0,0,0.10);
+  --shadow:    0 2px 8px rgba(0,0,0,0.20), 0 1px 3px rgba(0,0,0,0.12);
+  --shadow-lg: 0 8px 24px rgba(0,0,0,0.24), 0 2px 8px rgba(0,0,0,0.14);
+}
+
+/* ═══════════════════════════════════════════════════
+   RESET & BASE
+   ═══════════════════════════════════════════════════ */
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; }
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: var(--background);
+  color: var(--foreground);
+  line-height: 1.5;
+  font-size: 14px;
+  overflow-x: hidden;
+}
+
+/* ═══════════════════════════════════════════════════
+   LAYOUT: HEADER
+   ═══════════════════════════════════════════════════ */
+.header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 24px; height: 56px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 100;
+}
+.header::after {
+  content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, var(--accent) 0%, rgba(74,144,217,0.15) 40%, rgba(0,209,128,0.15) 60%, var(--bitget) 100%);
+  opacity: 0.5;
+}
+.logo { display: flex; align-items: center; gap: 12px; }
+.logo-mark {
+  font-family: 'Inter', serif;
+  font-size: 20px; font-weight: 800; letter-spacing: -0.5px;
+  background: linear-gradient(135deg, #F8F8F8 40%, var(--accent));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+.logo-divider { width: 1px; height: 20px; background: var(--border); }
+.logo-label { font-size: 12px; font-weight: 500; color: var(--foreground-sec); letter-spacing: 0.5px; }
+
+.header-right { display: flex; align-items: center; gap: 16px; }
+.status-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 12px 4px 8px; border-radius: 9999px;
+  background: var(--muted); border: 1px solid var(--border);
+  font-size: 12px; color: var(--foreground-sec); font-weight: 500;
+}
+.live-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--positive);
+  box-shadow: 0 0 6px var(--positive);
+  animation: pulse-live 2s ease-in-out infinite;
+}
+@keyframes pulse-live { 0%,100%{opacity:1;box-shadow:0 0 6px var(--positive)} 50%{opacity:0.5;box-shadow:0 0 2px var(--positive)} }
+
+/* ═══════════════════════════════════════════════════
+   NAVIGATION TABS
+   ═══════════════════════════════════════════════════ */
+.nav-tabs {
+  display: flex; gap: 0; padding: 0 24px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+}
+.nav-tab {
+  position: relative; padding: 10px 20px;
+  font-size: 13px; font-weight: 600; letter-spacing: 0.01em;
+  color: var(--foreground-muted);
+  cursor: pointer; user-select: none;
+  transition: color 0.15s;
+}
+.nav-tab:hover { color: var(--foreground-sec); }
+.nav-tab.active { color: var(--foreground); }
+.nav-tab::after {
+  content: ''; position: absolute; bottom: 0; left: 12px; right: 12px;
+  height: 2px; border-radius: 2px;
+  background: var(--accent);
+  transform: scaleX(0); transition: transform 0.2s ease;
+}
+.nav-tab.active::after { transform: scaleX(1); }
+.nav-tab .tab-icon { margin-right: 6px; font-size: 14px; }
+
+/* Sub-tabs (inside All Venues) */
+.sub-tabs {
+  display: flex; gap: 0; padding: 0 24px;
+  background: var(--background-alt);
+  border-bottom: 1px solid var(--border);
+}
+.sub-tab {
+  position: relative; padding: 8px 16px;
+  font-size: 12px; font-weight: 600;
+  color: var(--foreground-muted); cursor: pointer; user-select: none;
+  display: flex; align-items: center; gap: 5px;
+  transition: color 0.15s;
+}
+.sub-tab:hover { color: var(--foreground-sec); }
+.sub-tab.active { color: var(--foreground); background: var(--card); }
+.sub-tab::after {
+  content: ''; position: absolute; bottom: 0; left: 8px; right: 8px;
+  height: 1.5px; border-radius: 1px;
+  background: var(--foreground); opacity: 0;
+  transition: opacity 0.15s;
+}
+.sub-tab.active::after { opacity: 0.6; }
+
+/* Venue dot */
+.venue-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
+.venue-dot.tradexyz { background: var(--tradexyz); }
+.venue-dot.bitget { background: var(--bitget); }
+
+/* ═══════════════════════════════════════════════════
+   FILTER BAR
+   ═══════════════════════════════════════════════════ */
+.filter-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--background-alt);
+  flex-wrap: wrap;
+}
+.chip {
+  padding: 5px 14px; border-radius: 9999px;
+  font-size: 12px; font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--foreground-muted);
+  transition: all 0.12s;
+  white-space: nowrap;
+}
+.chip:hover:not(.active) { background: var(--muted); color: var(--foreground-sec); border-color: var(--border-hover); }
+.chip.active { background: var(--accent-dim); border-color: rgba(74,144,217,0.3); color: var(--accent); }
+.chip .count { font-size: 10px; opacity: 0.65; margin-left: 3px; }
+.search-box {
+  margin-left: auto;
+  padding: 6px 12px; border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 12px; width: 180px; outline: none;
+  font-family: inherit;
+  transition: border-color 0.15s;
+}
+.search-box::placeholder { color: var(--foreground-dim); }
+.search-box:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--ring); }
+
+.info-bar {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 6px 24px;
+  font-size: 11px; color: var(--foreground-dim);
+  border-bottom: 1px solid var(--border);
+  background: var(--background-alt);
+}
+
+/* ═══════════════════════════════════════════════════
+   VIEW CONTAINERS
+   ═══════════════════════════════════════════════════ */
+.view-container { display: none; }
+.view-container.active { display: block; }
+.sub-view { display: none; }
+.sub-view.active { display: block; }
+
+/* ═══════════════════════════════════════════════════
+   KPI STRIP
+   ═══════════════════════════════════════════════════ */
+.summary-page { padding: 20px 24px; }
+
+.kpi-strip {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px;
+  margin-bottom: 20px;
+}
+.kpi-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px 18px;
+  position: relative;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.kpi-card:hover { border-color: var(--border-hover); box-shadow: var(--shadow); }
+.kpi-label {
+  font-size: 11px; font-weight: 500;
+  color: var(--foreground-muted);
+  text-transform: uppercase; letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+.kpi-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 22px; font-weight: 700;
+  letter-spacing: -0.5px;
+}
+.kpi-sub { font-size: 11px; color: var(--foreground-dim); margin-top: 4px; }
+.kpi-icon {
+  position: absolute; right: 16px; top: 16px;
+  font-size: 18px; opacity: 0.15;
+}
+
+/* ═══════════════════════════════════════════════════
+   VENUE CARDS
+   ═══════════════════════════════════════════════════ */
+.venue-cards-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+  gap: 16px; margin-bottom: 20px;
+}
+.venue-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.venue-card:hover { border-color: var(--border-hover); box-shadow: var(--shadow); }
+.vc-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 16px; padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.vc-name { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.vc-badge {
+  padding: 3px 10px; border-radius: 9999px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+}
+.vc-asset-count {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px; color: var(--foreground-sec); font-weight: 500;
+}
+
+.vc-metrics {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 8px; margin-bottom: 16px;
+}
+.vc-metric {
+  background: var(--muted);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  border: 1px solid transparent;
+  transition: border-color 0.12s;
+}
+.vc-metric:hover { border-color: var(--border); }
+.vm-label {
+  font-size: 10px; color: var(--foreground-dim);
+  text-transform: uppercase; letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+.vm-asset { font-size: 14px; font-weight: 700; }
+.vm-tag {
+  display: inline-block; font-size: 10px;
+  padding: 1px 6px; border-radius: 4px;
+  font-weight: 600; margin-left: 4px; vertical-align: middle;
+}
+.vm-value { font-size: 11px; color: var(--foreground-sec); margin-top: 3px; }
+
+/* Section inside venue card */
+.vc-section { margin-bottom: 14px; }
+.vc-section:last-child { margin-bottom: 0; }
+.vc-section-title {
+  font-size: 11px; font-weight: 600;
+  color: var(--foreground-muted);
+  text-transform: uppercase; letter-spacing: 0.5px;
+  margin-bottom: 8px;
+  display: flex; align-items: center; gap: 6px;
+}
+.vc-section-title .vc-section-hint {
+  font-size: 10px; color: var(--foreground-dim);
+  text-transform: none; letter-spacing: 0; font-weight: 400;
+}
+
+/* Progress bars */
+.bar-wrap { margin-bottom: 6px; }
+.bar-header { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 3px; }
+.bar-name { font-weight: 600; }
+.bar-detail { color: var(--foreground-sec); font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+.bar-track { height: 4px; background: var(--muted); border-radius: 2px; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 2px; transition: width 0.5s ease; }
+
+/* Stacked category bar */
+.stacked-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; gap: 1px; }
+.bar-seg { height: 100%; transition: width 0.3s; }
+.cat-legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+.cat-legend-item { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--foreground-sec); }
+.cat-legend-item .cl-dot { width: 6px; height: 6px; border-radius: 2px; flex-shrink: 0; }
+
+/* ═══════════════════════════════════════════════════
+   COVERAGE & DIVERGENCE SECTIONS
+   ═══════════════════════════════════════════════════ */
+.section-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  margin-bottom: 20px;
+}
+.section-title {
+  font-size: 15px; font-weight: 700; margin-bottom: 4px;
+}
+.section-subtitle {
+  font-size: 12px; color: var(--foreground-dim); margin-bottom: 16px;
+}
+
+.cov-stats { display: flex; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+.cov-stat {
+  background: var(--muted);
+  border-radius: var(--radius);
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+}
+.cov-stat .cs-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 18px; font-weight: 700;
+}
+.cov-stat .cs-label { font-size: 10px; color: var(--foreground-dim); text-transform: uppercase; letter-spacing: 0.3px; }
+
+.cov-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.cov-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px; border-radius: var(--radius-sm);
+  font-size: 12px; font-weight: 600;
+  background: var(--muted); border: 1px solid var(--border);
+}
+.cov-chip.multi { background: var(--accent-dim); border-color: rgba(74,144,217,0.2); color: var(--accent-bright); }
+
+.div-cards { display: flex; flex-wrap: wrap; gap: 10px; }
+.div-card {
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px; min-width: 200px; flex: 1; max-width: 280px;
+  transition: border-color 0.12s;
+}
+.div-card:hover { border-color: var(--border-hover); }
+.dc-coin { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+.dc-spread { font-size: 12px; margin-bottom: 6px; }
+.dc-venues { font-size: 11px; color: var(--foreground-dim); }
+
+/* ═══════════════════════════════════════════════════
+   DATA TABLES
+   ═══════════════════════════════════════════════════ */
+.table-wrap { padding: 0 24px 24px; overflow-x: auto; }
+
+table { width: 100%; border-collapse: collapse; }
+thead th {
+  padding: 10px 12px; text-align: right;
+  font-size: 11px; font-weight: 600;
+  color: var(--foreground-dim);
+  text-transform: uppercase; letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border);
+  background: var(--background);
+  white-space: nowrap;
+}
+thead th:first-child { text-align: left; }
+thead th[data-sort] {
+  cursor: pointer; user-select: none;
+  transition: color 0.12s;
+}
+thead th[data-sort]:hover { color: var(--foreground-sec); }
+thead th.sorted { color: var(--accent); }
+.arrow { font-size: 9px; margin-left: 3px; opacity: 0.8; }
+
+tbody tr {
+  border-bottom: 1px solid var(--border);
+  transition: background 0.1s;
+}
+tbody tr:nth-child(even) { background: rgba(255,255,255,0.008); }
+tbody tr:hover {
+  background: var(--card-hover);
+}
+/* Left accent on hover — applied to first td, not tr (::before on tr creates phantom cell) */
+tbody td:first-child { position: relative; }
+tbody td:first-child::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+  width: 2px; background: var(--accent-bright);
+  opacity: 0; transition: opacity 0.12s;
+}
+tbody tr:hover td:first-child::before { opacity: 1; }
+
+td {
+  padding: 10px 12px; font-size: 13px; text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+td:first-child { text-align: left; }
+
+.asset-cell { display: flex; align-items: center; gap: 10px; overflow: hidden; }
+.asset-icon {
+  width: 32px; height: 32px; border-radius: var(--radius);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; flex-shrink: 0;
+}
+.asset-info { min-width: 0; overflow: hidden; }
+.asset-name { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.asset-type { font-size: 11px; color: var(--foreground-dim); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.asset-tag {
+  display: inline-block; font-size: 9px;
+  padding: 1px 6px; border-radius: 4px;
+  font-weight: 600; letter-spacing: 0.3px;
+}
+.tag-equity   { background: var(--purple-dim); color: var(--purple); }
+.tag-commodity{ background: var(--accent-dim); color: var(--accent); }
+.tag-index    { background: var(--info-dim); color: var(--info); }
+.tag-fx       { background: var(--pink-dim); color: var(--pink); }
+.tag-etf      { background: var(--cyan-dim); color: var(--cyan); }
+
+.change-badge {
+  display: inline-block; padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 12px; font-weight: 600;
+  font-family: 'JetBrains Mono', monospace;
+}
+.change-badge.up { background: var(--positive-dim); color: var(--positive); }
+.change-badge.down { background: var(--negative-dim); color: var(--negative); }
+
+.funding-badge {
+  display: inline-block; padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 12px; font-weight: 500;
+  font-family: 'JetBrains Mono', monospace;
+}
+.funding-badge.pos { background: var(--positive-dim); color: var(--positive); }
+.funding-badge.neg { background: var(--negative-dim); color: var(--negative); }
+.funding-badge.nearzero { background: var(--info-dim); color: #6b9fff; }
+.funding-badge.nodata { background: rgba(92,97,112,0.1); color: var(--foreground-dim); font-style: italic; }
+
+.venue-badge-sm {
+  display: inline-flex; align-items: center;
+  padding: 2px 8px; border-radius: var(--radius-sm);
+  font-size: 10px; font-weight: 700; letter-spacing: 0.3px;
+}
+.venue-badge-sm.tradexyz { background: var(--tradexyz-dim); color: var(--tradexyz); border: 1px solid rgba(212,168,83,0.2); }
+.venue-badge-sm.bitget { background: var(--bitget-dim); color: var(--bitget); border: 1px solid rgba(0,209,128,0.2); }
+
+.venue-subrow { background: var(--muted); cursor: pointer; }
+.venue-subrow:hover { background: var(--muted-hover) !important; }
+.venue-subrow td { padding: 8px 12px; font-size: 12px; border-bottom: 1px solid rgba(31,33,41,0.7); }
+
+.mono { font-family: 'JetBrains Mono', monospace; }
+
+/* ═══════════════════════════════════════════════════
+   HEATMAP
+   ═══════════════════════════════════════════════════ */
+.heatmap-wrap { padding: 20px 24px; }
+.heatmap-grid { display: grid; gap: 2px; }
+.hm-header {
+  font-size: 11px; font-weight: 700; color: var(--foreground-sec);
+  padding: 8px 6px; text-align: center;
+  background: var(--card); border-radius: 4px;
+}
+.hm-asset-label {
+  font-size: 12px; font-weight: 600; padding: 8px 10px;
+  display: flex; align-items: center; gap: 6px;
+  background: var(--card); border-radius: 4px;
+}
+.hm-cell {
+  padding: 8px 6px; text-align: center; border-radius: 4px;
+  font-size: 12px; font-weight: 600;
+  cursor: pointer; transition: transform 0.1s, box-shadow 0.1s;
+  position: relative;
+}
+.hm-cell:hover { transform: scale(1.04); box-shadow: var(--shadow-lg); z-index: 2; }
+.hm-val { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; }
+.hm-ann { font-size: 10px; opacity: 0.6; margin-top: 1px; }
+.hm-cell.na { background: rgba(31,33,41,0.5); color: var(--foreground-dim); }
+
+/* Heatmap legend */
+.heatmap-legend {
+  display: flex; align-items: center; gap: 16px;
+  margin-top: 16px; padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 11px; color: var(--foreground-dim);
+}
+.legend-item { display: flex; align-items: center; gap: 5px; }
+.legend-swatch {
+  width: 12px; height: 12px; border-radius: 3px;
+}
+
+/* ═══════════════════════════════════════════════════
+   MODAL
+   ═══════════════════════════════════════════════════ */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.75);
+  backdrop-filter: blur(4px);
+  z-index: 10000;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+.modal-overlay.open { opacity: 1; pointer-events: all; }
+.modal-box {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  width: 640px; max-width: 95vw; max-height: 90vh;
+  overflow-y: auto; padding: 28px;
+  position: relative;
+  transform: translateY(10px) scale(0.98);
+  transition: transform 0.25s ease;
+  box-shadow: var(--shadow-lg);
+}
+.modal-overlay.open .modal-box { transform: translateY(0) scale(1); }
+.modal-close {
+  position: absolute; top: 16px; right: 16px;
+  width: 28px; height: 28px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--muted);
+  color: var(--foreground-sec); font-size: 16px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: all 0.12s;
+}
+.modal-close:hover { background: var(--muted-hover); color: var(--foreground); }
+.modal-title {
+  font-size: 18px; font-weight: 800; margin-bottom: 20px;
+  padding-right: 36px; display: flex; align-items: center; gap: 10px;
+}
+.modal-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  margin-bottom: 20px;
+}
+.modal-metric {
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+.mm-label {
+  font-size: 10px; font-weight: 600;
+  color: var(--foreground-dim);
+  text-transform: uppercase; letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+.mm-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 18px; font-weight: 700;
+}
+.mm-sub { font-size: 11px; color: var(--foreground-sec); margin-top: 2px; }
+
+.modal-chart-section {
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px; margin-bottom: 16px;
+}
+.modal-chart-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 12px;
+}
+.modal-chart-title { font-size: 13px; font-weight: 700; }
+.modal-chart-range {
+  display: inline-flex; gap: 2px;
+  background: var(--background);
+  border-radius: var(--radius-sm); padding: 2px;
+  border: 1px solid var(--border);
+}
+.mcr-btn {
+  padding: 3px 10px; border: none; border-radius: 4px;
+  background: transparent; color: var(--foreground-dim);
+  font-size: 11px; font-weight: 600; cursor: pointer;
+  font-family: inherit; transition: all 0.12s;
+}
+.mcr-btn.active { background: var(--info-dim); color: var(--info); }
+.mcr-btn:hover:not(.active) { color: var(--foreground-sec); }
+.modal-footer {
+  font-size: 11px; color: var(--foreground-dim);
+  padding-top: 12px; border-top: 1px solid var(--border);
+}
+
+/* Sparkline range toggle */
+.spark-range-btns {
+  display: inline-flex; gap: 1px;
+  background: var(--background);
+  border-radius: 4px; padding: 2px;
+  border: 1px solid var(--border);
+}
+.sr-btn {
+  padding: 1px 6px; border: none; border-radius: 3px;
+  background: transparent; color: var(--foreground-dim);
+  font-size: 10px; font-weight: 600; cursor: pointer;
+  font-family: inherit; transition: all 0.12s;
+}
+.sr-btn.active { background: var(--accent-dim); color: var(--accent-bright); }
+.sr-btn:hover:not(.active) { color: var(--foreground-sec); }
+
+/* ═══════════════════════════════════════════════════
+   LOADING
+   ═══════════════════════════════════════════════════ */
+.loading-overlay {
+  position: fixed; inset: 0; background: var(--background);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  z-index: 9999;
+  transition: opacity 0.4s ease;
+}
+.loading-overlay.fade-out { opacity: 0; pointer-events: none; }
+.loader-bar {
+  width: 200px; height: 3px; border-radius: 2px;
+  background: var(--muted); overflow: hidden;
+}
+.loader-fill {
+  height: 100%; width: 0%;
+  background: linear-gradient(90deg, var(--tradexyz), var(--bitget));
+  border-radius: 2px;
+  animation: loader-grow 1.5s ease-in-out forwards;
+}
+@keyframes loader-grow { 0%{width:0%} 50%{width:60%} 100%{width:100%} }
+.load-text { margin-top: 16px; color: var(--foreground-sec); font-size: 13px; font-weight: 500; }
+.load-log { margin-top: 6px; color: var(--foreground-dim); font-size: 11px; }
+
+/* Footer */
+.dashboard-footer {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 24px;
+  border-top: 1px solid var(--border);
+  background: var(--card);
+  font-size: 11px; color: var(--foreground-dim);
+}
+.footer-venues { display: flex; gap: 12px; }
+.footer-venue { display: flex; align-items: center; gap: 4px; }
+
+/* Checkbox style */
+input[type="checkbox"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* ═══════════════════════════════════════════════════
+   RESPONSIVE
+   ═══════════════════════════════════════════════════ */
+@media (max-width: 960px) {
+  .kpi-strip { grid-template-columns: repeat(2, 1fr); }
+  .venue-cards-grid { grid-template-columns: 1fr; }
+  .vc-metrics { grid-template-columns: repeat(2, 1fr); }
+  .modal-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .kpi-strip { grid-template-columns: 1fr; }
+  .nav-tab { padding: 8px 12px; font-size: 12px; }
+  .header { padding: 0 16px; }
+  .summary-page, .table-wrap, .heatmap-wrap { padding-left: 16px; padding-right: 16px; }
+  .filter-bar { padding: 8px 16px; }
+}
+</style>
+</head>
+<body>
+
+<!-- Loading -->
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="logo-mark" style="font-size:24px;margin-bottom:20px">Avenir Group</div>
+  <div class="loader-bar"><div class="loader-fill"></div></div>
+  <div class="load-text">RWA Analyst is thinking</div>
+  <div class="load-log" id="loadLog">Connecting to venues...</div>
+</div>
+
+<!-- Header -->
+<div class="header">
+  <div class="logo">
+    <span class="logo-mark">Avenir Group</span>
+    <div class="logo-divider"></div>
+    <span class="logo-label">RWA Perps Analytics</span>
+  </div>
+  <div class="header-right">
+    <div class="status-pill">
+      <div class="live-dot"></div>
+      <span id="statusText">Connecting...</span>
+    </div>
+  </div>
+</div>
+
+<!-- Top-level tabs -->
+<div class="nav-tabs">
+  <div class="nav-tab active" onclick="switchView('allvenues', this)"><span class="tab-icon">◉</span>All Venues</div>
+  <div class="nav-tab" onclick="switchView('asset', this)"><span class="tab-icon">⊞</span>By Asset</div>
+  <div class="nav-tab" onclick="switchView('heatmap', this)"><span class="tab-icon">▦</span>Funding Heatmap</div>
+</div>
+
+<!-- ══ ALL VENUES ══ -->
+<div class="view-container active" id="view-allvenues">
+  <div class="sub-tabs">
+    <div class="sub-tab active" onclick="switchSubTab('aggregator', this)">Aggregator</div>
+    <div class="sub-tab" onclick="switchSubTab('tradexyz', this)"><span class="venue-dot tradexyz"></span>trade.xyz</div>
+    <div class="sub-tab" onclick="switchSubTab('bitget', this)"><span class="venue-dot bitget"></span>Bitget</div>
+  </div>
+
+  <!-- Aggregator -->
+  <div class="sub-view active" id="sub-aggregator">
+    <div class="summary-page">
+      <div class="kpi-strip" id="kpiStrip"></div>
+      <div class="venue-cards-grid" id="venueCardsGrid"></div>
+      <div class="section-card" id="coverageSection"></div>
+      <div class="section-card" id="divSection"></div>
+    </div>
+  </div>
+
+  <!-- trade.xyz table -->
+  <div class="sub-view" id="sub-tradexyz">
+    <div class="filter-bar">
+      <div class="chip active" onclick="setVenueFilter('tradexyz','all',this)">All RWA <span class="count" id="xyzCountAll"></span></div>
+      <div class="chip" onclick="setVenueFilter('tradexyz','equity',this)">Equities <span class="count" id="xyzCountEquity"></span></div>
+      <div class="chip" onclick="setVenueFilter('tradexyz','commodity',this)">Commodities <span class="count" id="xyzCountCommodity"></span></div>
+      <div class="chip" onclick="setVenueFilter('tradexyz','index',this)">Indices <span class="count" id="xyzCountIndex"></span></div>
+      <div class="chip" onclick="setVenueFilter('tradexyz','etf',this)">ETFs <span class="count" id="xyzCountEtf"></span></div>
+      <div class="chip" onclick="setVenueFilter('tradexyz','fx',this)">FX <span class="count" id="xyzCountFx"></span></div>
+      <label style="display:flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;color:var(--foreground-sec);cursor:pointer;user-select:none">
+        <input type="checkbox" id="xyzHideInactive" checked onchange="renderVenueTable('tradexyz')"> Hide inactive
+      </label>
+      <input class="search-box" placeholder="Search asset..." oninput="venueTableSearch.tradexyz=this.value.toLowerCase();renderVenueTable('tradexyz')">
+    </div>
+    <div class="info-bar"><span>trade.xyz (Hyperliquid HIP-3 DEX) · Funding settles every 1h</span><span>Auto-refresh: 30s</span></div>
+    <div class="table-wrap">
+      <table><thead><tr>
+        <th style="text-align:left" data-sort="name" onclick="setVenueSort('tradexyz','name')">Asset <span class="arrow"></span></th>
+        <th data-sort="markPx" onclick="setVenueSort('tradexyz','markPx')">Mark Price <span class="arrow"></span></th>
+        <th data-sort="indexPx" onclick="setVenueSort('tradexyz','indexPx')">Oracle Price <span class="arrow"></span></th>
+        <th data-sort="change" onclick="setVenueSort('tradexyz','change')">24h Change <span class="arrow"></span></th>
+        <th data-sort="volume" onclick="setVenueSort('tradexyz','volume')">24h Volume <span class="arrow">▼</span></th>
+        <th data-sort="oi" onclick="setVenueSort('tradexyz','oi')">Open Interest <span class="arrow"></span></th>
+        <th data-sort="funding" onclick="setVenueSort('tradexyz','funding')">Funding Rate <span class="arrow"></span></th>
+        <th style="cursor:default"><div style="display:flex;align-items:center;gap:6px;justify-content:flex-end"><span>Funding</span>
+          <div class="spark-range-btns"><button class="sr-btn active" onclick="setSparkRange('tradexyz',24,this)">24h</button><button class="sr-btn" onclick="setSparkRange('tradexyz',72,this)">3d</button><button class="sr-btn" onclick="setSparkRange('tradexyz',168,this)">7d</button></div>
+        </div></th>
+      </tr></thead><tbody id="xyzTableBody"></tbody></table>
+    </div>
+  </div>
+
+  <!-- Bitget table -->
+  <div class="sub-view" id="sub-bitget">
+    <div class="filter-bar">
+      <div class="chip active" onclick="setVenueFilter('bitget','all',this)">All RWA <span class="count" id="bgCountAll"></span></div>
+      <div class="chip" onclick="setVenueFilter('bitget','equity',this)">Equities <span class="count" id="bgCountEquity"></span></div>
+      <div class="chip" onclick="setVenueFilter('bitget','commodity',this)">Commodities <span class="count" id="bgCountCommodity"></span></div>
+      <div class="chip" onclick="setVenueFilter('bitget','index',this)">Indices <span class="count" id="bgCountIndex"></span></div>
+      <div class="chip" onclick="setVenueFilter('bitget','etf',this)">ETFs <span class="count" id="bgCountEtf"></span></div>
+      <div class="chip" onclick="setVenueFilter('bitget','fx',this)">FX <span class="count" id="bgCountFx"></span></div>
+      <label style="display:flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;color:var(--foreground-sec);cursor:pointer;user-select:none">
+        <input type="checkbox" id="bgHideInactive" checked onchange="renderVenueTable('bitget')"> Hide inactive
+      </label>
+      <input class="search-box" placeholder="Search asset..." oninput="venueTableSearch.bitget=this.value.toLowerCase();renderVenueTable('bitget')">
+    </div>
+    <div class="info-bar"><span>Bitget (USDT-FUTURES) · Funding settles every 8h</span><span>Auto-refresh: 30s</span></div>
+    <div class="table-wrap">
+      <table><thead><tr>
+        <th style="text-align:left" data-sort="name" onclick="setVenueSort('bitget','name')">Asset <span class="arrow"></span></th>
+        <th data-sort="markPx" onclick="setVenueSort('bitget','markPx')">Mark Price <span class="arrow"></span></th>
+        <th data-sort="indexPx" onclick="setVenueSort('bitget','indexPx')">Index Price <span class="arrow"></span></th>
+        <th data-sort="change" onclick="setVenueSort('bitget','change')">24h Change <span class="arrow"></span></th>
+        <th data-sort="volume" onclick="setVenueSort('bitget','volume')">24h Volume <span class="arrow">▼</span></th>
+        <th data-sort="oi" onclick="setVenueSort('bitget','oi')">Open Interest <span class="arrow"></span></th>
+        <th data-sort="funding" onclick="setVenueSort('bitget','funding')">Funding Rate <span class="arrow"></span></th>
+        <th style="cursor:default"><div style="display:flex;align-items:center;gap:6px;justify-content:flex-end"><span>Funding</span>
+          <div class="spark-range-btns"><button class="sr-btn active" onclick="setSparkRange('bitget',24,this)">24h</button><button class="sr-btn" onclick="setSparkRange('bitget',72,this)">3d</button><button class="sr-btn" onclick="setSparkRange('bitget',168,this)">7d</button></div>
+        </div></th>
+      </tr></thead><tbody id="bgTableBody"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<!-- ══ BY ASSET ══ -->
+<div class="view-container" id="view-asset">
+  <div class="filter-bar">
+    <div class="chip active" onclick="setAssetCat('all',this)">All <span class="count" id="aCountAll"></span></div>
+    <div class="chip" onclick="setAssetCat('equity',this)">Equities <span class="count" id="aCountEquity"></span></div>
+    <div class="chip" onclick="setAssetCat('commodity',this)">Commodities <span class="count" id="aCountCommodity"></span></div>
+    <div class="chip" onclick="setAssetCat('index',this)">Indices <span class="count" id="aCountIndex"></span></div>
+    <div class="chip" onclick="setAssetCat('etf',this)">ETFs <span class="count" id="aCountEtf"></span></div>
+    <div class="chip" onclick="setAssetCat('fx',this)">FX <span class="count" id="aCountFx"></span></div>
+    <label style="display:flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;color:var(--foreground-sec);cursor:pointer;user-select:none">
+      <input type="checkbox" id="assetHideInactive" onchange="renderAssetView()"> Hide inactive
+    </label>
+    <input class="search-box" placeholder="Search asset..." oninput="assetSearch=this.value.toLowerCase();renderAssetView()">
+  </div>
+  <div class="info-bar"><span>Click an asset row to expand · Click a venue row for details</span><span>Auto-refresh: 30s</span></div>
+  <div class="table-wrap">
+    <table><thead><tr>
+      <th style="text-align:left" data-sort="name" onclick="setAssetSort('name')">Asset <span class="arrow"></span></th>
+      <th data-sort="venues" onclick="setAssetSort('venues')">Venues <span class="arrow"></span></th>
+      <th data-sort="price" onclick="setAssetSort('price')">Best Price <span class="arrow"></span></th>
+      <th data-sort="change" onclick="setAssetSort('change')">24h Change <span class="arrow"></span></th>
+      <th data-sort="volume" onclick="setAssetSort('volume')">Total Volume <span class="arrow">▼</span></th>
+      <th data-sort="oi" onclick="setAssetSort('oi')">Total OI <span class="arrow"></span></th>
+      <th data-sort="spread" onclick="setAssetSort('spread')">Funding Spread <span class="arrow"></span></th>
+    </tr></thead><tbody id="assetTableBody"></tbody></table>
+  </div>
+</div>
+
+<!-- ══ HEATMAP ══ -->
+<div class="view-container" id="view-heatmap">
+  <div class="heatmap-wrap">
+    <div class="section-title">Funding Rate Heatmap</div>
+    <div class="section-subtitle">Current funding rates across venues — Green = longs pay shorts · Red = shorts pay longs · Blue = near-zero · Gray = no data</div>
+    <div style="display:flex;align-items:center;gap:8px;margin:12px 0 14px">
+      <span style="font-size:11px;color:var(--foreground-dim);font-weight:600">Sort by</span>
+      <div class="chip" onclick="setHeatmapSort('tradexyz',this)"><span class="venue-dot tradexyz" style="margin-right:4px"></span>trade.xyz</div>
+      <div class="chip" onclick="setHeatmapSort('bitget',this)"><span class="venue-dot bitget" style="margin-right:4px"></span>Bitget</div>
+    </div>
+    <div class="heatmap-grid" id="heatmapGrid"></div>
+    <div class="heatmap-legend">
+      <div class="legend-item"><div class="legend-swatch" style="background:rgba(0,209,128,0.5)"></div>Positive (longs pay)</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:rgba(229,72,77,0.5)"></div>Negative (shorts pay)</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:rgba(59,130,246,0.3)"></div>Near-zero</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:rgba(92,97,112,0.2)"></div>No data</div>
+      <div style="margin-left:auto;font-size:11px;color:var(--foreground-dim)">Deeper color = higher |APR|</div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal -->
+<div class="modal-overlay" id="assetModal" onclick="if(event.target===this)closeModal()">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal()">&times;</button>
+    <div id="modalContent"></div>
+  </div>
+</div>
+
+<!-- Footer -->
+<div class="dashboard-footer">
+  <div>Avenir Group · RWA Multi-Venue Analytics · Demo v3</div>
+  <div class="footer-venues">
+    <div class="footer-venue"><span class="venue-dot tradexyz"></span> trade.xyz</div>
+    <div class="footer-venue"><span class="venue-dot bitget"></span> Bitget</div>
+    <div style="margin-left:8px" id="footerTime">—</div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════
+// CONFIG (identical to production)
+// ═══════════════════════════════════════════════════
+
+const VENUES = {
+  tradexyz: { name: 'trade.xyz', color: '#D4A853', fundingInterval: 1 },
+  bitget:   { name: 'Bitget',    color: '#00D180', fundingInterval: 8 },
+};
+
+const CAT_COLORS = { index:'#3B82F6', equity:'#8B8FE8', commodity:'#D4A853', etf:'#3EC6D9', fx:'#D98CAF', other:'#5C6170' };
+const CAT_LABELS = { index:'Index', equity:'Equity', commodity:'Commodity', etf:'ETF', fx:'FX', other:'Other' };
+
+const KNOWN_CATEGORIES = {
+  'SP500':'index','XYZ100':'index','JP225':'index','KR200':'index','VIX':'index','NDX':'index','NQ100':'index','DJI':'index','NASDAQ':'index','DAX':'index','FTSE':'index',
+  'CL':'commodity','BRN':'commodity','BRENTOIL':'commodity','NATGAS':'commodity','OIL':'commodity',
+  'GOLD':'commodity','SILVER':'commodity','HG':'commodity','COPPER':'commodity','PLAT':'commodity','PLATINUM':'commodity','PALL':'commodity','PALLADIUM':'commodity','ALUMINIUM':'commodity','URANIUM':'commodity',
+  'CORN':'commodity','WHEAT':'commodity','SOYBEAN':'commodity','COFFEE':'commodity','SUGAR':'commodity','COTTON':'commodity',
+  'NVDA':'equity','TSLA':'equity','AAPL':'equity','MSFT':'equity','GOOGL':'equity','AMZN':'equity','META':'equity','NFLX':'equity','AMD':'equity','INTC':'equity','MU':'equity','ORCL':'equity','TSM':'equity','SNDK':'equity','AVGO':'equity','CRM':'equity','UBER':'equity','SHOP':'equity','SQ':'equity','PYPL':'equity','SNAP':'equity',
+  'COIN':'equity','HOOD':'equity','PLTR':'equity','MSTR':'equity','CRCL':'equity','SOFI':'equity','COST':'equity','RIVN':'equity','LCID':'equity','NIO':'equity','FUTU':'equity','RDDT':'equity',
+  'BABA':'equity','SOFTBANK':'equity','KIOXIA':'equity','SMSN':'equity','HYUNDAI':'equity','SKHX':'equity','PDD':'equity','JD':'equity',
+  'LLY':'equity','HIMS':'equity','PFE':'equity','MRNA':'equity','JNJ':'equity',
+  'GME':'equity','LITE':'equity','DKNG':'equity','CRWV':'equity','DFDV':'equity','MCD':'equity','WMT':'equity','DIS':'equity','NKE':'equity',
+  'IBM':'equity','ASML':'equity','ARM':'equity','GE':'equity','APP':'equity','MRVL':'equity','CSCO':'equity','PEP':'equity','ACN':'equity','MA':'equity','UNH':'equity',
+  'COP':'commodity','XOM':'commodity','OXY':'commodity','XLE':'commodity',
+  'V':'equity','BA':'equity','CAT':'equity','HD':'equity','JPM':'equity','GS':'equity','MS':'equity','BRK':'equity','ABBV':'equity','TMO':'equity','DHR':'equity','ABT':'equity','BMY':'equity','GILD':'equity',
+  'QCOM':'equity','TXN':'equity','AMAT':'equity','LRCX':'equity','KLAC':'equity','MCHP':'equity','ON':'equity','ADI':'equity',
+  'SNOW':'equity','NET':'equity','DDOG':'equity','ZS':'equity','PANW':'equity','CRWD':'equity','FTNT':'equity',
+  'EWY':'etf','EWJ':'etf','URNM':'etf','USAR':'etf','SPY':'etf','QQQ':'etf','GLD':'etf','SLV':'etf','USO':'etf','TLT':'etf',
+  'KWEB':'etf','EWT':'etf','TQQQ':'etf','SQQQ':'etf',
+  'JPY':'fx','EUR':'fx','DXY':'fx','GBP':'fx','CNY':'fx','AUD':'fx',
+};
+
+const KNOWN_NAMES = {
+  'SP500':'S&P 500 Index','XYZ100':'Nasdaq 100 (XYZ)','JP225':'Nikkei 225','KR200':'KOSPI 200','VIX':'VIX Volatility Index','NDX':'Nasdaq 100','NQ100':'Nasdaq 100','DJI':'Dow Jones','NASDAQ':'Nasdaq Composite','DAX':'DAX 40','FTSE':'FTSE 100',
+  'CL':'WTI Crude Oil','BRN':'Brent Crude Oil','BRENTOIL':'Brent Crude Oil','NATGAS':'Natural Gas','OIL':'Crude Oil',
+  'GOLD':'Gold (XAU)','SILVER':'Silver (XAG)','HG':'Copper','COPPER':'Copper','PLAT':'Platinum','PLATINUM':'Platinum','PALL':'Palladium','PALLADIUM':'Palladium','ALUMINIUM':'Aluminium','URANIUM':'Uranium',
+  'CORN':'Corn','WHEAT':'Wheat','SOYBEAN':'Soybean','COFFEE':'Coffee','SUGAR':'Sugar','COTTON':'Cotton',
+  'NVDA':'NVIDIA Corp','TSLA':'Tesla Inc','AAPL':'Apple Inc','MSFT':'Microsoft Corp','GOOGL':'Alphabet Inc','AMZN':'Amazon.com Inc','META':'Meta Platforms','NFLX':'Netflix Inc','AMD':'AMD Inc','INTC':'Intel Corp','MU':'Micron Technology','ORCL':'Oracle Corp','TSM':'Taiwan Semiconductor','SNDK':'SanDisk Corp','AVGO':'Broadcom Inc','CRM':'Salesforce Inc','UBER':'Uber Technologies','SHOP':'Shopify Inc','SQ':'Block Inc','PYPL':'PayPal Holdings','SNAP':'Snap Inc',
+  'COIN':'Coinbase Global','HOOD':'Robinhood Markets','PLTR':'Palantir Technologies','MSTR':'Strategy (MicroStrategy)','CRCL':'Circle Internet','SOFI':'SoFi Technologies','COST':'Costco Wholesale','RIVN':'Rivian Automotive','LCID':'Lucid Group','NIO':'NIO Inc','FUTU':'Futu Holdings','RDDT':'Reddit Inc','DFDV':'DeFi Development Corp',
+  'BABA':'Alibaba Group','SOFTBANK':'SoftBank Group','KIOXIA':'Kioxia Holdings','SMSN':'Samsung Electronics','HYUNDAI':'Hyundai Motor','SKHX':'SK Hynix','PDD':'PDD Holdings','JD':'JD.com Inc',
+  'LLY':'Eli Lilly & Co','HIMS':'Hims & Hers Health','PFE':'Pfizer Inc','MRNA':'Moderna Inc','JNJ':'Johnson & Johnson',
+  'GME':'GameStop Corp','LITE':'Lumentum Holdings','DKNG':'DraftKings Inc','CRWV':'CoreWeave Inc','MCD':'McDonalds Corp','WMT':'Walmart Inc','DIS':'Walt Disney Co','NKE':'Nike Inc',
+  'IBM':'IBM Corp','ASML':'ASML Holding','ARM':'Arm Holdings','GE':'GE Aerospace','APP':'AppLovin Corp','MRVL':'Marvell Technology','CSCO':'Cisco Systems','PEP':'PepsiCo Inc','ACN':'Accenture plc','MA':'Mastercard Inc','UNH':'UnitedHealth Group',
+  'COP':'ConocoPhillips','XOM':'Exxon Mobil','OXY':'Occidental Petroleum','XLE':'Energy Select SPDR',
+  'V':'Visa Inc','BA':'Boeing Co','CAT':'Caterpillar Inc','HD':'Home Depot','JPM':'JPMorgan Chase','GS':'Goldman Sachs','MS':'Morgan Stanley','BRK':'Berkshire Hathaway','ABBV':'AbbVie Inc','TMO':'Thermo Fisher','DHR':'Danaher Corp','ABT':'Abbott Laboratories','BMY':'Bristol-Myers Squibb','GILD':'Gilead Sciences',
+  'QCOM':'Qualcomm Inc','TXN':'Texas Instruments','AMAT':'Applied Materials','LRCX':'Lam Research','KLAC':'KLA Corp','MCHP':'Microchip Technology','ON':'ON Semiconductor','ADI':'Analog Devices',
+  'SNOW':'Snowflake Inc','NET':'Cloudflare Inc','DDOG':'Datadog Inc','ZS':'Zscaler Inc','PANW':'Palo Alto Networks','CRWD':'CrowdStrike Holdings','FTNT':'Fortinet Inc',
+  'EWY':'iShares South Korea','EWJ':'iShares Japan','URNM':'Sprott Uranium ETF','USAR':'US Real Assets','SPY':'SPDR S&P 500','QQQ':'Invesco QQQ','GLD':'SPDR Gold','SLV':'iShares Silver','USO':'United States Oil','TLT':'iShares 20+ Treasury',
+  'KWEB':'KraneShares China Internet','EWT':'iShares MSCI Taiwan','TQQQ':'ProShares UltraPro QQQ','SQQQ':'ProShares UltraPro Short QQQ',
+  'JPY':'USD/JPY','EUR':'EUR/USD','DXY':'US Dollar Index','GBP':'GBP/USD','CNY':'USD/CNY','AUD':'AUD/USD',
+};
+
+// ═══════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════
+
+// allData: array of { coin, fullName, category, venue, markPx, indexPx, change, volume, oi, funding }
+let allData = [];
+// Volume growth: venue → { coin: { prevVol, currVol, growth% } }
+let volumeGrowthData = { tradexyz: {}, bitget: {} };
+let lastGrowthFetch = 0;
+const GROWTH_FETCH_INTERVAL = 300000; // re-fetch every 5 min
+let currentView = 'allvenues';
+let currentSubTab = 'aggregator';
+let assetCatFilter = 'all';
+let assetSearch = '';
+let expandedAsset = null;
+let refreshTimer = null;
+
+// Per-venue table state
+let venueTableCatFilter = { tradexyz: 'all', bitget: 'all' };
+let venueTableSearch = { tradexyz: '', bitget: '' };
+let venueTableSort = { tradexyz: { key: 'volume', dir: -1 }, bitget: { key: 'volume', dir: -1 } };
+let assetSort = { key: 'volume', dir: -1 };
+
+// Sparkline state
+let sparkHours = { tradexyz: 24, bitget: 24 };
+let fundingCache = {}; // key: "venue:coin" → { hours, data }
+
+// ═══════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════
+
+function fmtPrice(v) {
+  if (!v) return '—';
+  if (v >= 10000) return v.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+  if (v >= 1) return v.toFixed(2);
+  return v.toFixed(4);
+}
+function fmtVolume(v) {
+  if (!v) return '—';
+  if (v >= 1e9) return '$' + (v/1e9).toFixed(2) + 'B';
+  if (v >= 1e6) return '$' + (v/1e6).toFixed(1) + 'M';
+  if (v >= 1e3) return '$' + (v/1e3).toFixed(0) + 'K';
+  return '$' + v.toFixed(0);
+}
+function fmtFunding(r) {
+  if (r === null) return 'N/A';
+  if (r === 0) return '0.0000%';
+  return (r >= 0 ? '+' : '') + (r * 100).toFixed(4) + '%';
+}
+function annualize(r, venue) {
+  if (r === null) return null;
+  const interval = VENUES[venue].fundingInterval;
+  return r * (24 / interval) * 365;
+}
+function fmtAnnual(r, venue) {
+  const ann = annualize(r, venue);
+  if (ann === null) return 'N/A';
+  return (ann * 100).toFixed(2) + '%';
+}
+// near-zero: annualized absolute value < 0.5%
+function fundingClass(r, venue) {
+  if (r === null) return 'nodata';
+  if (r === 0) return 'nearzero';
+  const ann = venue ? Math.abs(annualize(r, venue)) : Math.abs(r);
+  if (ann < 0.005) return 'nearzero';
+  return r > 0 ? 'pos' : 'neg';
+}
+
+function logLoad(msg) {
+  const el = document.getElementById('loadLog');
+  if (el) el.textContent = msg;
+  console.log('[RWA]', msg);
+}
+
+// ═══════════════════════════════════════════════
+// API: trade.xyz (Hyperliquid HIP-3)
+// ═══════════════════════════════════════════════
+
+async function fetchTradeXyz() {
+  const API_URL = 'https://api.hyperliquid.xyz/info';
+  logLoad('Fetching trade.xyz data...');
+
+  // Try dex param first, then fallback to all perps
+  let meta, ctxs, source;
+  for (const dexName of ['xyz', 'XYZ', 'tradexyz']) {
+    try {
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'metaAndAssetCtxs', dex: dexName })
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (!Array.isArray(data) || data.length !== 2) continue;
+      const universe = data[0].universe || data[0];
+      if (universe.length > 0) {
+        meta = data[0]; ctxs = data[1]; source = 'dex_param';
+        logLoad(`trade.xyz: ${universe.length} assets via dex="${dexName}"`);
+        break;
+      }
+    } catch (e) { /* try next */ }
+  }
+
+  if (!meta) {
+    // Fallback: all perps, filter by known names
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'metaAndAssetCtxs' })
+    });
+    const data = await res.json();
+    meta = data[0]; ctxs = data[1]; source = 'all_perps';
+    logLoad(`trade.xyz: ${(meta.universe || meta).length} total perps (filtering by known RWA)`);
+  }
+
+  const universe = meta.universe || meta;
+  const assets = [];
+
+  for (let i = 0; i < universe.length; i++) {
+    const u = universe[i];
+    const c = ctxs[i];
+    let rawName = u.name || '';
+    let coin = rawName.includes(':') ? rawName.split(':')[1] : rawName;
+
+    if (source === 'all_perps' && !KNOWN_CATEGORIES[coin]) continue;
+
+    const markPx = parseFloat(c.markPx) || 0;
+    const oraclePx = parseFloat(c.oraclePx) || 0;
+    const prevDayPx = parseFloat(c.prevDayPx) || 0;
+    const volume = parseFloat(c.dayNtlVlm) || 0;
+    const oi = parseFloat(c.openInterest) || 0;
+    const rawFunding = parseFloat(c.funding);
+    const funding = isNaN(rawFunding) ? null : rawFunding;
+    const change = prevDayPx ? ((markPx - prevDayPx) / prevDayPx) * 100 : 0;
+    const isActive = volume > 0 || oi > 0 || (funding !== null && funding !== 0);
+
+    const cat = KNOWN_CATEGORIES[coin] || 'other';
+    if (cat === 'other') console.warn(`[RWA] Uncategorized trade.xyz asset: ${coin}`);
+    const fullName = KNOWN_NAMES[coin] || (u.fullName || coin);
+
+    assets.push({
+      coin, fullName, category: cat, venue: 'tradexyz',
+      markPx, indexPx: oraclePx, change, volume, oi, funding, isActive
+    });
+  }
+
+  logLoad(`trade.xyz: ${assets.length} RWA assets processed`);
+  return assets;
+}
+
+// ═══════════════════════════════════════════════
+// API: Bitget
+// ═══════════════════════════════════════════════
+
+async function fetchBitget() {
+  const API_BASE = 'https://api.bitget.com';
+  const PRODUCT_TYPE = 'USDT-FUTURES';
+  logLoad('Fetching Bitget data...');
+
+  async function apiGet(path) {
+    const res = await fetch(API_BASE + path);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    if (json.code !== '00000') throw new Error(`API ${json.code}: ${json.msg}`);
+    return json.data;
+  }
+
+  // Fetch contracts + tickers in parallel
+  const [contractsRaw, tickersRaw] = await Promise.all([
+    apiGet(`/api/v2/mix/market/contracts?productType=${PRODUCT_TYPE}`),
+    apiGet(`/api/v2/mix/market/tickers?productType=${PRODUCT_TYPE}`)
+  ]);
+
+  // Build a funding rate map from tickers first
+  const fundingMap = {};
+  tickersRaw.forEach(t => {
+    const r = parseFloat(t.fundingRate);
+    if (r && r !== 0) fundingMap[t.symbol] = r;
+  });
+
+  // Filter RWA contracts
+  let rwaContracts = contractsRaw.filter(c =>
+    c.isRwa === 'YES' || c.isRwa === 'yes' || c.isRwa === 'Yes'
+  );
+  if (rwaContracts.length === 0) {
+    const knownKeys = Object.keys(KNOWN_CATEGORIES);
+    rwaContracts = contractsRaw.filter(c => {
+      const base = (c.baseCoin || c.symbol || '').replace(/USDT$/i,'').toUpperCase();
+      return knownKeys.includes(base);
+    });
+  }
+  logLoad(`Bitget: ${rwaContracts.length} RWA contracts`);
+
+  // Index tickers by symbol
+  const tickerMap = {};
+  tickersRaw.forEach(t => { tickerMap[t.symbol] = t; });
+
+  const assets = [];
+  const needFunding = []; // symbols where tickers had no funding data
+
+  for (const contract of rwaContracts) {
+    const symbol = contract.symbol;
+    const base = (contract.baseCoin || symbol.replace(/USDT$/i, '')).toUpperCase();
+    const t = tickerMap[symbol];
+    if (!t) continue;
+
+    const markPx = parseFloat(t.markPrice) || parseFloat(t.lastPr) || 0;
+    const indexPx = parseFloat(t.indexPrice) || markPx;
+    const change24h = parseFloat(t.change24h) || 0;
+    const volume = parseFloat(t.quoteVolume) || parseFloat(t.usdtVolume) || 0;
+    const holdingQty = parseFloat(t.holdingAmount) || 0;
+    const oi = holdingQty * (markPx || 1);
+
+    // Parse funding: use null for "no data", keep 0 if API explicitly returned "0"
+    let funding = null;
+    if (fundingMap[symbol] !== undefined) {
+      funding = fundingMap[symbol];
+    } else if (t.fundingRate !== undefined && t.fundingRate !== null && t.fundingRate !== '') {
+      funding = parseFloat(t.fundingRate);
+      if (isNaN(funding)) funding = null;
+    }
+
+    const cat = KNOWN_CATEGORIES[base] || 'other';
+    if (cat === 'other') console.warn(`[RWA] Uncategorized Bitget asset: ${base} (${symbol})`);
+    const fullName = KNOWN_NAMES[base] || (contract.symbolName || base);
+
+    const idx = assets.length;
+    assets.push({
+      coin: base, symbol, fullName, category: cat, venue: 'bitget',
+      markPx, indexPx, change: change24h * 100, volume, oi, funding, isActive: false
+    });
+
+    if (funding === null) needFunding.push({ symbol, idx });
+  }
+
+  // Fetch individual funding rates for assets where tickers had no data
+  if (needFunding.length > 0) {
+    logLoad(`Bitget: fetching funding rates for ${needFunding.length} assets...`);
+    await Promise.all(needFunding.map(async ({ symbol, idx }) => {
+      try {
+        const data = await apiGet(`/api/v2/mix/market/current-fund-rate?symbol=${symbol}&productType=${PRODUCT_TYPE}`);
+        if (data && data.fundingRate !== undefined && data.fundingRate !== null && data.fundingRate !== '') {
+          const r = parseFloat(data.fundingRate);
+          if (!isNaN(r)) assets[idx].funding = r;
+        }
+      } catch (e) { /* funding stays null = no data */ }
+    }));
+  }
+
+  // Update isActive after all funding rates are set
+  assets.forEach(a => {
+    a.isActive = a.volume > 0 || a.oi > 0 || (a.funding !== null && a.funding !== 0);
+  });
+
+  logLoad(`Bitget: ${assets.length} RWA assets processed`);
+  return assets;
+}
+
+// ═══════════════════════════════════════════════
+// FUNDING HISTORY & SPARKLINES
+// ═══════════════════════════════════════════════
+
+async function fetchFundingHistoryXyz(coin, hours) {
+  const API_URL = 'https://api.hyperliquid.xyz/info';
+  const startTime = Date.now() - hours * 3600 * 1000;
+  for (const name of [coin, `xyz:${coin}`]) {
+    try {
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'fundingHistory', coin: name, startTime })
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) return data;
+    } catch (e) { /* try next */ }
+  }
+  return [];
+}
+
+async function fetchFundingHistoryBitget(symbol, hours) {
+  const PRODUCT_TYPE = 'USDT-FUTURES';
+  const periodsNeeded = Math.min(Math.ceil(hours / 8), 100);
+  try {
+    const res = await fetch(`https://api.bitget.com/api/v2/mix/market/history-fund-rate?symbol=${symbol}&productType=${PRODUCT_TYPE}&limit=${periodsNeeded}`);
+    if (!res.ok) return [];
+    const json = await res.json();
+    if (json.code !== '00000') return [];
+    return Array.isArray(json.data) ? json.data : [];
+  } catch (e) { return []; }
+}
+
+function setSparkRange(venue, hours, btnEl) {
+  sparkHours[venue] = hours;
+  // Update buttons within the same table
+  const container = btnEl.closest('.spark-range-btns');
+  container.querySelectorAll('.sr-btn').forEach(b => b.classList.remove('active'));
+  btnEl.classList.add('active');
+  // Clear cache for this venue so sparklines reload
+  Object.keys(fundingCache).forEach(k => {
+    if (k.startsWith(venue + ':')) delete fundingCache[k];
+  });
+  renderVenueTable(venue);
+}
+
+async function loadSparkline(venue, asset) {
+  const cellId = `spark_${venue}_${asset.coin}`;
+  const cell = document.getElementById(cellId);
+  if (!cell) return;
+
+  const hours = sparkHours[venue];
+  const cacheKey = `${venue}:${asset.coin}`;
+  let data = fundingCache[cacheKey];
+
+  if (!data || data.hours !== hours) {
+    cell.innerHTML = '<span style="color:var(--text-muted);font-size:11px">loading...</span>';
+    try {
+      let raw;
+      if (venue === 'tradexyz') {
+        raw = await fetchFundingHistoryXyz(asset.coin, hours);
+      } else {
+        // Bitget needs symbol (e.g. TSLAUSDT)
+        const symbol = asset.symbol || (asset.coin + 'USDT');
+        raw = await fetchFundingHistoryBitget(symbol, hours);
+      }
+      data = { hours, data: raw };
+      fundingCache[cacheKey] = data;
+    } catch (e) {
+      cell.innerHTML = '<span style="color:var(--text-muted);font-size:11px">N/A</span>';
+      return;
+    }
+  }
+
+  if (!data.data || data.data.length < 2) {
+    cell.innerHTML = '<span style="color:var(--text-muted);font-size:11px">N/A</span>';
+    return;
+  }
+
+  const rates = data.data.map(d => parseFloat(d.fundingRate || d.fundRate || 0));
+  // Reverse if newest-first
+  if (data.data.length >= 2) {
+    const t0 = parseInt(data.data[0].fundingTime || data.data[0].settleTime || data.data[0].time || 0);
+    const t1 = parseInt(data.data[1].fundingTime || data.data[1].settleTime || data.data[1].time || 0);
+    if (t0 > t1) rates.reverse();
+  }
+  cell.innerHTML = renderSparkSVG(rates);
+}
+
+function renderSparkSVG(rates) {
+  const w = 120, h = 32, pad = 2;
+  const min = Math.min(...rates, 0);
+  const max = Math.max(...rates, 0);
+  const range = max - min || 0.0001;
+
+  const coords = rates.map((r, i) => ({
+    x: parseFloat(((i / (rates.length - 1)) * w).toFixed(1)),
+    y: parseFloat((h - pad - ((r - min) / range) * (h - pad * 2)).toFixed(1)),
+    rate: r
+  }));
+
+  const zeroY = (h - pad - ((0 - min) / range) * (h - pad * 2)).toFixed(1);
+  let segments = '', fills = '';
+
+  for (let i = 0; i < coords.length - 1; i++) {
+    const a = coords[i], b = coords[i + 1];
+    const colA = a.rate >= 0 ? '#0ecb81' : '#f6465d';
+    const colB = b.rate >= 0 ? '#0ecb81' : '#f6465d';
+
+    if ((a.rate >= 0) === (b.rate >= 0)) {
+      segments += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${colA}" stroke-width="1.5"/>`;
+      fills += `<polygon points="${a.x},${a.y} ${b.x},${b.y} ${b.x},${zeroY} ${a.x},${zeroY}" fill="${colA}" fill-opacity="0.15"/>`;
+    } else {
+      const t = a.rate / (a.rate - b.rate);
+      const cx = (a.x + t * (b.x - a.x)).toFixed(1);
+      segments += `<line x1="${a.x}" y1="${a.y}" x2="${cx}" y2="${zeroY}" stroke="${colA}" stroke-width="1.5"/>`;
+      fills += `<polygon points="${a.x},${a.y} ${cx},${zeroY} ${a.x},${zeroY}" fill="${colA}" fill-opacity="0.15"/>`;
+      segments += `<line x1="${cx}" y1="${zeroY}" x2="${b.x}" y2="${b.y}" stroke="${colB}" stroke-width="1.5"/>`;
+      fills += `<polygon points="${cx},${zeroY} ${b.x},${b.y} ${b.x},${zeroY}" fill="${colB}" fill-opacity="0.15"/>`;
+    }
+  }
+
+  const zeroLine = (min < 0 && max > 0)
+    ? `<line x1="0" y1="${zeroY}" x2="${w}" y2="${zeroY}" stroke="#5e6673" stroke-width="0.5" stroke-dasharray="2,2"/>`
+    : '';
+  let dots = '';
+  coords.forEach(c => {
+    dots += `<circle cx="${c.x}" cy="${c.y}" r="1.5" fill="${c.rate >= 0 ? '#0ecb81' : '#f6465d'}"/>`;
+  });
+
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${fills}${zeroLine}${segments}${dots}</svg>`;
+}
+
+// ═══════════════════════════════════════════════
+// VOLUME GROWTH (24h vs prev 24h via kline API)
+// ═══════════════════════════════════════════════
+
+async function fetchVolumeGrowthAll() {
+  const now = Date.now();
+  if (now - lastGrowthFetch < GROWTH_FETCH_INTERVAL && Object.keys(volumeGrowthData.tradexyz).length > 0) return;
+  lastGrowthFetch = now;
+  logLoad('Fetching 24h volume growth data...');
+
+  const [xyzG, bgG] = await Promise.all([
+    fetchVolumeGrowthXyz().catch(e => { console.error('xyz growth error:', e); return {}; }),
+    fetchVolumeGrowthBitget().catch(e => { console.error('bg growth error:', e); return {}; })
+  ]);
+  volumeGrowthData.tradexyz = xyzG;
+  volumeGrowthData.bitget = bgG;
+  logLoad(`Volume growth: xyz=${Object.keys(xyzG).length}, bitget=${Object.keys(bgG).length} assets`);
+}
+
+async function fetchVolumeGrowthXyz() {
+  const assets = allData.filter(d => d.venue === 'tradexyz');
+  const results = {};
+  // Use 48h of HOURLY candles, sum into two 24h windows for reliable comparison
+  const now = Date.now();
+  const startTime = now - 48 * 3600 * 1000;
+  const midPoint = now - 24 * 3600 * 1000;
+
+  const promises = assets.map(async (asset) => {
+    try {
+      for (const coinName of [asset.coin, `xyz:${asset.coin}`]) {
+        const res = await fetch('https://api.hyperliquid.xyz/info', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'candleSnapshot',
+            req: { coin: coinName, interval: '1h', startTime, endTime: now }
+          })
+        });
+        if (!res.ok) continue;
+        const candles = await res.json();
+        if (Array.isArray(candles) && candles.length >= 10) {
+          // Sum volume for older 24h window vs newer 24h window
+          // Candle: { t (open time), T, s, i, o, c, h, l, v, n }
+          let olderVol = 0, newerVol = 0;
+          candles.forEach(c => {
+            const t = parseInt(c.t || 0);
+            const vol = parseFloat(c.v || 0);
+            const px = parseFloat(c.c || asset.markPx);
+            const volUsd = vol * px;
+            if (t < midPoint) olderVol += volUsd;
+            else newerVol += volUsd;
+          });
+          if (olderVol > 100) {
+            results[asset.coin] = {
+              prevVol: olderVol, currVol: newerVol,
+              growth: ((newerVol - olderVol) / olderVol) * 100
+            };
+          }
+          break;
+        }
+      }
+    } catch (e) { /* skip */ }
+  });
+
+  await Promise.all(promises);
+  return results;
+}
+
+async function fetchVolumeGrowthBitget() {
+  const assets = allData.filter(d => d.venue === 'bitget');
+  const results = {};
+  const now = Date.now();
+  const midPoint = now - 24 * 3600 * 1000;
+  const startTime = now - 48 * 3600 * 1000;
+
+  const promises = assets.map(async (asset) => {
+    try {
+      const symbol = asset.symbol || (asset.coin + 'USDT');
+      // Fetch 48h of hourly candles, sum into two 24h windows
+      const res = await fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=1H&startTime=${startTime}&endTime=${now}&limit=48`);
+      if (!res.ok) return;
+      const json = await res.json();
+      if (json.code !== '00000' || !Array.isArray(json.data) || json.data.length < 10) return;
+      // Bitget candle: [ts, open, high, low, close, baseVol, quoteVol]
+      let olderVol = 0, newerVol = 0;
+      json.data.forEach(c => {
+        const t = parseInt(c[0] || 0);
+        const vol = parseFloat(c[6] || c[5] || 0); // quoteVol (USDT)
+        if (t < midPoint) olderVol += vol;
+        else newerVol += vol;
+      });
+      if (olderVol > 100) {
+        results[asset.coin] = {
+          prevVol: olderVol, currVol: newerVol,
+          growth: ((newerVol - olderVol) / olderVol) * 100
+        };
+      }
+    } catch (e) { /* skip */ }
+  });
+
+  await Promise.all(promises);
+  return results;
+}
+
+// ═══════════════════════════════════════════════
+// ASSET DETAIL MODAL
+// ═══════════════════════════════════════════════
+
+let modalChartHours = 24;
+let modalVenue = null;
+let modalAssetData = null;
+
+function openAssetModal(venue, asset) {
+  modalVenue = venue;
+  modalAssetData = asset;
+  modalChartHours = 24;
+  renderModalContent();
+  document.getElementById('assetModal').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function openHeatmapModal(coin, venue) {
+  const asset = allData.find(d => d.coin === coin && d.venue === venue);
+  if (asset) openAssetModal(venue, asset);
+}
+
+function closeModal() {
+  document.getElementById('assetModal').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+function setModalChartRange(hours, btnEl) {
+  modalChartHours = hours;
+  document.querySelectorAll('.mcr-btn').forEach(b => b.classList.remove('active'));
+  btnEl.classList.add('active');
+  loadModalChart();
+}
+
+function renderModalContent() {
+  const d = modalAssetData;
+  const v = modalVenue;
+  const mc = document.getElementById('modalContent');
+  const vInfo = VENUES[v];
+  const interval = vInfo.fundingInterval;
+
+  const spread = d.markPx - d.indexPx;
+  const spreadPct = d.indexPx ? ((spread / d.indexPx) * 100) : 0;
+  const premium = d.indexPx ? ((d.markPx - d.indexPx) / d.indexPx * 100) : 0;
+  const annRate = annualize(d.funding, v);
+  const annPct = annRate !== null ? (annRate * 100).toFixed(2) : 'N/A';
+
+  const spreadColor = Math.abs(spreadPct) > 0.05 ? 'var(--red)' : 'var(--text-primary)';
+  const changeColor = d.change >= 0 ? 'var(--green)' : 'var(--red)';
+  const fundingColor = d.funding === null ? 'var(--text-muted)' : d.funding > 0 ? 'var(--green)' : d.funding < 0 ? 'var(--red)' : '#6b9fff';
+  const premiumColor = premium > 0 ? 'var(--green)' : premium < 0 ? 'var(--red)' : 'var(--text-muted)';
+  const catColor = CAT_COLORS[d.category] || '#6b7280';
+
+  mc.innerHTML = `
+    <div class="modal-title">
+      <div class="asset-icon" style="background:${catColor}22;color:${catColor};border:1px solid ${catColor}44;width:36px;height:36px;font-size:13px">${d.coin.slice(0,2)}</div>
+      ${d.coin} — ${d.fullName}
+      <span class="venue-badge-sm ${v}" style="margin-left:auto;font-size:12px">${vInfo.name}</span>
+    </div>
+
+    <div class="modal-grid">
+      <div class="modal-metric">
+        <div class="mm-label">Mark Price</div>
+        <div class="mm-value">$${fmtPrice(d.markPx)}</div>
+      </div>
+      <div class="modal-metric">
+        <div class="mm-label">Oracle Price</div>
+        <div class="mm-value">$${fmtPrice(d.indexPx)}</div>
+      </div>
+      <div class="modal-metric">
+        <div class="mm-label">Mark / Oracle Spread</div>
+        <div class="mm-value" style="color:${spreadColor}">$${Math.abs(spread).toFixed(4)}</div>
+        <div class="mm-sub">${spreadPct >= 0 ? '+' : ''}${spreadPct.toFixed(4)}%</div>
+      </div>
+      <div class="modal-metric">
+        <div class="mm-label">24h Change</div>
+        <div class="mm-value" style="color:${changeColor}">${d.change >= 0 ? '+' : ''}${d.change.toFixed(2)}%</div>
+      </div>
+      <div class="modal-metric">
+        <div class="mm-label">24h Volume</div>
+        <div class="mm-value">${fmtVolume(d.volume)}</div>
+      </div>
+      <div class="modal-metric">
+        <div class="mm-label">Open Interest</div>
+        <div class="mm-value">${fmtVolume(d.oi)}</div>
+      </div>
+      <div class="modal-metric">
+        <div class="mm-label">Current Funding (${interval}H)</div>
+        <div class="mm-value" style="color:${fundingColor}">${fmtFunding(d.funding)}</div>
+        <div class="mm-sub">${annPct === 'N/A' ? 'N/A' : annPct + '% APR'}</div>
+      </div>
+      <div class="modal-metric">
+        <div class="mm-label">Premium</div>
+        <div class="mm-value" style="color:${premiumColor}">${premium >= 0 ? '+' : ''}${premium.toFixed(4)}%</div>
+      </div>
+    </div>
+
+    <div class="modal-chart-section">
+      <div class="modal-chart-header">
+        <div class="modal-chart-title">Funding Rate Trend</div>
+        <div class="modal-chart-range">
+          <button class="mcr-btn active" onclick="setModalChartRange(24,this)">24h</button>
+          <button class="mcr-btn" onclick="setModalChartRange(72,this)">3d</button>
+          <button class="mcr-btn" onclick="setModalChartRange(168,this)">7d</button>
+          <button class="mcr-btn" onclick="setModalChartRange(720,this)">30d</button>
+        </div>
+      </div>
+      <div id="modalChartArea" style="min-height:200px;display:flex;align-items:center;justify-content:center">
+        <span style="color:var(--text-muted);font-size:13px">Loading chart...</span>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      Data via <strong>${vInfo.name}</strong> &nbsp;|&nbsp; Funding settles every ${interval}h
+    </div>
+  `;
+
+  loadModalChart();
+}
+
+async function loadModalChart() {
+  const area = document.getElementById('modalChartArea');
+  if (!area) return;
+  area.innerHTML = '<span style="color:var(--text-muted);font-size:13px">Loading chart...</span>';
+
+  const d = modalAssetData;
+  const v = modalVenue;
+  const hours = modalChartHours;
+
+  let raw;
+  try {
+    if (v === 'tradexyz') {
+      raw = await fetchFundingHistoryXyz(d.coin, hours);
+    } else {
+      const symbol = d.symbol || (d.coin + 'USDT');
+      raw = await fetchFundingHistoryBitget(symbol, hours);
+    }
+  } catch (e) {
+    area.innerHTML = '<span style="color:var(--text-muted);font-size:13px">Failed to load chart data</span>';
+    return;
+  }
+
+  if (!raw || raw.length < 2) {
+    area.innerHTML = '<span style="color:var(--text-muted);font-size:13px">Insufficient data for chart</span>';
+    return;
+  }
+
+  // Parse data
+  const points = raw.map(p => {
+    const rate = parseFloat(p.fundingRate || p.fundRate || 0);
+    return { time: parseInt(p.fundingTime || p.settleTime || p.time || 0), rate: isNaN(rate) ? 0 : rate };
+  });
+
+  // Sort by time ascending
+  points.sort((a, b) => a.time - b.time);
+
+  area.innerHTML = renderModalChart(points);
+}
+
+function renderModalChart(points) {
+  const W = 520, H = 200, padL = 65, padR = 10, padT = 15, padB = 50;
+  const chartW = W - padL - padR, chartH = H - padT - padB;
+
+  const rates = points.map(p => p.rate);
+  const times = points.map(p => p.time);
+  const minR = Math.min(...rates, 0);
+  const maxR = Math.max(...rates, 0);
+  const range = maxR - minR || 0.0001;
+
+  function yPos(r) { return padT + chartH - ((r - minR) / range) * chartH; }
+  function xPos(i) { return padL + (i / (points.length - 1)) * chartW; }
+  const zeroY = yPos(0);
+
+  // Y-axis labels (5 ticks)
+  let yLabels = '';
+  const tickCount = 5;
+  for (let i = 0; i <= tickCount; i++) {
+    const r = minR + (range / tickCount) * i;
+    const y = yPos(r);
+    yLabels += `<text x="${padL-8}" y="${y+4}" text-anchor="end" fill="#5e6673" font-size="11">${(r*100).toFixed(4)}%</text>`;
+    yLabels += `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="#2a2d35" stroke-width="0.5"/>`;
+  }
+
+  // X-axis labels (6 time labels)
+  let xLabels = '';
+  const xTickCount = Math.min(6, points.length);
+  for (let i = 0; i < xTickCount; i++) {
+    const idx = Math.round((i / (xTickCount - 1)) * (points.length - 1));
+    const t = new Date(times[idx]);
+    const label = t.getHours().toString().padStart(2,'0') + ':' + t.getMinutes().toString().padStart(2,'0');
+    const x = xPos(idx);
+    xLabels += `<text x="${x}" y="${H-10}" text-anchor="middle" fill="#5e6673" font-size="11">${label}</text>`;
+  }
+
+  // Zero line
+  const zeroLine = (minR < 0 && maxR > 0)
+    ? `<line x1="${padL}" y1="${zeroY}" x2="${W-padR}" y2="${zeroY}" stroke="#5e6673" stroke-width="1" stroke-dasharray="4,3"/>`
+    : '';
+
+  // Bars + line
+  const barW = Math.max(2, (chartW / points.length) * 0.7);
+  let bars = '', linePts = '', dots = '';
+
+  points.forEach((p, i) => {
+    const x = xPos(i);
+    const y = yPos(p.rate);
+    const barColor = p.rate >= 0 ? '#0ecb81' : '#f6465d';
+    const barH = Math.abs(y - zeroY);
+    const barY = p.rate >= 0 ? y : zeroY;
+    bars += `<rect x="${x - barW/2}" y="${barY}" width="${barW}" height="${barH}" fill="${barColor}" fill-opacity="0.4" rx="1"/>`;
+    linePts += `${x},${y} `;
+    dots += `<circle cx="${x}" cy="${y}" r="2.5" fill="${barColor}" stroke="${barColor}" stroke-width="1"/>`;
+  });
+
+  // Smooth line through points
+  let lineSegs = '';
+  for (let i = 0; i < points.length - 1; i++) {
+    const x1 = xPos(i), y1 = yPos(points[i].rate);
+    const x2 = xPos(i+1), y2 = yPos(points[i+1].rate);
+    const col = points[i].rate >= 0 ? '#0ecb81' : '#f6465d';
+    if ((points[i].rate >= 0) === (points[i+1].rate >= 0)) {
+      lineSegs += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${col}" stroke-width="2"/>`;
+    } else {
+      const t = points[i].rate / (points[i].rate - points[i+1].rate);
+      const cx = x1 + t * (x2 - x1);
+      const col2 = points[i+1].rate >= 0 ? '#0ecb81' : '#f6465d';
+      lineSegs += `<line x1="${x1}" y1="${y1}" x2="${cx}" y2="${zeroY}" stroke="${col}" stroke-width="2"/>`;
+      lineSegs += `<line x1="${cx}" y1="${zeroY}" x2="${x2}" y2="${y2}" stroke="${col2}" stroke-width="2"/>`;
+    }
+  }
+
+  return `<svg width="100%" viewBox="0 0 ${W} ${H}" class="modal-chart-canvas" style="display:block">
+    <rect x="${padL}" y="${padT}" width="${chartW}" height="${chartH}" fill="rgba(0,0,0,0.2)" rx="4"/>
+    ${yLabels}${xLabels}${zeroLine}${bars}${lineSegs}${dots}
+  </svg>`;
+}
+
+// ═══════════════════════════════════════════════
+// REFRESH
+// ═══════════════════════════════════════════════
+
+async function refresh(isFirst) {
+  try {
+    const [xyzAssets, bitgetAssets] = await Promise.all([
+      fetchTradeXyz().catch(e => { console.error('trade.xyz error:', e); return []; }),
+      fetchBitget().catch(e => { console.error('Bitget error:', e); return []; })
+    ]);
+
+    allData = [...xyzAssets, ...bitgetAssets];
+
+    // Fetch volume growth (cached, re-fetches every 5 min)
+    await fetchVolumeGrowthAll().catch(e => console.error('Volume growth error:', e));
+
+    const venueCount = new Set(allData.map(d => d.venue)).size;
+    const now = new Date().toLocaleTimeString();
+    document.getElementById('statusText').textContent =
+      `${venueCount} Venues · ${allData.length} Assets · ${now}`;
+    const ft = document.getElementById('footerTime');
+    if (ft) ft.textContent = now;
+
+    if (isFirst) {
+      document.getElementById('loadingOverlay').style.display = 'none';
+    }
+
+    renderCurrentView();
+  } catch (e) {
+    console.error('Refresh error:', e);
+    document.getElementById('statusText').textContent = `Error: ${e.message}`;
+    // Always hide loader even on error so user isn't stuck
+    document.getElementById('loadingOverlay').style.display = 'none';
+  }
+}
+
+function renderCurrentView() {
+  if (currentView === 'allvenues') {
+    if (currentSubTab === 'aggregator') renderOverview();
+    else if (currentSubTab === 'tradexyz') renderVenueTable('tradexyz');
+    else if (currentSubTab === 'bitget') renderVenueTable('bitget');
+  }
+  else if (currentView === 'asset') renderAssetView();
+  else if (currentView === 'heatmap') renderHeatmap();
+}
+
+// ═══════════════════════════════════════════════
+// VIEW SWITCH (top-level)
+// ═══════════════════════════════════════════════
+
+function switchView(view, tabEl) {
+  currentView = view;
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  tabEl.classList.add('active');
+  document.querySelectorAll('.view-container').forEach(c => c.classList.remove('active'));
+  document.getElementById('view-' + view).classList.add('active');
+  renderCurrentView();
+}
+
+// Sub-tab switch (inside All Venues)
+function switchSubTab(sub, tabEl) {
+  currentSubTab = sub;
+  document.querySelectorAll('.sub-tab').forEach(t => t.classList.remove('active'));
+  tabEl.classList.add('active');
+  document.querySelectorAll('.sub-view').forEach(v => v.classList.remove('active'));
+  document.getElementById('sub-' + sub).classList.add('active');
+  renderCurrentView();
+}
+
+// ═══════════════════════════════════════════════
+// VIEW 1: ALL VENUES OVERVIEW
+// ═══════════════════════════════════════════════
+
+function renderOverview() { renderKPIs(); renderVenueCards(); renderCoverage(); renderDivergence(); }
+
+function renderKPIs() {
+  const strip = document.getElementById('kpiStrip');
+  const uniqueCoins = new Set(allData.map(d => d.coin));
+  const totalVolume = allData.reduce((s,d) => s+d.volume, 0);
+  const totalOI = allData.reduce((s,d) => s+d.oi, 0);
+  const venueCount = new Set(allData.map(d => d.venue)).size;
+  const posRates = [], negRates = [];
+  allData.forEach(d => {
+    const ann = annualize(d.funding, d.venue);
+    if (ann === null) return;
+    if (ann > 0) posRates.push(ann);
+    else if (ann < 0) negRates.push(ann);
+  });
+  const avgPos = posRates.length > 0 ? posRates.reduce((a,b)=>a+b,0)/posRates.length : 0;
+  const avgNeg = negRates.length > 0 ? negRates.reduce((a,b)=>a+b,0)/negRates.length : 0;
+
+  strip.innerHTML = `
+    <div class="kpi-card"><div class="kpi-icon">◎</div><div class="kpi-label">Total RWA Assets</div><div class="kpi-value">${uniqueCoins.size}</div><div class="kpi-sub">across ${venueCount} venues · ${allData.length} listings</div></div>
+    <div class="kpi-card"><div class="kpi-icon">$</div><div class="kpi-label">Total 24h Volume</div><div class="kpi-value">${fmtVolume(totalVolume)}</div><div class="kpi-sub">all venues combined</div></div>
+    <div class="kpi-card"><div class="kpi-icon">⊡</div><div class="kpi-label">Total Open Interest</div><div class="kpi-value">${fmtVolume(totalOI)}</div><div class="kpi-sub">notional across all venues</div></div>
+    <div class="kpi-card"><div class="kpi-icon">↑</div><div class="kpi-label">Avg Positive Funding</div><div class="kpi-value" style="color:var(--positive)">+${(avgPos*100).toFixed(2)}%</div><div class="kpi-sub">annualized · ${posRates.length} assets</div></div>
+    <div class="kpi-card"><div class="kpi-icon">↓</div><div class="kpi-label">Avg Negative Funding</div><div class="kpi-value" style="color:var(--negative)">${(avgNeg*100).toFixed(2)}%</div><div class="kpi-sub">annualized · ${negRates.length} assets</div></div>
+  `;
+}
+
+function renderVenueCards() {
+  const grid = document.getElementById('venueCardsGrid');
+  grid.innerHTML = '';
+  Object.entries(VENUES).forEach(([vKey, vInfo]) => {
+    const vData = allData.filter(d => d.venue === vKey);
+    if (vData.length === 0) return;
+    const totalVol = vData.reduce((s,d) => s+d.volume, 0);
+    const catCounts = {};
+    vData.forEach(d => { catCounts[d.category] = (catCounts[d.category]||0)+1; });
+    const catEntries = Object.entries(catCounts).sort((a,b)=>b[1]-a[1]);
+
+    // Volume growth top 3
+    const vgData = volumeGrowthData[vKey] || {};
+    const volGrowers = vData.filter(d => vgData[d.coin] && isFinite(vgData[d.coin].growth))
+      .map(d => ({coin:d.coin, fullName:d.fullName, ...vgData[d.coin]}))
+      .sort((a,b) => b.growth-a.growth).slice(0,3);
+
+    const topGainer = [...vData].sort((a,b) => b.change-a.change)[0];
+    const topFunding = [...vData].filter(d => d.funding !== null).sort((a,b) => Math.abs(annualize(b.funding,vKey))-Math.abs(annualize(a.funding,vKey)))[0] || vData[0];
+    const topOI = [...vData].sort((a,b) => b.oi-a.oi)[0];
+
+    const sorted = [...vData].sort((a,b)=>b.volume-a.volume);
+    const top3 = sorted.slice(0,3);
+    const top3Vol = top3.reduce((s,d)=>s+d.volume,0);
+    const top3Pct = totalVol > 0 ? (top3Vol/totalVol*100).toFixed(1) : '0.0';
+    const restPct = totalVol > 0 ? (100 - parseFloat(top3Pct)).toFixed(1) : '0.0';
+    const maxVol = top3.length > 0 ? top3[0].volume : 1; // normalize to #1
+
+    // Summary stacked bar: top3 colored + rest gray
+    const summaryBar = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <div style="flex:1;display:flex;height:6px;border-radius:3px;overflow:hidden;background:var(--muted)">
+        ${top3.map((d,i) => {
+          const w = totalVol > 0 ? (d.volume/totalVol*100) : 0;
+          const opacity = 1 - i*0.25;
+          return `<div style="width:${w}%;background:${vInfo.color};opacity:${opacity}"></div>`;
+        }).join('')}
+      </div>
+      <span style="font-size:11px;color:var(--foreground-sec);font-family:'JetBrains Mono',monospace;white-space:nowrap">${top3Pct}%</span>
+    </div>`;
+
+    // Individual bars normalized to #1
+    const concBars = summaryBar + top3.map((d, i) => {
+      const pct = totalVol > 0 ? (d.volume/totalVol*100) : 0;
+      const relPct = maxVol > 0 ? (d.volume/maxVol*100) : 0; // relative to largest
+      const rank = i + 1;
+      const opacity = 1 - i*0.2;
+      return `<div class="bar-wrap"><div class="bar-header"><span class="bar-name"><span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:4px;background:${vInfo.color}${i===0?'25':i===1?'18':'10'};color:${vInfo.color};font-size:10px;font-weight:700;margin-right:4px">${rank}</span>${d.coin}</span><span class="bar-detail">${pct.toFixed(1)}% · ${fmtVolume(d.volume)}</span></div><div class="bar-track"><div class="bar-fill" style="width:${relPct}%;background:${vInfo.color};opacity:${opacity}"></div></div></div>`;
+    }).join('');
+
+    const barSegs = catEntries.map(([cat, count]) => {
+      const pct = (count/vData.length*100).toFixed(1);
+      return `<div class="bar-seg" style="width:${pct}%;background:${CAT_COLORS[cat]||'#63656e'};border-radius:0"></div>`;
+    }).join('');
+    const legend = catEntries.map(([cat, count]) =>
+      `<div class="cat-legend-item"><div class="cl-dot" style="background:${CAT_COLORS[cat]||'#63656e'}"></div>${CAT_LABELS[cat]||cat} (${count})</div>`
+    ).join('');
+
+    // Volume growth — compact leaderboard cards
+    let volGrowthHTML = '';
+    if (volGrowers.length === 0) {
+      volGrowthHTML = '<div style="color:var(--foreground-dim);font-style:italic;font-size:12px;padding:4px 0">Loading volume data...</div>';
+    } else {
+      volGrowthHTML = '<div style="display:flex;gap:8px">' + volGrowers.map((g, i) => {
+        const isUp = g.growth >= 0;
+        const gc = isUp ? 'var(--positive)' : 'var(--negative)';
+        const arrow = isUp ? '↑' : '↓';
+        return `<div style="flex:1;background:var(--muted);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;transition:border-color 0.12s" onmouseover="this.style.borderColor='var(--border-hover)'" onmouseout="this.style.borderColor='var(--border)'">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <span style="font-weight:700;font-size:13px">${g.coin}</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:700;color:${gc}">${arrow} ${isUp?'+':''}${g.growth.toFixed(1)}%</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:10px">
+            <span style="color:var(--foreground-dim)">prev ${fmtVolume(g.prevVol)}</span>
+            <span style="color:var(--foreground-sec)">now ${fmtVolume(g.currVol)}</span>
+          </div>
+        </div>`;
+      }).join('') + '</div>';
+    }
+
+    const badgeStyle = `background:${vInfo.color}15;color:${vInfo.color};border:1px solid ${vInfo.color}30`;
+    const tfBg = topFunding.funding===null ? 'rgba(92,97,112,0.1)' : topFunding.funding>=0 ? 'var(--positive-dim)' : 'var(--negative-dim)';
+    const tfColor = topFunding.funding===null ? 'var(--foreground-dim)' : topFunding.funding>=0 ? 'var(--positive)' : 'var(--negative)';
+
+    const card = document.createElement('div');
+    card.className = 'venue-card';
+    card.innerHTML = `
+      <div class="vc-header">
+        <div class="vc-name"><span class="venue-dot ${vKey}"></span>${vInfo.name} <span class="vc-badge" style="${badgeStyle}">${vData.length} ASSETS</span></div>
+        <div class="vc-asset-count">${fmtVolume(totalVol)}</div>
+      </div>
+      <div class="vc-metrics">
+        <div class="vc-metric"><div class="vm-label">24h Top Gainer</div><div class="vm-asset">${topGainer.coin} <span class="vm-tag" style="background:var(--positive-dim);color:var(--positive)">+${topGainer.change.toFixed(2)}%</span></div><div class="vm-value">${topGainer.fullName}</div></div>
+        <div class="vc-metric"><div class="vm-label">Highest Funding</div><div class="vm-asset">${topFunding.coin} <span class="vm-tag" style="background:${tfBg};color:${tfColor}">${fmtAnnual(topFunding.funding, vKey)} APR</span></div><div class="vm-value">${topFunding.fullName}</div></div>
+        <div class="vc-metric"><div class="vm-label">Largest OI</div><div class="vm-asset">${topOI.coin}</div><div class="vm-value">${fmtVolume(topOI.oi)} notional</div></div>
+      </div>
+      <div class="vc-section"><div class="vc-section-title">24h Volume Growth — Top 3 <span class="vc-section-hint">(today vs yesterday)</span></div>${volGrowthHTML}</div>
+      <div class="vc-section"><div class="vc-section-title">Category Breakdown</div><div class="stacked-bar">${barSegs}</div><div class="cat-legend">${legend}</div></div>
+      <div class="vc-section"><div class="vc-section-title">Volume Concentration <span class="vc-section-hint">(Top-3 = ${top3Pct}%)</span></div>${concBars}</div>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+function renderCoverage() {
+  const section = document.getElementById('coverageSection');
+  const grouped = {};
+  allData.forEach(d => { if (!grouped[d.coin]) grouped[d.coin]={coin:d.coin,venues:new Set()}; grouped[d.coin].venues.add(d.venue); });
+  const allCoins = Object.values(grouped);
+  const multi = allCoins.filter(c => c.venues.size > 1);
+  const single = allCoins.filter(c => c.venues.size === 1);
+  const multiChips = multi.map(c => {
+    const dots = [...c.venues].map(v=>`<span class="venue-dot ${v}"></span>`).join('');
+    return `<div class="cov-chip multi">${dots}${c.coin}</div>`;
+  }).join('');
+
+  section.innerHTML = `
+    <div class="section-title">Cross-Venue Coverage</div>
+    <div class="section-subtitle">Assets available on multiple venues</div>
+    <div class="cov-stats">
+      <div class="cov-stat"><div class="cs-value" style="color:var(--accent)">${multi.length}</div><div class="cs-label">Multi-venue</div></div>
+      <div class="cov-stat"><div class="cs-value">${single.length}</div><div class="cs-label">Single-venue</div></div>
+      <div class="cov-stat"><div class="cs-value">${allCoins.length}</div><div class="cs-label">Total unique</div></div>
+    </div>
+    <div style="font-size:11px;color:var(--foreground-sec);margin-bottom:6px">Available on multiple venues:</div>
+    <div class="cov-grid">${multiChips || '<span style="color:var(--foreground-dim)">None</span>'}</div>
+  `;
+}
+
+function renderDivergence() {
+  const section = document.getElementById('divSection');
+  const grouped = {};
+  allData.forEach(d => { if (!grouped[d.coin]) grouped[d.coin]={coin:d.coin,fullName:d.fullName,venues:{}}; grouped[d.coin].venues[d.venue]=d; });
+
+  const MIN_ANN = 0.015;
+  const divergences = [];
+  Object.values(grouped).forEach(a => {
+    const vKeys = Object.keys(a.venues);
+    if (vKeys.length < 2) return;
+    const rates = vKeys.map(v => ({venue:v, ann:annualize(a.venues[v].funding,v)})).filter(r => r.ann !== null);
+    const pos = rates.filter(r => r.ann > 0);
+    const neg = rates.filter(r => r.ann < 0);
+    if (pos.length === 0 || neg.length === 0) return;
+    const bestPos = pos.sort((a,b)=>b.ann-a.ann)[0];
+    const bestNeg = neg.sort((a,b)=>a.ann-b.ann)[0];
+    if (bestPos.ann < MIN_ANN || Math.abs(bestNeg.ann) < MIN_ANN) return;
+    divergences.push({coin:a.coin, fullName:a.fullName, spread:bestPos.ann-bestNeg.ann, posVenue:bestPos, negVenue:bestNeg});
+  });
+  divergences.sort((a,b) => b.spread-a.spread);
+
+  let html = '';
+  if (divergences.length === 0) {
+    html = '<div style="color:var(--foreground-dim);font-style:italic;font-size:12px">No divergences — requires one positive and one negative venue, both exceeding 1.5% APR</div>';
+  } else {
+    html = divergences.map(d => {
+      const sp = (d.spread*100).toFixed(2);
+      const sc = d.spread > 0.10 ? 'var(--positive)' : d.spread > 0.05 ? 'var(--accent)' : 'var(--foreground-sec)';
+      return `<div class="div-card"><div class="dc-coin">${d.coin} <span style="font-size:11px;font-weight:400;color:var(--foreground-dim)">${d.fullName}</span></div><div class="dc-spread" style="color:${sc};font-weight:700">Spread: ${sp}% APR</div><div class="dc-venues"><span class="venue-badge-sm ${d.posVenue.venue}" style="margin-right:4px">${VENUES[d.posVenue.venue].name}</span><span style="color:var(--positive)">+${(d.posVenue.ann*100).toFixed(2)}%</span> &nbsp;vs&nbsp; <span class="venue-badge-sm ${d.negVenue.venue}" style="margin-right:4px">${VENUES[d.negVenue.venue].name}</span><span style="color:var(--negative)">${(d.negVenue.ann*100).toFixed(2)}%</span></div></div>`;
+    }).join('');
+  }
+  section.innerHTML = `<div class="section-title">Funding Rate Divergence</div><div class="section-subtitle">Assets with opposing funding rates across venues (both &gt; 1.5% APR annualized)</div><div class="div-cards">${html}</div>`;
+}
+
+// ═══════════════════════════════════════════════════
+// VENUE TABLES
+// ═══════════════════════════════════════════════════
+
+function setVenueFilter(venue, cat, el) {
+  venueTableCatFilter[venue] = cat;
+  document.querySelectorAll(`#sub-${venue} .chip`).forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  renderVenueTable(venue);
+}
+
+function setVenueSort(venue, key) {
+  const s = venueTableSort[venue];
+  if (s.key === key) s.dir *= -1;
+  else { s.key = key; s.dir = -1; }
+  renderVenueTable(venue);
+}
+
+function renderVenueTable(venue) {
+  const isXyz = venue === 'tradexyz';
+  const tbodyId = isXyz ? 'xyzTableBody' : 'bgTableBody';
+  const prefix = isXyz ? 'xyz' : 'bg';
+  const hideId = isXyz ? 'xyzHideInactive' : 'bgHideInactive';
+  const tbody = document.getElementById(tbodyId);
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  const catFilter = venueTableCatFilter[venue] || 'all';
+  const search = venueTableSearch[venue] || '';
+  const hideInactive = document.getElementById(hideId)?.checked ?? true;
+
+  const allVenueData = allData.filter(d => d.venue === venue);
+  const catCounts = { all: allVenueData.length, equity: 0, commodity: 0, index: 0, etf: 0, fx: 0 };
+  allVenueData.forEach(d => { if (catCounts[d.category] !== undefined) catCounts[d.category]++; });
+  Object.entries(catCounts).forEach(([cat, count]) => {
+    const capCat = cat.charAt(0).toUpperCase() + cat.slice(1);
+    const el = document.getElementById(`${prefix}Count${capCat}`);
+    if (el) el.textContent = `(${count})`;
+  });
+
+  let data = allVenueData.filter(d => {
+    if (catFilter !== 'all' && d.category !== catFilter) return false;
+    if (hideInactive && !d.isActive) return false;
+    if (search && !d.coin.toLowerCase().includes(search) && !d.fullName.toLowerCase().includes(search)) return false;
+    return true;
+  });
+
+  const { key: sortKey, dir: sortDir } = venueTableSort[venue];
+  data.sort((a, b) => {
+    let va, vb;
+    switch (sortKey) {
+      case 'name':    return sortDir * a.coin.localeCompare(b.coin);
+      case 'markPx':  va = a.markPx; vb = b.markPx; break;
+      case 'indexPx': va = a.indexPx; vb = b.indexPx; break;
+      case 'change':  va = a.change; vb = b.change; break;
+      case 'volume':  va = a.volume; vb = b.volume; break;
+      case 'oi':      va = a.oi; vb = b.oi; break;
+      case 'funding': va = a.funding===null?-1:Math.abs(a.funding); vb = b.funding===null?-1:Math.abs(b.funding); break;
+      default:        va = a.volume; vb = b.volume;
+    }
+    return sortDir * (va - vb);
+  });
+
+  // Sort header visuals
+  document.querySelectorAll(`#sub-${venue} thead th`).forEach(th => {
+    const key = th.dataset.sort;
+    if (!key) return;
+    th.classList.toggle('sorted', key === sortKey);
+    const arrow = th.querySelector('.arrow');
+    if (arrow) arrow.textContent = key === sortKey ? (sortDir > 0 ? '▲' : '▼') : '';
+  });
+
+  data.forEach(d => {
+    const isUp = d.change >= 0;
+    const catColor = CAT_COLORS[d.category] || '#63656e';
+    const annRate = annualize(d.funding, venue);
+    const annPct = annRate !== null ? (annRate * 100).toFixed(2) : 'N/A';
+    const sparkId = `spark_${venue}_${d.coin}`;
+
+    const tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    tr.onclick = () => openAssetModal(venue, d);
+    tr.innerHTML = `
+      <td><div class="asset-cell"><div class="asset-icon" style="background:${catColor}12;color:${catColor};border:1px solid ${catColor}25">${d.coin.slice(0,2)}</div><div class="asset-info"><div class="asset-name">${d.coin} <span class="asset-tag tag-${d.category}">${d.category.toUpperCase()}</span></div><div class="asset-type">${d.fullName}</div></div></div></td>
+      <td class="mono" style="font-weight:600">$${fmtPrice(d.markPx)}</td>
+      <td class="mono" style="color:var(--foreground-sec)">$${fmtPrice(d.indexPx)}</td>
+      <td><span class="change-badge ${isUp?'up':'down'}">${isUp?'+':''}${d.change.toFixed(2)}%</span></td>
+      <td class="mono">${fmtVolume(d.volume)}</td>
+      <td class="mono">${fmtVolume(d.oi)}</td>
+      <td><span class="funding-badge ${fundingClass(d.funding, venue)}">${fmtFunding(d.funding)}</span><span style="display:block;font-size:10px;color:var(--foreground-dim);margin-top:2px">${annPct === 'N/A' ? 'N/A' : annPct + '% APR'}</span></td>
+      <td id="${sparkId}"><span style="color:var(--foreground-dim);font-size:11px">—</span></td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  data.forEach(d => loadSparkline(venue, d));
+}
+
+// ═══════════════════════════════════════════════════
+// BY ASSET VIEW
+// ═══════════════════════════════════════════════════
+
+function setAssetCat(cat, el) {
+  assetCatFilter = cat;
+  document.querySelectorAll('#view-asset .chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  renderAssetView();
+}
+function setAssetSort(key) {
+  if (assetSort.key === key) assetSort.dir *= -1;
+  else { assetSort.key = key; assetSort.dir = -1; }
+  renderAssetView();
+}
+
+function renderAssetView() {
+  const tbody = document.getElementById('assetTableBody');
+  tbody.innerHTML = '';
+  const grouped = {};
+  allData.forEach(d => {
+    if (!grouped[d.coin]) grouped[d.coin] = {coin:d.coin, fullName:d.fullName, category:d.category, venues:{}};
+    grouped[d.coin].venues[d.venue] = d;
+  });
+  let allAssets = Object.values(grouped);
+
+  const catCounts = { all: allAssets.length, equity: 0, commodity: 0, index: 0, etf: 0, fx: 0 };
+  allAssets.forEach(a => { if (catCounts[a.category] !== undefined) catCounts[a.category]++; });
+  Object.entries(catCounts).forEach(([cat, count]) => {
+    const capCat = cat.charAt(0).toUpperCase() + cat.slice(1);
+    const el = document.getElementById(`aCount${capCat}`);
+    if (el) el.textContent = `(${count})`;
+  });
+
+  const hideInactive = document.getElementById('assetHideInactive')?.checked ?? false;
+  let assets = allAssets.filter(a => {
+    if (assetCatFilter !== 'all' && a.category !== assetCatFilter) return false;
+    if (assetSearch && !a.coin.toLowerCase().includes(assetSearch) && !a.fullName.toLowerCase().includes(assetSearch)) return false;
+    if (hideInactive) { if (!Object.values(a.venues).some(v => v.isActive)) return false; }
+    return true;
+  });
+
+  const { key: sk, dir: sd } = assetSort;
+  assets.sort((a, b) => {
+    const aVols = Object.values(a.venues), bVols = Object.values(b.venues);
+    let va, vb;
+    switch (sk) {
+      case 'name':   return sd * a.coin.localeCompare(b.coin);
+      case 'venues': va = Object.keys(a.venues).length; vb = Object.keys(b.venues).length; break;
+      case 'price':  va = Math.max(...aVols.map(v=>v.markPx)); vb = Math.max(...bVols.map(v=>v.markPx)); break;
+      case 'change': va = aVols.reduce((s,v)=>s+v.change,0)/aVols.length; vb = bVols.reduce((s,v)=>s+v.change,0)/bVols.length; break;
+      case 'volume': va = aVols.reduce((s,v)=>s+v.volume,0); vb = bVols.reduce((s,v)=>s+v.volume,0); break;
+      case 'oi':     va = aVols.reduce((s,v)=>s+v.oi,0); vb = bVols.reduce((s,v)=>s+v.oi,0); break;
+      case 'spread':
+        const aR = aVols.map(v=>v.funding).filter(f=>f!==null), bR = bVols.map(v=>v.funding).filter(f=>f!==null);
+        va = aR.length>=2 ? Math.max(...aR)-Math.min(...aR) : 0;
+        vb = bR.length>=2 ? Math.max(...bR)-Math.min(...bR) : 0; break;
+      default: va = aVols.reduce((s,v)=>s+v.volume,0); vb = bVols.reduce((s,v)=>s+v.volume,0);
+    }
+    return sd * (va - vb);
+  });
+
+  document.querySelectorAll('#view-asset thead th').forEach(th => {
+    const key = th.dataset.sort;
+    if (!key) return;
+    th.classList.toggle('sorted', key === sk);
+    const arrow = th.querySelector('.arrow');
+    if (arrow) arrow.textContent = key === sk ? (sd > 0 ? '▲' : '▼') : '';
+  });
+
+  assets.forEach(a => {
+    const vList = Object.keys(a.venues);
+    const vCount = vList.length;
+    const totVol = Object.values(a.venues).reduce((s,v)=>s+v.volume,0);
+    const totOI = Object.values(a.venues).reduce((s,v)=>s+v.oi,0);
+    const bestPx = Math.max(...Object.values(a.venues).map(v=>v.markPx));
+    const avgChg = Object.values(a.venues).reduce((s,v)=>s+v.change,0)/vCount;
+    const isUp = avgChg >= 0;
+    const catColor = CAT_COLORS[a.category];
+    let fs = '—', fsc = '';
+    if (vCount >= 2) {
+      const rates = Object.values(a.venues).map(v=>v.funding).filter(f=>f!==null);
+      if (rates.length >= 2) {
+        const sp = Math.max(...rates) - Math.min(...rates);
+        fs = sp > 0 ? (sp*100).toFixed(4)+'%' : '0.0000%';
+        if (sp > 0) fsc = 'style="color:var(--accent);font-weight:600"';
+      }
+    }
+    const dots = vList.map(v=>`<span class="venue-dot ${v}" title="${VENUES[v].name}"></span>`).join('');
+    const anyActive = Object.values(a.venues).some(v => v.isActive);
+    const inactiveTag = anyActive ? '' : ' <span style="font-size:9px;padding:1px 5px;border-radius:4px;background:rgba(92,97,112,0.15);color:var(--foreground-dim);font-weight:600">INACTIVE</span>';
+    const rowOp = anyActive ? '' : 'opacity:0.45;';
+
+    const tr = document.createElement('tr');
+    tr.style.cssText = rowOp + 'cursor:pointer;';
+    tr.onclick = () => { expandedAsset = expandedAsset===a.coin?null:a.coin; renderAssetView(); };
+    tr.innerHTML = `<td><div class="asset-cell"><div class="asset-icon" style="background:${catColor}12;color:${catColor};border:1px solid ${catColor}25">${a.coin.slice(0,2)}</div><div class="asset-info"><div class="asset-name">${a.coin} <span class="asset-tag tag-${a.category}">${a.category.toUpperCase()}</span>${inactiveTag}</div><div class="asset-type">${a.fullName}</div></div></div></td><td>${dots} <span style="font-size:12px;color:var(--foreground-sec)">${vCount}</span></td><td class="mono" style="font-weight:600">$${fmtPrice(bestPx)}</td><td><span class="change-badge ${isUp?'up':'down'}">${isUp?'+':''}${avgChg.toFixed(2)}%</span></td><td class="mono">${fmtVolume(totVol)}</td><td class="mono">${fmtVolume(totOI)}</td><td class="mono" ${fsc}>${fs}</td>`;
+    tbody.appendChild(tr);
+
+    if (expandedAsset === a.coin) {
+      vList.forEach(vk => {
+        const d = a.venues[vk];
+        const fAnn = fmtAnnual(d.funding, vk);
+        const fAnnLabel = fAnn === 'N/A' ? 'N/A' : fAnn + ' APR';
+        const sub = document.createElement('tr');
+        sub.className = 'venue-subrow';
+        sub.innerHTML = `<td style="padding-left:56px"><span class="venue-badge-sm ${vk}">${VENUES[vk].name}</span> <span style="font-size:11px;color:var(--foreground-dim);margin-left:6px">${VENUES[vk].fundingInterval}h funding</span> <span style="font-size:10px;color:var(--info);margin-left:8px;cursor:pointer" title="Click for detail">⊕ Detail</span></td><td></td><td class="mono" style="font-weight:600">$${fmtPrice(d.markPx)}</td><td><span class="change-badge ${d.change>=0?'up':'down'}">${d.change>=0?'+':''}${d.change.toFixed(2)}%</span></td><td class="mono">${fmtVolume(d.volume)}</td><td class="mono">${fmtVolume(d.oi)}</td><td><span class="funding-badge ${fundingClass(d.funding, vk)}">${fmtFunding(d.funding)}</span> <span style="font-size:10px;color:var(--foreground-dim)">${fAnnLabel}</span></td>`;
+        sub.onclick = (e) => { e.stopPropagation(); openAssetModal(vk, d); };
+        tbody.appendChild(sub);
+      });
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════
+// HEATMAP
+// ═══════════════════════════════════════════════════
+
+let heatmapSortVenue = null; // null = default volume sort
+function setHeatmapSort(venue, el) {
+  // Toggle: click again to deselect
+  if (heatmapSortVenue === venue) { heatmapSortVenue = null; }
+  else { heatmapSortVenue = venue; }
+  el.parentElement.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+  if (heatmapSortVenue) el.classList.add('active');
+  renderHeatmap();
+}
+
+function renderHeatmap() {
+  const grid = document.getElementById('heatmapGrid');
+  grid.innerHTML = '';
+  const venueKeys = Object.keys(VENUES).filter(v => allData.some(d => d.venue === v));
+  grid.style.gridTemplateColumns = `180px repeat(${venueKeys.length}, 1fr)`;
+  grid.innerHTML += `<div class="hm-header" style="visibility:hidden"></div>`;
+  venueKeys.forEach(v => { grid.innerHTML += `<div class="hm-header"><span class="venue-dot ${v}"></span> ${VENUES[v].name}</div>`; });
+
+  const grouped = {};
+  allData.forEach(d => {
+    if (!grouped[d.coin]) grouped[d.coin] = {coin:d.coin, fullName:d.fullName, category:d.category, venues:{}};
+    grouped[d.coin].venues[d.venue] = d;
+  });
+
+  const assetList = Object.values(grouped);
+
+  // Sort: by selected venue's |APR| desc, or default volume
+  if (heatmapSortVenue && VENUES[heatmapSortVenue]) {
+    const sv = heatmapSortVenue;
+    assetList.sort((a, b) => {
+      const aR = a.venues[sv] && a.venues[sv].funding !== null ? Math.abs(annualize(a.venues[sv].funding, sv) || 0) : -1;
+      const bR = b.venues[sv] && b.venues[sv].funding !== null ? Math.abs(annualize(b.venues[sv].funding, sv) || 0) : -1;
+      return bR - aR;
+    });
+  } else {
+    assetList.sort((a, b) => {
+      const aV = Object.values(a.venues).reduce((s,v)=>s+v.volume,0);
+      const bV = Object.values(b.venues).reduce((s,v)=>s+v.volume,0);
+      return bV - aV;
+    });
+  }
+
+  const maxRate = Math.max(...allData.filter(d=>d.funding!==null).map(d=>Math.abs(d.funding)),0.0001);
+
+  assetList.forEach(a => {
+    const cc = CAT_COLORS[a.category];
+    grid.innerHTML += `<div class="hm-asset-label"><span style="color:${cc};font-weight:700">${a.coin}</span><span style="font-size:10px;color:var(--foreground-dim)">${a.fullName}</span></div>`;
+
+    venueKeys.forEach(v => {
+      const d = a.venues[v];
+      if (!d) { grid.innerHTML += `<div class="hm-cell na">N/A</div>`; return; }
+      const r = d.funding;
+      if (r === null) {
+        grid.innerHTML += `<div class="hm-cell" style="background:rgba(92,97,112,0.06);color:var(--foreground-dim);font-style:italic"><div class="hm-val">N/A</div><div class="hm-ann">No data</div></div>`;
+        return;
+      }
+      const int = Math.min(Math.abs(r)/maxRate, 1);
+      const annVal = annualize(r, v);
+      const isNearZero = annVal !== null && Math.abs(annVal) < 0.005;
+
+      let bg, col;
+      if (isNearZero) {
+        bg='rgba(59,130,246,0.08)'; col='#6b9fff';
+      } else if (r > 0) {
+        const opac = 0.05 + int * 0.50;
+        bg=`rgba(0,209,128,${opac.toFixed(2)})`; col=int>0.45?'#fff':'#00D180';
+      } else {
+        const opac = 0.05 + int * 0.50;
+        bg=`rgba(229,72,77,${opac.toFixed(2)})`; col=int>0.45?'#fff':'#E5484D';
+      }
+
+      grid.innerHTML += `<div class="hm-cell" style="background:${bg};color:${col}" onclick="openHeatmapModal('${a.coin}','${v}')"><div class="hm-val">${fmtFunding(r)}</div><div class="hm-ann">${fmtAnnual(r,v)} APR</div></div>`;
+    });
+  });
+}
+
+// ═══════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+(async function init() {
+  await refresh(true);
+  refreshTimer = setInterval(() => refresh(false), REFRESH_INTERVAL);
+})();
+
+</script>
+</body>
+</html>
