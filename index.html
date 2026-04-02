@@ -58,6 +58,8 @@
   --tradexyz-dim: rgba(212,168,83,0.10);
   --bitget:       #00D180;
   --bitget-dim:   rgba(0,209,128,0.10);
+  --gate:         #2B6AFF;
+  --gate-dim:     rgba(43,106,255,0.10);
 
   /* ── Radius ── */
   --radius-sm: 6px;
@@ -97,7 +99,7 @@ body {
 }
 .header::after {
   content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 1px;
-  background: linear-gradient(90deg, var(--accent) 0%, rgba(74,144,217,0.15) 40%, rgba(0,209,128,0.15) 60%, var(--bitget) 100%);
+  background: linear-gradient(90deg, var(--accent) 0%, rgba(74,144,217,0.15) 30%, rgba(43,106,255,0.15) 50%, rgba(0,209,128,0.15) 70%, var(--bitget) 100%);
   opacity: 0.5;
 }
 .logo { display: flex; align-items: center; gap: 12px; }
@@ -177,6 +179,7 @@ body {
 .venue-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
 .venue-dot.tradexyz { background: var(--tradexyz); }
 .venue-dot.bitget { background: var(--bitget); }
+.venue-dot.gate { background: var(--gate); }
 
 /* ═══════════════════════════════════════════════════
    FILTER BAR
@@ -387,7 +390,8 @@ body {
   font-size: 12px; font-weight: 600;
   background: var(--muted); border: 1px solid var(--border);
 }
-.cov-chip.multi { background: var(--accent-dim); border-color: rgba(74,144,217,0.2); color: var(--accent-bright); }
+.cov-chip.tri { background: rgba(212,168,83,0.12); border-color: rgba(212,168,83,0.25); color: #D4A853; }
+.cov-chip.dual { background: var(--accent-dim); border-color: rgba(74,144,217,0.2); color: var(--accent-bright); }
 
 .div-cards { display: flex; flex-wrap: wrap; gap: 10px; }
 .div-card {
@@ -498,6 +502,7 @@ td:first-child { text-align: left; }
 }
 .venue-badge-sm.tradexyz { background: var(--tradexyz-dim); color: var(--tradexyz); border: 1px solid rgba(212,168,83,0.2); }
 .venue-badge-sm.bitget { background: var(--bitget-dim); color: var(--bitget); border: 1px solid rgba(0,209,128,0.2); }
+.venue-badge-sm.gate { background: var(--gate-dim); color: var(--gate); border: 1px solid rgba(43,106,255,0.2); }
 
 .venue-subrow { background: var(--muted); cursor: pointer; }
 .venue-subrow:hover { background: var(--muted-hover) !important; }
@@ -665,7 +670,7 @@ td:first-child { text-align: left; }
 }
 .loader-fill {
   height: 100%; width: 0%;
-  background: linear-gradient(90deg, var(--tradexyz), var(--bitget));
+  background: linear-gradient(90deg, var(--tradexyz), var(--gate), var(--bitget));
   border-radius: 2px;
   animation: loader-grow 1.5s ease-in-out forwards;
 }
@@ -746,6 +751,7 @@ input[type="checkbox"] {
     <div class="sub-tab active" onclick="switchSubTab('aggregator', this)">Aggregator</div>
     <div class="sub-tab" onclick="switchSubTab('tradexyz', this)"><span class="venue-dot tradexyz"></span>trade.xyz</div>
     <div class="sub-tab" onclick="switchSubTab('bitget', this)"><span class="venue-dot bitget"></span>Bitget</div>
+    <div class="sub-tab" onclick="switchSubTab('gate', this)"><span class="venue-dot gate"></span>Gate.io</div>
   </div>
 
   <!-- Aggregator -->
@@ -819,6 +825,36 @@ input[type="checkbox"] {
       </tr></thead><tbody id="bgTableBody"></tbody></table>
     </div>
   </div>
+
+  <div class="sub-view" id="sub-gate">
+    <div class="filter-bar">
+      <div class="chip active" onclick="setVenueFilter('gate','all',this)">All RWA <span class="count" id="gateCountAll"></span></div>
+      <div class="chip" onclick="setVenueFilter('gate','equity',this)">Equities <span class="count" id="gateCountEquity"></span></div>
+      <div class="chip" onclick="setVenueFilter('gate','commodity',this)">Commodities <span class="count" id="gateCountCommodity"></span></div>
+      <div class="chip" onclick="setVenueFilter('gate','index',this)">Indices <span class="count" id="gateCountIndex"></span></div>
+      <div class="chip" onclick="setVenueFilter('gate','etf',this)">ETFs <span class="count" id="gateCountEtf"></span></div>
+      <div class="chip" onclick="setVenueFilter('gate','fx',this)">FX <span class="count" id="gateCountFx"></span></div>
+      <label style="display:flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;color:var(--foreground-sec);cursor:pointer;user-select:none">
+        <input type="checkbox" id="gateHideInactive" checked onchange="renderVenueTable('gate')"> Hide inactive
+      </label>
+      <input class="search-box" placeholder="Search asset..." oninput="venueTableSearch.gate=this.value.toLowerCase();renderVenueTable('gate')">
+    </div>
+    <div class="info-bar"><span>Gate.io (USDT Perpetual) · Funding settles every 8h</span><span>Auto-refresh: 30s</span></div>
+    <div class="table-wrap">
+      <table><thead><tr>
+        <th style="text-align:left" data-sort="name" onclick="setVenueSort('gate','name')">Asset <span class="arrow"></span></th>
+        <th data-sort="markPx" onclick="setVenueSort('gate','markPx')">Mark Price <span class="arrow"></span></th>
+        <th data-sort="indexPx" onclick="setVenueSort('gate','indexPx')">Index Price <span class="arrow"></span></th>
+        <th data-sort="change" onclick="setVenueSort('gate','change')">24h Change <span class="arrow"></span></th>
+        <th data-sort="volume" onclick="setVenueSort('gate','volume')">24h Volume <span class="arrow">▼</span></th>
+        <th data-sort="oi" onclick="setVenueSort('gate','oi')">Open Interest <span class="arrow"></span></th>
+        <th data-sort="funding" onclick="setVenueSort('gate','funding')">Funding Rate <span class="arrow"></span></th>
+        <th style="cursor:default"><div style="display:flex;align-items:center;gap:6px;justify-content:flex-end"><span>Funding</span>
+          <div class="spark-range-btns"><button class="sr-btn active" onclick="setSparkRange('gate',24,this)">24h</button><button class="sr-btn" onclick="setSparkRange('gate',72,this)">3d</button><button class="sr-btn" onclick="setSparkRange('gate',168,this)">7d</button></div>
+        </div></th>
+      </tr></thead><tbody id="gateTableBody"></tbody></table>
+    </div>
+  </div>
 </div>
 
 <!-- ══ BY ASSET ══ -->
@@ -858,6 +894,7 @@ input[type="checkbox"] {
       <span style="font-size:11px;color:var(--foreground-dim);font-weight:600">Sort by</span>
       <div class="chip" onclick="setHeatmapSort('tradexyz',this)"><span class="venue-dot tradexyz" style="margin-right:4px"></span>trade.xyz</div>
       <div class="chip" onclick="setHeatmapSort('bitget',this)"><span class="venue-dot bitget" style="margin-right:4px"></span>Bitget</div>
+      <div class="chip" onclick="setHeatmapSort('gate',this)"><span class="venue-dot gate" style="margin-right:4px"></span>Gate.io</div>
     </div>
     <div class="heatmap-grid" id="heatmapGrid"></div>
     <div class="heatmap-legend">
@@ -896,6 +933,7 @@ input[type="checkbox"] {
 const VENUES = {
   tradexyz: { name: 'trade.xyz', color: '#D4A853', fundingInterval: 1 },
   bitget:   { name: 'Bitget',    color: '#00D180', fundingInterval: 8 },
+  gate:     { name: 'Gate.io',   color: '#2B6AFF', fundingInterval: 8 },
 };
 
 const CAT_COLORS = { index:'#3B82F6', equity:'#8B8FE8', commodity:'#D4A853', etf:'#3EC6D9', fx:'#D98CAF', other:'#5C6170' };
@@ -949,9 +987,10 @@ const KNOWN_NAMES = {
 // allData: array of { coin, fullName, category, venue, markPx, indexPx, change, volume, oi, funding }
 let allData = [];
 // Volume growth: venue → { coin: { prevVol, currVol, growth% } }
-let volumeGrowthData = { tradexyz: {}, bitget: {} };
+let volumeGrowthData = { tradexyz: {}, bitget: {}, gate: {} };
 let lastGrowthFetch = 0;
 const GROWTH_FETCH_INTERVAL = 300000; // re-fetch every 5 min
+const REFRESH_INTERVAL = 30000; // auto-refresh every 30s
 let currentView = 'allvenues';
 let currentSubTab = 'aggregator';
 let assetCatFilter = 'all';
@@ -960,13 +999,13 @@ let expandedAsset = null;
 let refreshTimer = null;
 
 // Per-venue table state
-let venueTableCatFilter = { tradexyz: 'all', bitget: 'all' };
-let venueTableSearch = { tradexyz: '', bitget: '' };
-let venueTableSort = { tradexyz: { key: 'volume', dir: -1 }, bitget: { key: 'volume', dir: -1 } };
+let venueTableCatFilter = { tradexyz: 'all', bitget: 'all', gate: 'all' };
+let venueTableSearch = { tradexyz: '', bitget: '', gate: '' };
+let venueTableSort = { tradexyz: { key: 'volume', dir: -1 }, bitget: { key: 'volume', dir: -1 }, gate: { key: 'volume', dir: -1 } };
 let assetSort = { key: 'volume', dir: -1 };
 
 // Sparkline state
-let sparkHours = { tradexyz: 24, bitget: 24 };
+let sparkHours = { tradexyz: 24, bitget: 24, gate: 24 };
 let fundingCache = {}; // key: "venue:coin" → { hours, data }
 
 // ═══════════════════════════════════════════════
@@ -1201,6 +1240,59 @@ async function fetchBitget() {
 }
 
 // ═══════════════════════════════════════════════
+// API: Gate.io (USDT Perpetual Futures)
+// ═══════════════════════════════════════════════
+
+// Gate.io API base: use Vercel proxy in production (avoids CORS), direct in dev
+const GATE_API_BASE = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+  ? 'https://api.gateio.ws/api/v4/futures/usdt'
+  : '/api/gate';
+
+async function fetchGate() {
+  logLoad('Fetching Gate.io data...');
+
+  // Fetch all USDT futures tickers
+  const res = await fetch(`${GATE_API_BASE}/tickers`);
+  if (!res.ok) throw new Error(`Gate HTTP ${res.status}`);
+  const tickers = await res.json();
+
+  const knownKeys = Object.keys(KNOWN_CATEGORIES);
+  const assets = [];
+
+  for (const t of tickers) {
+    // contract format: "BTC_USDT" → base = "BTC"
+    const contract = t.contract || '';
+    const base = contract.replace(/_USDT$/i, '').toUpperCase();
+
+    if (!knownKeys.includes(base)) continue;
+
+    const markPx = parseFloat(t.mark_price) || 0;
+    const indexPx = parseFloat(t.index_price) || 0;
+    const lastPx = parseFloat(t.last) || 0;
+    const change = parseFloat(t.change_percentage) || 0;
+    const volume = parseFloat(t.volume_24h_quote) || parseFloat(t.volume_24h_usd) || 0;
+    const oi = parseFloat(t.total_size) || 0;
+    const oiUsd = oi * markPx;
+
+    const rawFunding = parseFloat(t.funding_rate);
+    const funding = isNaN(rawFunding) ? null : rawFunding;
+
+    const cat = KNOWN_CATEGORIES[base] || 'other';
+    if (cat === 'other') console.warn(`[RWA] Uncategorized Gate asset: ${base}`);
+    const fullName = KNOWN_NAMES[base] || base;
+    const isActive = volume > 0 || oiUsd > 0 || (funding !== null && funding !== 0);
+
+    assets.push({
+      coin: base, symbol: contract, fullName, category: cat, venue: 'gate',
+      markPx: markPx || lastPx, indexPx, change, volume, oi: oiUsd, funding, isActive
+    });
+  }
+
+  logLoad(`Gate.io: ${assets.length} RWA assets processed`);
+  return assets;
+}
+
+// ═══════════════════════════════════════════════
 // FUNDING HISTORY & SPARKLINES
 // ═══════════════════════════════════════════════
 
@@ -1224,13 +1316,29 @@ async function fetchFundingHistoryXyz(coin, hours) {
 
 async function fetchFundingHistoryBitget(symbol, hours) {
   const PRODUCT_TYPE = 'USDT-FUTURES';
-  const periodsNeeded = Math.min(Math.ceil(hours / 8), 100);
+  const periodsNeeded = Math.min(Math.max(Math.ceil(hours / 8), 20), 100);
   try {
     const res = await fetch(`https://api.bitget.com/api/v2/mix/market/history-fund-rate?symbol=${symbol}&productType=${PRODUCT_TYPE}&limit=${periodsNeeded}`);
     if (!res.ok) return [];
     const json = await res.json();
     if (json.code !== '00000') return [];
     return Array.isArray(json.data) ? json.data : [];
+  } catch (e) { return []; }
+}
+
+async function fetchFundingHistoryGate(contract, hours) {
+  // Gate settles every 8h → ensure minimum 20 points for a readable chart
+  const periodsNeeded = Math.min(Math.max(Math.ceil(hours / 8), 20), 100);
+  try {
+    const res = await fetch(`${GATE_API_BASE}/funding_rate?contract=${contract}&limit=${periodsNeeded}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!Array.isArray(data)) return [];
+    // Gate returns: [{ t (unix seconds), r (rate string) }, ...]
+    return data.map(d => ({
+      fundingRate: d.r || d.rate || '0',
+      fundingTime: (d.t || 0) * 1000
+    }));
   } catch (e) { return []; }
 }
 
@@ -1262,6 +1370,9 @@ async function loadSparkline(venue, asset) {
       let raw;
       if (venue === 'tradexyz') {
         raw = await fetchFundingHistoryXyz(asset.coin, hours);
+      } else if (venue === 'gate') {
+        const contract = asset.symbol || (asset.coin + '_USDT');
+        raw = await fetchFundingHistoryGate(contract, hours);
       } else {
         // Bitget needs symbol (e.g. TSLAUSDT)
         const symbol = asset.symbol || (asset.coin + 'USDT');
@@ -1344,26 +1455,41 @@ async function fetchVolumeGrowthAll() {
   lastGrowthFetch = now;
   logLoad('Fetching 24h volume growth data...');
 
-  const [xyzG, bgG] = await Promise.all([
+  const [xyzG, bgG, gateG] = await Promise.all([
     fetchVolumeGrowthXyz().catch(e => { console.error('xyz growth error:', e); return {}; }),
-    fetchVolumeGrowthBitget().catch(e => { console.error('bg growth error:', e); return {}; })
+    fetchVolumeGrowthBitget().catch(e => { console.error('bg growth error:', e); return {}; }),
+    fetchVolumeGrowthGate().catch(e => { console.error('gate growth error:', e); return {}; })
   ]);
   volumeGrowthData.tradexyz = xyzG;
   volumeGrowthData.bitget = bgG;
-  logLoad(`Volume growth: xyz=${Object.keys(xyzG).length}, bitget=${Object.keys(bgG).length} assets`);
+  volumeGrowthData.gate = gateG;
+  logLoad(`Volume growth: xyz=${Object.keys(xyzG).length}, bitget=${Object.keys(bgG).length}, gate=${Object.keys(gateG).length} assets`);
+}
+
+// Rate-limited batch executor: max N concurrent requests
+async function batchFetch(tasks, concurrency = 5) {
+  const results = [];
+  let idx = 0;
+  async function worker() {
+    while (idx < tasks.length) {
+      const i = idx++;
+      try { results[i] = await tasks[i](); } catch (e) { results[i] = null; }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, () => worker()));
+  return results;
 }
 
 async function fetchVolumeGrowthXyz() {
   const assets = allData.filter(d => d.venue === 'tradexyz');
   const results = {};
-  // Use 48h of HOURLY candles, sum into two 24h windows for reliable comparison
   const now = Date.now();
   const startTime = now - 48 * 3600 * 1000;
   const midPoint = now - 24 * 3600 * 1000;
 
-  const promises = assets.map(async (asset) => {
-    try {
-      for (const coinName of [asset.coin, `xyz:${asset.coin}`]) {
+  const tasks = assets.map(asset => async () => {
+    for (const coinName of [asset.coin, `xyz:${asset.coin}`]) {
+      try {
         const res = await fetch('https://api.hyperliquid.xyz/info', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1375,8 +1501,6 @@ async function fetchVolumeGrowthXyz() {
         if (!res.ok) continue;
         const candles = await res.json();
         if (Array.isArray(candles) && candles.length >= 10) {
-          // Sum volume for older 24h window vs newer 24h window
-          // Candle: { t (open time), T, s, i, o, c, h, l, v, n }
           let olderVol = 0, newerVol = 0;
           candles.forEach(c => {
             const t = parseInt(c.t || 0);
@@ -1392,13 +1516,13 @@ async function fetchVolumeGrowthXyz() {
               growth: ((newerVol - olderVol) / olderVol) * 100
             };
           }
-          break;
+          return;
         }
-      }
-    } catch (e) { /* skip */ }
+      } catch (e) { /* try next name */ }
+    }
   });
 
-  await Promise.all(promises);
+  await batchFetch(tasks, 5);
   return results;
 }
 
@@ -1409,32 +1533,62 @@ async function fetchVolumeGrowthBitget() {
   const midPoint = now - 24 * 3600 * 1000;
   const startTime = now - 48 * 3600 * 1000;
 
-  const promises = assets.map(async (asset) => {
-    try {
-      const symbol = asset.symbol || (asset.coin + 'USDT');
-      // Fetch 48h of hourly candles, sum into two 24h windows
-      const res = await fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=1H&startTime=${startTime}&endTime=${now}&limit=48`);
-      if (!res.ok) return;
-      const json = await res.json();
-      if (json.code !== '00000' || !Array.isArray(json.data) || json.data.length < 10) return;
-      // Bitget candle: [ts, open, high, low, close, baseVol, quoteVol]
-      let olderVol = 0, newerVol = 0;
-      json.data.forEach(c => {
-        const t = parseInt(c[0] || 0);
-        const vol = parseFloat(c[6] || c[5] || 0); // quoteVol (USDT)
-        if (t < midPoint) olderVol += vol;
-        else newerVol += vol;
-      });
-      if (olderVol > 100) {
-        results[asset.coin] = {
-          prevVol: olderVol, currVol: newerVol,
-          growth: ((newerVol - olderVol) / olderVol) * 100
-        };
-      }
-    } catch (e) { /* skip */ }
+  const tasks = assets.map(asset => async () => {
+    const symbol = asset.symbol || (asset.coin + 'USDT');
+    const res = await fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=1H&startTime=${startTime}&endTime=${now}&limit=48`);
+    if (!res.ok) return;
+    const json = await res.json();
+    if (json.code !== '00000' || !Array.isArray(json.data) || json.data.length < 10) return;
+    let olderVol = 0, newerVol = 0;
+    json.data.forEach(c => {
+      const t = parseInt(c[0] || 0);
+      const vol = parseFloat(c[6] || c[5] || 0);
+      if (t < midPoint) olderVol += vol;
+      else newerVol += vol;
+    });
+    if (olderVol > 100) {
+      results[asset.coin] = {
+        prevVol: olderVol, currVol: newerVol,
+        growth: ((newerVol - olderVol) / olderVol) * 100
+      };
+    }
   });
 
-  await Promise.all(promises);
+  await batchFetch(tasks, 5);
+  return results;
+}
+
+async function fetchVolumeGrowthGate() {
+  const assets = allData.filter(d => d.venue === 'gate');
+  const results = {};
+  const now = Math.floor(Date.now() / 1000);
+  const startTime = now - 48 * 3600;
+  const midPoint = now - 24 * 3600;
+
+  const tasks = assets.map(asset => async () => {
+    const contract = asset.symbol || (asset.coin + '_USDT');
+    const res = await fetch(`${GATE_API_BASE}/candlesticks?contract=${contract}&from=${startTime}&to=${now}&interval=1h`);
+    if (!res.ok) return;
+    const candles = await res.json();
+    if (!Array.isArray(candles) || candles.length < 10) return;
+    let olderVol = 0, newerVol = 0;
+    candles.forEach(c => {
+      const t = parseInt(c.t || 0);
+      const vol = parseFloat(c.v || 0);
+      const px = parseFloat(c.c || asset.markPx);
+      const volUsd = vol * px;
+      if (t < midPoint) olderVol += volUsd;
+      else newerVol += volUsd;
+    });
+    if (olderVol > 100) {
+      results[asset.coin] = {
+        prevVol: olderVol, currVol: newerVol,
+        growth: ((newerVol - olderVol) / olderVol) * 100
+      };
+    }
+  });
+
+  await batchFetch(tasks, 5);
   return results;
 }
 
@@ -1571,6 +1725,9 @@ async function loadModalChart() {
   try {
     if (v === 'tradexyz') {
       raw = await fetchFundingHistoryXyz(d.coin, hours);
+    } else if (v === 'gate') {
+      const contract = d.symbol || (d.coin + '_USDT');
+      raw = await fetchFundingHistoryGate(contract, hours);
     } else {
       const symbol = d.symbol || (d.coin + 'USDT');
       raw = await fetchFundingHistoryBitget(symbol, hours);
@@ -1681,12 +1838,13 @@ function renderModalChart(points) {
 
 async function refresh(isFirst) {
   try {
-    const [xyzAssets, bitgetAssets] = await Promise.all([
+    const [xyzAssets, bitgetAssets, gateAssets] = await Promise.all([
       fetchTradeXyz().catch(e => { console.error('trade.xyz error:', e); return []; }),
-      fetchBitget().catch(e => { console.error('Bitget error:', e); return []; })
+      fetchBitget().catch(e => { console.error('Bitget error:', e); return []; }),
+      fetchGate().catch(e => { console.error('Gate.io error:', e); return []; })
     ]);
 
-    allData = [...xyzAssets, ...bitgetAssets];
+    allData = [...xyzAssets, ...bitgetAssets, ...gateAssets];
 
     // Fetch volume growth (cached, re-fetches every 5 min)
     await fetchVolumeGrowthAll().catch(e => console.error('Volume growth error:', e));
@@ -1716,6 +1874,7 @@ function renderCurrentView() {
     if (currentSubTab === 'aggregator') renderOverview();
     else if (currentSubTab === 'tradexyz') renderVenueTable('tradexyz');
     else if (currentSubTab === 'bitget') renderVenueTable('bitget');
+    else if (currentSubTab === 'gate') renderVenueTable('gate');
   }
   else if (currentView === 'asset') renderAssetView();
   else if (currentView === 'heatmap') renderHeatmap();
@@ -1883,23 +2042,30 @@ function renderCoverage() {
   const grouped = {};
   allData.forEach(d => { if (!grouped[d.coin]) grouped[d.coin]={coin:d.coin,venues:new Set()}; grouped[d.coin].venues.add(d.venue); });
   const allCoins = Object.values(grouped);
-  const multi = allCoins.filter(c => c.venues.size > 1);
+  const tri = allCoins.filter(c => c.venues.size >= 3);
+  const dual = allCoins.filter(c => c.venues.size === 2);
   const single = allCoins.filter(c => c.venues.size === 1);
-  const multiChips = multi.map(c => {
+  const triChips = tri.map(c => {
     const dots = [...c.venues].map(v=>`<span class="venue-dot ${v}"></span>`).join('');
-    return `<div class="cov-chip multi">${dots}${c.coin}</div>`;
+    return `<div class="cov-chip tri">${dots}${c.coin}</div>`;
+  }).join('');
+  const dualChips = dual.map(c => {
+    const dots = [...c.venues].map(v=>`<span class="venue-dot ${v}"></span>`).join('');
+    return `<div class="cov-chip dual">${dots}${c.coin}</div>`;
   }).join('');
 
   section.innerHTML = `
     <div class="section-title">Cross-Venue Coverage</div>
     <div class="section-subtitle">Assets available on multiple venues</div>
     <div class="cov-stats">
-      <div class="cov-stat"><div class="cs-value" style="color:var(--accent)">${multi.length}</div><div class="cs-label">Multi-venue</div></div>
+      <div class="cov-stat"><div class="cs-value" style="color:#D4A853">${tri.length}</div><div class="cs-label">3-Venue</div></div>
+      <div class="cov-stat"><div class="cs-value" style="color:var(--accent)">${dual.length}</div><div class="cs-label">2-Venue</div></div>
       <div class="cov-stat"><div class="cs-value">${single.length}</div><div class="cs-label">Single-venue</div></div>
       <div class="cov-stat"><div class="cs-value">${allCoins.length}</div><div class="cs-label">Total unique</div></div>
     </div>
-    <div style="font-size:11px;color:var(--foreground-sec);margin-bottom:6px">Available on multiple venues:</div>
-    <div class="cov-grid">${multiChips || '<span style="color:var(--foreground-dim)">None</span>'}</div>
+    ${tri.length ? `<div style="font-size:11px;color:#D4A853;margin-bottom:6px;font-weight:600">All 3 venues (${tri.length})</div><div class="cov-grid" style="margin-bottom:12px">${triChips}</div>` : ''}
+    ${dual.length ? `<div style="font-size:11px;color:var(--accent);margin-bottom:6px;font-weight:600">2 venues (${dual.length})</div><div class="cov-grid">${dualChips}</div>` : ''}
+    ${!tri.length && !dual.length ? '<div class="cov-grid"><span style="color:var(--foreground-dim)">None</span></div>' : ''}
   `;
 }
 
@@ -1914,13 +2080,15 @@ function renderDivergence() {
     const vKeys = Object.keys(a.venues);
     if (vKeys.length < 2) return;
     const rates = vKeys.map(v => ({venue:v, ann:annualize(a.venues[v].funding,v)})).filter(r => r.ann !== null);
-    const pos = rates.filter(r => r.ann > 0);
-    const neg = rates.filter(r => r.ann < 0);
-    if (pos.length === 0 || neg.length === 0) return;
-    const bestPos = pos.sort((a,b)=>b.ann-a.ann)[0];
-    const bestNeg = neg.sort((a,b)=>a.ann-b.ann)[0];
-    if (bestPos.ann < MIN_ANN || Math.abs(bestNeg.ann) < MIN_ANN) return;
-    divergences.push({coin:a.coin, fullName:a.fullName, spread:bestPos.ann-bestNeg.ann, posVenue:bestPos, negVenue:bestNeg});
+    // enumerate all positive vs negative pairs
+    for (const p of rates) {
+      for (const n of rates) {
+        if (p.venue === n.venue) continue;
+        if (p.ann <= 0 || n.ann >= 0) continue;
+        if (p.ann < MIN_ANN || Math.abs(n.ann) < MIN_ANN) continue;
+        divergences.push({coin:a.coin, fullName:a.fullName, spread:p.ann - n.ann, posVenue:p, negVenue:n});
+      }
+    }
   });
   divergences.sort((a,b) => b.spread-a.spread);
 
@@ -1956,10 +2124,15 @@ function setVenueSort(venue, key) {
 }
 
 function renderVenueTable(venue) {
-  const isXyz = venue === 'tradexyz';
-  const tbodyId = isXyz ? 'xyzTableBody' : 'bgTableBody';
-  const prefix = isXyz ? 'xyz' : 'bg';
-  const hideId = isXyz ? 'xyzHideInactive' : 'bgHideInactive';
+  const venueMap = {
+    tradexyz: { tbodyId: 'xyzTableBody', prefix: 'xyz', hideId: 'xyzHideInactive' },
+    bitget:   { tbodyId: 'bgTableBody',  prefix: 'bg',  hideId: 'bgHideInactive' },
+    gate:     { tbodyId: 'gateTableBody', prefix: 'gate', hideId: 'gateHideInactive' }
+  };
+  const vm = venueMap[venue] || venueMap.bitget;
+  const tbodyId = vm.tbodyId;
+  const prefix = vm.prefix;
+  const hideId = vm.hideId;
   const tbody = document.getElementById(tbodyId);
   if (!tbody) return;
   tbody.innerHTML = '';
