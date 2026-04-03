@@ -60,6 +60,8 @@
   --bitget-dim:   rgba(0,209,128,0.10);
   --gate:         #2B6AFF;
   --gate-dim:     rgba(43,106,255,0.10);
+  --binance:      #F0B90B;
+  --binance-dim:  rgba(240,185,11,0.10);
 
   /* ── Radius ── */
   --radius-sm: 6px;
@@ -180,6 +182,7 @@ body {
 .venue-dot.tradexyz { background: var(--tradexyz); }
 .venue-dot.bitget { background: var(--bitget); }
 .venue-dot.gate { background: var(--gate); }
+.venue-dot.binance { background: var(--binance); }
 
 /* ═══════════════════════════════════════════════════
    FILTER BAR
@@ -510,6 +513,7 @@ td:first-child { text-align: left; }
 .venue-badge-sm.tradexyz { background: var(--tradexyz-dim); color: var(--tradexyz); border: 1px solid rgba(212,168,83,0.2); }
 .venue-badge-sm.bitget { background: var(--bitget-dim); color: var(--bitget); border: 1px solid rgba(0,209,128,0.2); }
 .venue-badge-sm.gate { background: var(--gate-dim); color: var(--gate); border: 1px solid rgba(43,106,255,0.2); }
+.venue-badge-sm.binance { background: var(--binance-dim); color: var(--binance); border: 1px solid rgba(240,185,11,0.2); }
 
 .venue-subrow { background: var(--muted); cursor: pointer; }
 .venue-subrow:hover { background: var(--muted-hover) !important; }
@@ -759,6 +763,7 @@ input[type="checkbox"] {
     <div class="sub-tab" onclick="switchSubTab('tradexyz', this)"><span class="venue-dot tradexyz"></span>trade.xyz</div>
     <div class="sub-tab" onclick="switchSubTab('bitget', this)"><span class="venue-dot bitget"></span>Bitget</div>
     <div class="sub-tab" onclick="switchSubTab('gate', this)"><span class="venue-dot gate"></span>Gate.io</div>
+    <div class="sub-tab" onclick="switchSubTab('binance', this)"><span class="venue-dot binance"></span>Binance</div>
   </div>
 
   <!-- Aggregator -->
@@ -865,6 +870,38 @@ input[type="checkbox"] {
       </tr></thead><tbody id="gateTableBody"></tbody></table>
     </div>
   </div>
+
+  <!-- Binance table -->
+  <div class="sub-view" id="sub-binance">
+    <div class="filter-bar">
+      <div class="chip active" onclick="setVenueFilter('binance','all',this)">All RWA <span class="count" id="bnCountAll"></span></div>
+      <div class="chip" onclick="setVenueFilter('binance','equity',this)">Equities <span class="count" id="bnCountEquity"></span></div>
+      <div class="chip" onclick="setVenueFilter('binance','commodity',this)">Commodities <span class="count" id="bnCountCommodity"></span></div>
+      <div class="chip" onclick="setVenueFilter('binance','index',this)">Indices <span class="count" id="bnCountIndex"></span></div>
+      <div class="chip" onclick="setVenueFilter('binance','etf',this)">ETFs <span class="count" id="bnCountEtf"></span></div>
+      <div class="chip" onclick="setVenueFilter('binance','fx',this)">FX <span class="count" id="bnCountFx"></span></div>
+      <label style="display:flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;color:var(--foreground-sec);cursor:pointer;user-select:none">
+        <input type="checkbox" id="bnHideInactive" checked onchange="renderVenueTable('binance')"> Hide inactive
+      </label>
+      <input class="search-box" placeholder="Search asset..." oninput="venueTableSearch.binance=this.value.toLowerCase();renderVenueTable('binance')">
+    </div>
+    <div class="info-bar"><span>Binance (USDT-M Perpetual) · Funding settles every 8h · Fees vary per contract (default Maker 0.02% / Taker 0.05%)</span><span>Auto-refresh: 30s</span></div>
+    <div class="table-wrap">
+      <table><thead><tr>
+        <th style="text-align:left" data-sort="name" onclick="setVenueSort('binance','name')">Asset <span class="arrow"></span></th>
+        <th data-sort="markPx" onclick="setVenueSort('binance','markPx')">Mark Price <span class="arrow"></span></th>
+        <th data-sort="indexPx" onclick="setVenueSort('binance','indexPx')">Index Price <span class="arrow"></span></th>
+        <th data-sort="change" onclick="setVenueSort('binance','change')">24h Change <span class="arrow"></span></th>
+        <th data-sort="volume" onclick="setVenueSort('binance','volume')">24h Volume <span class="arrow">▼</span></th>
+        <th data-sort="oi" onclick="setVenueSort('binance','oi')">Open Interest <span class="arrow"></span></th>
+        <th data-sort="funding" onclick="setVenueSort('binance','funding')">Funding Rate <span class="arrow"></span></th>
+        <th data-sort="posRate" onclick="setVenueSort('binance','posRate')"><span class="th-info">% Positive <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip">Percentage of funding periods with a positive rate in the selected time window. Values near 100% or near 0% indicate the rate direction is highly consistent — these contracts are more suitable for longer-term funding arbitrage positions.</span></span></th>
+        <th style="cursor:default"><div style="display:flex;align-items:center;gap:6px;justify-content:flex-end"><span>Funding</span>
+          <div class="spark-range-btns"><button class="sr-btn active" onclick="setSparkRange('binance',24,this)">24h</button><button class="sr-btn" onclick="setSparkRange('binance',72,this)">3d</button><button class="sr-btn" onclick="setSparkRange('binance',168,this)">7d</button></div>
+        </div></th>
+      </tr></thead><tbody id="bnTableBody"></tbody></table>
+    </div>
+  </div>
 </div>
 
 <!-- ══ BY ASSET ══ -->
@@ -905,6 +942,7 @@ input[type="checkbox"] {
       <div class="chip" onclick="setHeatmapSort('tradexyz',this)"><span class="venue-dot tradexyz" style="margin-right:4px"></span>trade.xyz</div>
       <div class="chip" onclick="setHeatmapSort('bitget',this)"><span class="venue-dot bitget" style="margin-right:4px"></span>Bitget</div>
       <div class="chip" onclick="setHeatmapSort('gate',this)"><span class="venue-dot gate" style="margin-right:4px"></span>Gate.io</div>
+      <div class="chip" onclick="setHeatmapSort('binance',this)"><span class="venue-dot binance" style="margin-right:4px"></span>Binance</div>
     </div>
     <div class="heatmap-grid" id="heatmapGrid"></div>
     <div class="heatmap-legend">
@@ -944,6 +982,7 @@ const VENUES = {
   tradexyz: { name: 'trade.xyz', color: '#D4A853', fundingInterval: 1, makerFee: 0.0001, takerFee: 0.00035 },
   bitget:   { name: 'Bitget',    color: '#00D180', fundingInterval: 8, makerFee: 0.0002, takerFee: 0.0006 },
   gate:     { name: 'Gate.io',   color: '#2B6AFF', fundingInterval: 8, makerFee: 0.00015, takerFee: 0.0005 },
+  binance:  { name: 'Binance',   color: '#F0B90B', fundingInterval: 8, makerFee: 0.0002, takerFee: 0.0005 },
 };
 
 const CAT_COLORS = { index:'#3B82F6', equity:'#8B8FE8', commodity:'#D4A853', etf:'#3EC6D9', fx:'#D98CAF', other:'#5C6170' };
@@ -997,7 +1036,7 @@ const KNOWN_NAMES = {
 // allData: array of { coin, fullName, category, venue, markPx, indexPx, change, volume, oi, funding }
 let allData = [];
 // Volume growth: venue → { coin: { prevVol, currVol, growth% } }
-let volumeGrowthData = { tradexyz: {}, bitget: {}, gate: {} };
+let volumeGrowthData = { tradexyz: {}, bitget: {}, gate: {}, binance: {} };
 let lastGrowthFetch = 0;
 const GROWTH_FETCH_INTERVAL = 300000; // re-fetch every 5 min
 const REFRESH_INTERVAL = 30000; // auto-refresh every 30s
@@ -1009,13 +1048,13 @@ let expandedAsset = null;
 let refreshTimer = null;
 
 // Per-venue table state
-let venueTableCatFilter = { tradexyz: 'all', bitget: 'all', gate: 'all' };
-let venueTableSearch = { tradexyz: '', bitget: '', gate: '' };
-let venueTableSort = { tradexyz: { key: 'volume', dir: -1 }, bitget: { key: 'volume', dir: -1 }, gate: { key: 'volume', dir: -1 } };
+let venueTableCatFilter = { tradexyz: 'all', bitget: 'all', gate: 'all', binance: 'all' };
+let venueTableSearch = { tradexyz: '', bitget: '', gate: '', binance: '' };
+let venueTableSort = { tradexyz: { key: 'volume', dir: -1 }, bitget: { key: 'volume', dir: -1 }, gate: { key: 'volume', dir: -1 }, binance: { key: 'volume', dir: -1 } };
 let assetSort = { key: 'volume', dir: -1 };
 
 // Sparkline state
-let sparkHours = { tradexyz: 24, bitget: 24, gate: 24 };
+let sparkHours = { tradexyz: 24, bitget: 24, gate: 24, binance: 24 };
 let divHoldDays = 0; // 0 = no fee deduction
 let fundingCache = {}; // key: "venue:coin" → { hours, data }
 
@@ -1345,6 +1384,119 @@ async function fetchGate() {
 }
 
 // ═══════════════════════════════════════════════
+// API: Binance (USDT-M Perpetual Futures)
+// ═══════════════════════════════════════════════
+
+const BINANCE_API_BASE = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+  ? 'https://fapi.binance.com/fapi/v1'
+  : '/api/binance';
+
+async function fetchBinance() {
+  logLoad('Fetching Binance data...');
+
+  // Fetch premiumIndex (mark+funding) + exchangeInfo (fees) + ticker24h in parallel
+  const [premiumRes, infoRes, tickerRes] = await Promise.all([
+    fetch(`${BINANCE_API_BASE}/premiumIndex`),
+    fetch(`${BINANCE_API_BASE}/exchangeInfo`).catch(() => null),
+    fetch(`${BINANCE_API_BASE}/ticker/24hr`).catch(() => null)
+  ]);
+  if (!premiumRes.ok) throw new Error(`Binance HTTP ${premiumRes.status}`);
+  const premiumData = await premiumRes.json();
+
+  // Build fee map from exchangeInfo
+  const feeMap = {};
+  if (infoRes && infoRes.ok) {
+    try {
+      const info = await infoRes.json();
+      (info.symbols || []).forEach(s => {
+        // Binance stores fees as basis points * 10000? Actually raw decimals or integers varies
+        // makerCommission/takerCommission might be absent; use commissionRates if available
+        let mk = VENUES.binance.makerFee, tk = VENUES.binance.takerFee;
+        if (s.makerCommission !== undefined) {
+          mk = parseFloat(s.makerCommission) / 1000000; // e.g. 200 → 0.0002
+          tk = parseFloat(s.takerCommission) / 1000000;
+        }
+        feeMap[s.symbol] = { maker: mk, taker: tk };
+      });
+      logLoad(`Binance: fee data for ${Object.keys(feeMap).length} symbols`);
+    } catch(e) { /* use defaults */ }
+  }
+
+  // Build ticker map for volume
+  const tickerMap = {};
+  if (tickerRes && tickerRes.ok) {
+    try {
+      const tickers = await tickerRes.json();
+      tickers.forEach(t => { tickerMap[t.symbol] = t; });
+    } catch(e) { /* ok */ }
+  }
+
+  const knownKeys = Object.keys(KNOWN_CATEGORIES);
+  const assets = [];
+
+  for (const p of premiumData) {
+    const symbol = p.symbol || '';
+    const base = symbol.replace(/USDT$/i, '').toUpperCase();
+    if (!knownKeys.includes(base)) continue;
+
+    const markPx = parseFloat(p.markPrice) || 0;
+    const indexPx = parseFloat(p.indexPrice) || 0;
+    const rawFunding = parseFloat(p.lastFundingRate);
+    const funding = isNaN(rawFunding) ? null : rawFunding;
+
+    const t = tickerMap[symbol] || {};
+    const volume = parseFloat(t.quoteVolume) || 0;
+    const change = parseFloat(t.priceChangePercent) || 0;
+
+    // OI needs separate call per symbol — skip for now, use ticker data
+    const oi = volume > 0 ? volume * 0.3 : 0; // rough estimate; we'll refine later
+
+    const cat = KNOWN_CATEGORIES[base] || 'other';
+    const fullName = KNOWN_NAMES[base] || base;
+    const isActive = volume > 0 || (funding !== null && funding !== 0);
+
+    const cf = feeMap[symbol] || {};
+    assets.push({
+      coin: base, symbol, fullName, category: cat, venue: 'binance',
+      markPx, indexPx, change, volume, oi, funding, predictedFunding: null, isActive,
+      makerFee: cf.maker || VENUES.binance.makerFee,
+      takerFee: cf.taker || VENUES.binance.takerFee
+    });
+  }
+
+  // Fetch OI for active assets in batch
+  if (assets.length > 0) {
+    const oiTasks = assets.map((a, idx) => async () => {
+      try {
+        const res = await fetch(`${BINANCE_API_BASE}/openInterest?symbol=${a.symbol}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const oiQty = parseFloat(data.openInterest) || 0;
+        assets[idx].oi = oiQty * a.markPx;
+      } catch(e) { /* keep estimate */ }
+    });
+    await batchFetch(oiTasks, 5);
+  }
+
+  logLoad(`Binance: ${assets.length} RWA assets processed`);
+  return assets;
+}
+
+async function fetchFundingHistoryBinance(symbol, hours) {
+  const periodsNeeded = Math.min(Math.max(Math.ceil(hours / 8), 20), 1000);
+  try {
+    const res = await fetch(`${BINANCE_API_BASE}/fundingRate?symbol=${symbol}&limit=${periodsNeeded}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!Array.isArray(data)) return [];
+    return data.map(d => ({
+      fundingRate: d.fundingRate || '0',
+      fundingTime: d.fundingTime || 0
+    }));
+  } catch(e) { return []; }
+}
+
+// ═══════════════════════════════════════════════
 // FUNDING HISTORY & SPARKLINES
 // ═══════════════════════════════════════════════
 
@@ -1425,8 +1577,10 @@ async function loadSparkline(venue, asset) {
       } else if (venue === 'gate') {
         const contract = asset.symbol || (asset.coin + '_USDT');
         raw = await fetchFundingHistoryGate(contract, hours);
+      } else if (venue === 'binance') {
+        const symbol = asset.symbol || (asset.coin + 'USDT');
+        raw = await fetchFundingHistoryBinance(symbol, hours);
       } else {
-        // Bitget needs symbol (e.g. TSLAUSDT)
         const symbol = asset.symbol || (asset.coin + 'USDT');
         raw = await fetchFundingHistoryBitget(symbol, hours);
       }
@@ -1812,6 +1966,9 @@ async function loadModalChart() {
     } else if (v === 'gate') {
       const contract = d.symbol || (d.coin + '_USDT');
       raw = await fetchFundingHistoryGate(contract, hours);
+    } else if (v === 'binance') {
+      const symbol = d.symbol || (d.coin + 'USDT');
+      raw = await fetchFundingHistoryBinance(symbol, hours);
     } else {
       const symbol = d.symbol || (d.coin + 'USDT');
       raw = await fetchFundingHistoryBitget(symbol, hours);
@@ -1922,13 +2079,14 @@ function renderModalChart(points) {
 
 async function refresh(isFirst) {
   try {
-    const [xyzAssets, bitgetAssets, gateAssets] = await Promise.all([
+    const [xyzAssets, bitgetAssets, gateAssets, binanceAssets] = await Promise.all([
       fetchTradeXyz().catch(e => { console.error('trade.xyz error:', e); return []; }),
       fetchBitget().catch(e => { console.error('Bitget error:', e); return []; }),
-      fetchGate().catch(e => { console.error('Gate.io error:', e); return []; })
+      fetchGate().catch(e => { console.error('Gate.io error:', e); return []; }),
+      fetchBinance().catch(e => { console.error('Binance error:', e); return []; })
     ]);
 
-    allData = [...xyzAssets, ...bitgetAssets, ...gateAssets];
+    allData = [...xyzAssets, ...bitgetAssets, ...gateAssets, ...binanceAssets];
 
     // Fetch volume growth (cached, re-fetches every 5 min)
     await fetchVolumeGrowthAll().catch(e => console.error('Volume growth error:', e));
@@ -1959,6 +2117,7 @@ function renderCurrentView() {
     else if (currentSubTab === 'tradexyz') renderVenueTable('tradexyz');
     else if (currentSubTab === 'bitget') renderVenueTable('bitget');
     else if (currentSubTab === 'gate') renderVenueTable('gate');
+    else if (currentSubTab === 'binance') renderVenueTable('binance');
   }
   else if (currentView === 'asset') renderAssetView();
   else if (currentView === 'heatmap') renderHeatmap();
@@ -2262,7 +2421,8 @@ function renderVenueTable(venue) {
   const venueMap = {
     tradexyz: { tbodyId: 'xyzTableBody', prefix: 'xyz', hideId: 'xyzHideInactive' },
     bitget:   { tbodyId: 'bgTableBody',  prefix: 'bg',  hideId: 'bgHideInactive' },
-    gate:     { tbodyId: 'gateTableBody', prefix: 'gate', hideId: 'gateHideInactive' }
+    gate:     { tbodyId: 'gateTableBody', prefix: 'gate', hideId: 'gateHideInactive' },
+    binance:  { tbodyId: 'bnTableBody',  prefix: 'bn',  hideId: 'bnHideInactive' }
   };
   const vm = venueMap[venue] || venueMap.bitget;
   const tbodyId = vm.tbodyId;

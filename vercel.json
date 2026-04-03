@@ -1,6 +1,7 @@
 {
   "rewrites": [
     { "source": "/api/gate/:path*", "destination": "https://api.gateio.ws/api/v4/futures/usdt/:path*" },
+    { "source": "/api/binance/:path*", "destination": "https://fapi.binance.com/fapi/v1/:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [
