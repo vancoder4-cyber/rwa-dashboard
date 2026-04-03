@@ -393,6 +393,7 @@ body {
   font-size: 12px; font-weight: 600;
   background: var(--muted); border: 1px solid var(--border);
 }
+.cov-chip.quad { background: rgba(240,185,11,0.12); border-color: rgba(240,185,11,0.25); color: #F0B90B; }
 .cov-chip.tri { background: rgba(212,168,83,0.12); border-color: rgba(212,168,83,0.25); color: #D4A853; }
 .cov-chip.dual { background: var(--accent-dim); border-color: rgba(74,144,217,0.2); color: var(--accent-bright); }
 
@@ -2285,9 +2286,14 @@ function renderCoverage() {
   const grouped = {};
   allData.forEach(d => { if (!grouped[d.coin]) grouped[d.coin]={coin:d.coin,venues:new Set()}; grouped[d.coin].venues.add(d.venue); });
   const allCoins = Object.values(grouped);
-  const tri = allCoins.filter(c => c.venues.size >= 3);
+  const quad = allCoins.filter(c => c.venues.size >= 4);
+  const tri = allCoins.filter(c => c.venues.size === 3);
   const dual = allCoins.filter(c => c.venues.size === 2);
   const single = allCoins.filter(c => c.venues.size === 1);
+  const quadChips = quad.map(c => {
+    const dots = [...c.venues].map(v=>`<span class="venue-dot ${v}"></span>`).join('');
+    return `<div class="cov-chip quad">${dots}${c.coin}</div>`;
+  }).join('');
   const triChips = tri.map(c => {
     const dots = [...c.venues].map(v=>`<span class="venue-dot ${v}"></span>`).join('');
     return `<div class="cov-chip tri">${dots}${c.coin}</div>`;
@@ -2301,14 +2307,16 @@ function renderCoverage() {
     <div class="section-title">Cross-Venue Coverage</div>
     <div class="section-subtitle">Assets available on multiple venues</div>
     <div class="cov-stats">
+      <div class="cov-stat"><div class="cs-value" style="color:var(--binance)">${quad.length}</div><div class="cs-label">4-Venue</div></div>
       <div class="cov-stat"><div class="cs-value" style="color:#D4A853">${tri.length}</div><div class="cs-label">3-Venue</div></div>
       <div class="cov-stat"><div class="cs-value" style="color:var(--accent)">${dual.length}</div><div class="cs-label">2-Venue</div></div>
       <div class="cov-stat"><div class="cs-value">${single.length}</div><div class="cs-label">Single-venue</div></div>
       <div class="cov-stat"><div class="cs-value">${allCoins.length}</div><div class="cs-label">Total unique</div></div>
     </div>
-    ${tri.length ? `<div style="font-size:11px;color:#D4A853;margin-bottom:6px;font-weight:600">All 3 venues (${tri.length})</div><div class="cov-grid" style="margin-bottom:12px">${triChips}</div>` : ''}
+    ${quad.length ? `<div style="font-size:11px;color:var(--binance);margin-bottom:6px;font-weight:600">All 4 venues (${quad.length})</div><div class="cov-grid" style="margin-bottom:12px">${quadChips}</div>` : ''}
+    ${tri.length ? `<div style="font-size:11px;color:#D4A853;margin-bottom:6px;font-weight:600">3 venues (${tri.length})</div><div class="cov-grid" style="margin-bottom:12px">${triChips}</div>` : ''}
     ${dual.length ? `<div style="font-size:11px;color:var(--accent);margin-bottom:6px;font-weight:600">2 venues (${dual.length})</div><div class="cov-grid">${dualChips}</div>` : ''}
-    ${!tri.length && !dual.length ? '<div class="cov-grid"><span style="color:var(--foreground-dim)">None</span></div>' : ''}
+    ${!quad.length && !tri.length && !dual.length ? '<div class="cov-grid"><span style="color:var(--foreground-dim)">None</span></div>' : ''}
   `;
 }
 
