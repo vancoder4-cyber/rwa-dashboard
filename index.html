@@ -54,8 +54,8 @@
   --gold-dim:     rgba(212,168,83,0.08);
 
   /* ── Venue brand colors ── */
-  --tradexyz:     #D4A853;
-  --tradexyz-dim: rgba(212,168,83,0.10);
+  --tradexyz:     #C4875A;
+  --tradexyz-dim: rgba(196,135,90,0.10);
   --bitget:       #00D180;
   --bitget-dim:   rgba(0,209,128,0.10);
   --gate:         #2B6AFF;
@@ -393,8 +393,8 @@ body {
   font-size: 12px; font-weight: 600;
   background: var(--muted); border: 1px solid var(--border);
 }
-.cov-chip.quad { background: rgba(240,185,11,0.12); border-color: rgba(240,185,11,0.25); color: #F0B90B; }
-.cov-chip.tri { background: rgba(212,168,83,0.12); border-color: rgba(212,168,83,0.25); color: #D4A853; }
+.cov-chip.quad { background: rgba(255,107,107,0.12); border-color: rgba(255,107,107,0.25); color: #FF6B6B; }
+.cov-chip.tri { background: rgba(139,143,232,0.12); border-color: rgba(139,143,232,0.25); color: #8B8FE8; }
 .cov-chip.dual { background: var(--accent-dim); border-color: rgba(74,144,217,0.2); color: var(--accent-bright); }
 
 .div-cards { display: flex; flex-wrap: wrap; gap: 10px; }
@@ -511,7 +511,7 @@ td:first-child { text-align: left; }
   padding: 2px 8px; border-radius: var(--radius-sm);
   font-size: 10px; font-weight: 700; letter-spacing: 0.3px;
 }
-.venue-badge-sm.tradexyz { background: var(--tradexyz-dim); color: var(--tradexyz); border: 1px solid rgba(212,168,83,0.2); }
+.venue-badge-sm.tradexyz { background: var(--tradexyz-dim); color: var(--tradexyz); border: 1px solid rgba(196,135,90,0.2); }
 .venue-badge-sm.bitget { background: var(--bitget-dim); color: var(--bitget); border: 1px solid rgba(0,209,128,0.2); }
 .venue-badge-sm.gate { background: var(--gate-dim); color: var(--gate); border: 1px solid rgba(43,106,255,0.2); }
 .venue-badge-sm.binance { background: var(--binance-dim); color: var(--binance); border: 1px solid rgba(240,185,11,0.2); }
@@ -980,7 +980,7 @@ input[type="checkbox"] {
 // ═══════════════════════════════════════════════════
 
 const VENUES = {
-  tradexyz: { name: 'trade.xyz', color: '#D4A853', fundingInterval: 1, makerFee: 0.0001, takerFee: 0.00035 },
+  tradexyz: { name: 'trade.xyz', color: '#C4875A', fundingInterval: 1, makerFee: 0.0001, takerFee: 0.00035 },
   bitget:   { name: 'Bitget',    color: '#00D180', fundingInterval: 8, makerFee: 0.0002, takerFee: 0.0006 },
   gate:     { name: 'Gate.io',   color: '#2B6AFF', fundingInterval: 8, makerFee: 0.00015, takerFee: 0.0005 },
   binance:  { name: 'Binance',   color: '#F0B90B', fundingInterval: 8, makerFee: 0.0002, takerFee: 0.0005 },
@@ -2307,14 +2307,14 @@ function renderCoverage() {
     <div class="section-title">Cross-Venue Coverage</div>
     <div class="section-subtitle">Assets available on multiple venues</div>
     <div class="cov-stats">
-      <div class="cov-stat"><div class="cs-value" style="color:var(--binance)">${quad.length}</div><div class="cs-label">4-Venue</div></div>
-      <div class="cov-stat"><div class="cs-value" style="color:#D4A853">${tri.length}</div><div class="cs-label">3-Venue</div></div>
+      <div class="cov-stat"><div class="cs-value" style="color:#FF6B6B">${quad.length}</div><div class="cs-label">4-Venue</div></div>
+      <div class="cov-stat"><div class="cs-value" style="color:#8B8FE8">${tri.length}</div><div class="cs-label">3-Venue</div></div>
       <div class="cov-stat"><div class="cs-value" style="color:var(--accent)">${dual.length}</div><div class="cs-label">2-Venue</div></div>
       <div class="cov-stat"><div class="cs-value">${single.length}</div><div class="cs-label">Single-venue</div></div>
       <div class="cov-stat"><div class="cs-value">${allCoins.length}</div><div class="cs-label">Total unique</div></div>
     </div>
-    ${quad.length ? `<div style="font-size:11px;color:var(--binance);margin-bottom:6px;font-weight:600">All 4 venues (${quad.length})</div><div class="cov-grid" style="margin-bottom:12px">${quadChips}</div>` : ''}
-    ${tri.length ? `<div style="font-size:11px;color:#D4A853;margin-bottom:6px;font-weight:600">3 venues (${tri.length})</div><div class="cov-grid" style="margin-bottom:12px">${triChips}</div>` : ''}
+    ${quad.length ? `<div style="font-size:11px;color:#FF6B6B;margin-bottom:6px;font-weight:600">All 4 venues (${quad.length})</div><div class="cov-grid" style="margin-bottom:12px">${quadChips}</div>` : ''}
+    ${tri.length ? `<div style="font-size:11px;color:#8B8FE8;margin-bottom:6px;font-weight:600">3 venues (${tri.length})</div><div class="cov-grid" style="margin-bottom:12px">${triChips}</div>` : ''}
     ${dual.length ? `<div style="font-size:11px;color:var(--accent);margin-bottom:6px;font-weight:600">2 venues (${dual.length})</div><div class="cov-grid">${dualChips}</div>` : ''}
     ${!quad.length && !tri.length && !dual.length ? '<div class="cov-grid"><span style="color:var(--foreground-dim)">None</span></div>' : ''}
   `;
