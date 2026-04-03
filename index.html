@@ -402,9 +402,16 @@ body {
   transition: border-color 0.12s;
 }
 .div-card:hover { border-color: var(--border-hover); }
-.dc-coin { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
-.dc-spread { font-size: 12px; margin-bottom: 6px; }
+.dc-coin { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
+.dc-net { font-size: 18px; font-weight: 700; position: relative; cursor: default; }
+.dc-net .dc-tip { display: none; position: absolute; left: 0; top: 100%; margin-top: 6px; background: var(--card); border: 1px solid var(--border-hover); border-radius: 8px; padding: 10px 14px; font-size: 11px; font-weight: 400; color: var(--foreground-sec); white-space: nowrap; z-index: 100; box-shadow: 0 8px 24px rgba(0,0,0,0.5); line-height: 1.7; }
+.dc-net:hover .dc-tip { display: block; }
 .dc-venues { font-size: 11px; color: var(--foreground-dim); }
+
+.th-info { position: relative; display: inline-flex; align-items: center; gap: 3px; }
+.th-info-icon { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; border-radius: 50%; border: 1px solid var(--foreground-dim); font-size: 9px; color: var(--foreground-dim); cursor: default; opacity: 0.5; font-style: italic; font-family: Georgia, serif; }
+.th-info-tip { display: none; position: absolute; right: 0; top: 100%; margin-top: 6px; background: var(--card); border: 1px solid var(--border-hover); border-radius: 8px; padding: 10px 14px; font-size: 11px; font-weight: 400; color: var(--foreground-sec); white-space: normal; width: 240px; z-index: 100; box-shadow: 0 8px 24px rgba(0,0,0,0.5); line-height: 1.6; text-transform: none; letter-spacing: 0; }
+.th-info-icon:hover + .th-info-tip { display: block; }
 
 /* ═══════════════════════════════════════════════════
    DATA TABLES
@@ -778,7 +785,7 @@ input[type="checkbox"] {
       </label>
       <input class="search-box" placeholder="Search asset..." oninput="venueTableSearch.tradexyz=this.value.toLowerCase();renderVenueTable('tradexyz')">
     </div>
-    <div class="info-bar"><span>trade.xyz (Hyperliquid HIP-3 DEX) · Funding settles every 1h</span><span>Auto-refresh: 30s</span></div>
+    <div class="info-bar"><span>trade.xyz (Hyperliquid HIP-3 DEX) · Funding settles every 1h · Maker 0.01% / Taker 0.035%</span><span>Auto-refresh: 30s</span></div>
     <div class="table-wrap">
       <table><thead><tr>
         <th style="text-align:left" data-sort="name" onclick="setVenueSort('tradexyz','name')">Asset <span class="arrow"></span></th>
@@ -788,6 +795,7 @@ input[type="checkbox"] {
         <th data-sort="volume" onclick="setVenueSort('tradexyz','volume')">24h Volume <span class="arrow">▼</span></th>
         <th data-sort="oi" onclick="setVenueSort('tradexyz','oi')">Open Interest <span class="arrow"></span></th>
         <th data-sort="funding" onclick="setVenueSort('tradexyz','funding')">Funding Rate <span class="arrow"></span></th>
+        <th data-sort="posRate" onclick="setVenueSort('tradexyz','posRate')"><span class="th-info">% Positive <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip">Percentage of funding periods with a positive rate in the selected time window. Values near 100% or near 0% indicate the rate direction is highly consistent — these contracts are more suitable for longer-term funding arbitrage positions.</span></span></th>
         <th style="cursor:default"><div style="display:flex;align-items:center;gap:6px;justify-content:flex-end"><span>Funding</span>
           <div class="spark-range-btns"><button class="sr-btn active" onclick="setSparkRange('tradexyz',24,this)">24h</button><button class="sr-btn" onclick="setSparkRange('tradexyz',72,this)">3d</button><button class="sr-btn" onclick="setSparkRange('tradexyz',168,this)">7d</button></div>
         </div></th>
@@ -809,7 +817,7 @@ input[type="checkbox"] {
       </label>
       <input class="search-box" placeholder="Search asset..." oninput="venueTableSearch.bitget=this.value.toLowerCase();renderVenueTable('bitget')">
     </div>
-    <div class="info-bar"><span>Bitget (USDT-FUTURES) · Funding settles every 8h</span><span>Auto-refresh: 30s</span></div>
+    <div class="info-bar"><span>Bitget (USDT-FUTURES) · Funding settles every 8h · Fees vary per contract (default Maker 0.02% / Taker 0.06%)</span><span>Auto-refresh: 30s</span></div>
     <div class="table-wrap">
       <table><thead><tr>
         <th style="text-align:left" data-sort="name" onclick="setVenueSort('bitget','name')">Asset <span class="arrow"></span></th>
@@ -819,6 +827,7 @@ input[type="checkbox"] {
         <th data-sort="volume" onclick="setVenueSort('bitget','volume')">24h Volume <span class="arrow">▼</span></th>
         <th data-sort="oi" onclick="setVenueSort('bitget','oi')">Open Interest <span class="arrow"></span></th>
         <th data-sort="funding" onclick="setVenueSort('bitget','funding')">Funding Rate <span class="arrow"></span></th>
+        <th data-sort="posRate" onclick="setVenueSort('bitget','posRate')"><span class="th-info">% Positive <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip">Percentage of funding periods with a positive rate in the selected time window. Values near 100% or near 0% indicate the rate direction is highly consistent — these contracts are more suitable for longer-term funding arbitrage positions.</span></span></th>
         <th style="cursor:default"><div style="display:flex;align-items:center;gap:6px;justify-content:flex-end"><span>Funding</span>
           <div class="spark-range-btns"><button class="sr-btn active" onclick="setSparkRange('bitget',24,this)">24h</button><button class="sr-btn" onclick="setSparkRange('bitget',72,this)">3d</button><button class="sr-btn" onclick="setSparkRange('bitget',168,this)">7d</button></div>
         </div></th>
@@ -839,7 +848,7 @@ input[type="checkbox"] {
       </label>
       <input class="search-box" placeholder="Search asset..." oninput="venueTableSearch.gate=this.value.toLowerCase();renderVenueTable('gate')">
     </div>
-    <div class="info-bar"><span>Gate.io (USDT Perpetual) · Funding settles every 8h</span><span>Auto-refresh: 30s</span></div>
+    <div class="info-bar"><span>Gate.io (USDT Perpetual) · Funding settles every 8h · Fees vary per contract (default Maker 0.015% / Taker 0.05%)</span><span>Auto-refresh: 30s</span></div>
     <div class="table-wrap">
       <table><thead><tr>
         <th style="text-align:left" data-sort="name" onclick="setVenueSort('gate','name')">Asset <span class="arrow"></span></th>
@@ -849,6 +858,7 @@ input[type="checkbox"] {
         <th data-sort="volume" onclick="setVenueSort('gate','volume')">24h Volume <span class="arrow">▼</span></th>
         <th data-sort="oi" onclick="setVenueSort('gate','oi')">Open Interest <span class="arrow"></span></th>
         <th data-sort="funding" onclick="setVenueSort('gate','funding')">Funding Rate <span class="arrow"></span></th>
+        <th data-sort="posRate" onclick="setVenueSort('gate','posRate')"><span class="th-info">% Positive <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip">Percentage of funding periods with a positive rate in the selected time window. Values near 100% or near 0% indicate the rate direction is highly consistent — these contracts are more suitable for longer-term funding arbitrage positions.</span></span></th>
         <th style="cursor:default"><div style="display:flex;align-items:center;gap:6px;justify-content:flex-end"><span>Funding</span>
           <div class="spark-range-btns"><button class="sr-btn active" onclick="setSparkRange('gate',24,this)">24h</button><button class="sr-btn" onclick="setSparkRange('gate',72,this)">3d</button><button class="sr-btn" onclick="setSparkRange('gate',168,this)">7d</button></div>
         </div></th>
@@ -931,9 +941,9 @@ input[type="checkbox"] {
 // ═══════════════════════════════════════════════════
 
 const VENUES = {
-  tradexyz: { name: 'trade.xyz', color: '#D4A853', fundingInterval: 1 },
-  bitget:   { name: 'Bitget',    color: '#00D180', fundingInterval: 8 },
-  gate:     { name: 'Gate.io',   color: '#2B6AFF', fundingInterval: 8 },
+  tradexyz: { name: 'trade.xyz', color: '#D4A853', fundingInterval: 1, makerFee: 0.0001, takerFee: 0.00035 },
+  bitget:   { name: 'Bitget',    color: '#00D180', fundingInterval: 8, makerFee: 0.0002, takerFee: 0.0006 },
+  gate:     { name: 'Gate.io',   color: '#2B6AFF', fundingInterval: 8, makerFee: 0.00015, takerFee: 0.0005 },
 };
 
 const CAT_COLORS = { index:'#3B82F6', equity:'#8B8FE8', commodity:'#D4A853', etf:'#3EC6D9', fx:'#D98CAF', other:'#5C6170' };
@@ -1006,6 +1016,7 @@ let assetSort = { key: 'volume', dir: -1 };
 
 // Sparkline state
 let sparkHours = { tradexyz: 24, bitget: 24, gate: 24 };
+let divHoldDays = 0; // 0 = no fee deduction
 let fundingCache = {}; // key: "venue:coin" → { hours, data }
 
 // ═══════════════════════════════════════════════
@@ -1114,6 +1125,8 @@ async function fetchTradeXyz() {
     const oi = parseFloat(c.openInterest) || 0;
     const rawFunding = parseFloat(c.funding);
     const funding = isNaN(rawFunding) ? null : rawFunding;
+    const rawPremium = parseFloat(c.premium);
+    const predictedFunding = isNaN(rawPremium) ? null : rawPremium;
     const change = prevDayPx ? ((markPx - prevDayPx) / prevDayPx) * 100 : 0;
     const isActive = volume > 0 || oi > 0 || (funding !== null && funding !== 0);
 
@@ -1123,7 +1136,8 @@ async function fetchTradeXyz() {
 
     assets.push({
       coin, fullName, category: cat, venue: 'tradexyz',
-      markPx, indexPx: oraclePx, change, volume, oi, funding, isActive
+      markPx, indexPx: oraclePx, change, volume, oi, funding, predictedFunding, isActive,
+      makerFee: VENUES.tradexyz.makerFee, takerFee: VENUES.tradexyz.takerFee
     });
   }
 
@@ -1207,27 +1221,43 @@ async function fetchBitget() {
     if (cat === 'other') console.warn(`[RWA] Uncategorized Bitget asset: ${base} (${symbol})`);
     const fullName = KNOWN_NAMES[base] || (contract.symbolName || base);
 
+    const cMaker = parseFloat(contract.makerFeeRate);
+    const cTaker = parseFloat(contract.takerFeeRate);
+    const makerFee = isNaN(cMaker) ? VENUES.bitget.makerFee : cMaker;
+    const takerFee = isNaN(cTaker) ? VENUES.bitget.takerFee : cTaker;
+
     const idx = assets.length;
     assets.push({
       coin: base, symbol, fullName, category: cat, venue: 'bitget',
-      markPx, indexPx, change: change24h * 100, volume, oi, funding, isActive: false
+      markPx, indexPx, change: change24h * 100, volume, oi, funding, predictedFunding: null, isActive: false,
+      makerFee, takerFee
     });
 
     if (funding === null) needFunding.push({ symbol, idx });
   }
 
-  // Fetch individual funding rates for assets where tickers had no data
-  if (needFunding.length > 0) {
-    logLoad(`Bitget: fetching funding rates for ${needFunding.length} assets...`);
-    await Promise.all(needFunding.map(async ({ symbol, idx }) => {
+  // Fetch individual funding rates + predicted rates for all assets
+  {
+    const fetchTargets = needFunding.length > 0 ? needFunding : assets.map((a, idx) => ({ symbol: a.symbol, idx }));
+    logLoad(`Bitget: fetching funding details for ${fetchTargets.length} assets...`);
+    const tasks = fetchTargets.map(({ symbol, idx }) => async () => {
       try {
         const data = await apiGet(`/api/v2/mix/market/current-fund-rate?symbol=${symbol}&productType=${PRODUCT_TYPE}`);
-        if (data && data.fundingRate !== undefined && data.fundingRate !== null && data.fundingRate !== '') {
-          const r = parseFloat(data.fundingRate);
-          if (!isNaN(r)) assets[idx].funding = r;
+        if (data) {
+          if (assets[idx].funding === null && data.fundingRate !== undefined && data.fundingRate !== null && data.fundingRate !== '') {
+            const r = parseFloat(data.fundingRate);
+            if (!isNaN(r)) assets[idx].funding = r;
+          }
+          // Bitget doesn't provide a predicted rate directly, but we can store the current as reference
+          // The fundingRate from current-fund-rate is the upcoming settlement rate
+          if (data.fundingRate !== undefined) {
+            const pr = parseFloat(data.fundingRate);
+            if (!isNaN(pr)) assets[idx].predictedFunding = pr;
+          }
         }
       } catch (e) { /* funding stays null = no data */ }
-    }));
+    });
+    await batchFetch(tasks, 5);
   }
 
   // Update isActive after all funding rates are set
@@ -1251,10 +1281,28 @@ const GATE_API_BASE = location.hostname === 'localhost' || location.hostname ===
 async function fetchGate() {
   logLoad('Fetching Gate.io data...');
 
-  // Fetch all USDT futures tickers
-  const res = await fetch(`${GATE_API_BASE}/tickers`);
-  if (!res.ok) throw new Error(`Gate HTTP ${res.status}`);
-  const tickers = await res.json();
+  // Fetch tickers + contracts in parallel for fee data
+  const [tickersRes, contractsRes] = await Promise.all([
+    fetch(`${GATE_API_BASE}/tickers`),
+    fetch(`${GATE_API_BASE}/contracts`).catch(() => null)
+  ]);
+  if (!tickersRes.ok) throw new Error(`Gate HTTP ${tickersRes.status}`);
+  const tickers = await tickersRes.json();
+
+  // Build fee map from contracts
+  const feeMap = {};
+  if (contractsRes && contractsRes.ok) {
+    try {
+      const contracts = await contractsRes.json();
+      contracts.forEach(c => {
+        feeMap[c.name] = {
+          maker: parseFloat(c.maker_fee_rate) || VENUES.gate.makerFee,
+          taker: parseFloat(c.taker_fee_rate) || VENUES.gate.takerFee
+        };
+      });
+      logLoad(`Gate.io: fee data for ${Object.keys(feeMap).length} contracts`);
+    } catch(e) { /* use defaults */ }
+  }
 
   const knownKeys = Object.keys(KNOWN_CATEGORIES);
   const assets = [];
@@ -1276,15 +1324,19 @@ async function fetchGate() {
 
     const rawFunding = parseFloat(t.funding_rate);
     const funding = isNaN(rawFunding) ? null : rawFunding;
+    const rawIndicative = parseFloat(t.funding_rate_indicative);
+    const predictedFunding = isNaN(rawIndicative) ? null : rawIndicative;
 
     const cat = KNOWN_CATEGORIES[base] || 'other';
     if (cat === 'other') console.warn(`[RWA] Uncategorized Gate asset: ${base}`);
     const fullName = KNOWN_NAMES[base] || base;
     const isActive = volume > 0 || oiUsd > 0 || (funding !== null && funding !== 0);
 
+    const cf = feeMap[contract] || {};
     assets.push({
       coin: base, symbol: contract, fullName, category: cat, venue: 'gate',
-      markPx: markPx || lastPx, indexPx, change, volume, oi: oiUsd, funding, isActive
+      markPx: markPx || lastPx, indexPx, change, volume, oi: oiUsd, funding, predictedFunding, isActive,
+      makerFee: cf.maker || VENUES.gate.makerFee, takerFee: cf.taker || VENUES.gate.takerFee
     });
   }
 
@@ -1398,10 +1450,19 @@ async function loadSparkline(venue, asset) {
     const t1 = parseInt(data.data[1].fundingTime || data.data[1].settleTime || data.data[1].time || 0);
     if (t0 > t1) rates.reverse();
   }
-  cell.innerHTML = renderSparkSVG(rates);
+  cell.innerHTML = renderSparkSVG(rates, asset.predictedFunding);
+
+  // Update % Positive cell
+  const posCell = document.getElementById(`pos_${venue}_${asset.coin}`);
+  if (posCell && rates.length > 0) {
+    const posCount = rates.filter(r => r > 0).length;
+    const pct = Math.round((posCount / rates.length) * 100);
+    const col = pct >= 70 ? 'var(--positive)' : pct >= 40 ? 'var(--accent)' : pct > 0 ? 'var(--foreground-sec)' : 'var(--negative)';
+    posCell.innerHTML = `<span style="color:${col};font-weight:600;font-size:12px">${pct}%</span><span style="display:block;font-size:10px;color:var(--foreground-dim)">${posCount}/${rates.length}</span>`;
+  }
 }
 
-function renderSparkSVG(rates) {
+function renderSparkSVG(rates, predictedRate) {
   const w = 120, h = 32, pad = 2;
   const min = Math.min(...rates, 0);
   const max = Math.max(...rates, 0);
@@ -1442,7 +1503,19 @@ function renderSparkSVG(rates) {
     dots += `<circle cx="${c.x}" cy="${c.y}" r="1.5" fill="${c.rate >= 0 ? '#0ecb81' : '#f6465d'}"/>`;
   });
 
-  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${fills}${zeroLine}${segments}${dots}</svg>`;
+  // Dashed prediction line extending from last point
+  let predLine = '';
+  if (predictedRate !== null && predictedRate !== undefined && coords.length > 0) {
+    const last = coords[coords.length - 1];
+    const predY = parseFloat((h - pad - ((predictedRate - min) / range) * (h - pad * 2)).toFixed(1));
+    const clampedY = Math.max(pad, Math.min(h - pad, predY));
+    const predX = w + 15;
+    const predCol = predictedRate >= 0 ? '#0ecb81' : '#f6465d';
+    predLine = `<line x1="${last.x}" y1="${last.y}" x2="${predX}" y2="${clampedY}" stroke="${predCol}" stroke-width="1.2" stroke-dasharray="3,2" opacity="0.7"/>`;
+    predLine += `<circle cx="${predX}" cy="${clampedY}" r="2" fill="${predCol}" opacity="0.5" stroke="${predCol}" stroke-width="0.5"/>`;
+  }
+
+  return `<svg width="${w + 18}" height="${h}" viewBox="0 0 ${w + 18} ${h}">${fills}${zeroLine}${segments}${dots}${predLine}</svg>`;
 }
 
 // ═══════════════════════════════════════════════
@@ -1686,6 +1759,17 @@ function renderModalContent() {
       <div class="modal-metric">
         <div class="mm-label">Premium</div>
         <div class="mm-value" style="color:${premiumColor}">${premium >= 0 ? '+' : ''}${premium.toFixed(4)}%</div>
+      </div>
+      ${d.predictedFunding !== null ? (() => {
+        const pAnn = annualize(d.predictedFunding, v);
+        const pAnnPct = pAnn !== null ? (pAnn*100).toFixed(2) : 'N/A';
+        const pColor = d.predictedFunding > 0 ? 'var(--green)' : d.predictedFunding < 0 ? 'var(--red)' : 'var(--text-muted)';
+        const arrow = d.predictedFunding > (d.funding||0) ? '▲' : d.predictedFunding < (d.funding||0) ? '▼' : '▶';
+        return `<div class="modal-metric"><div class="mm-label">Predicted Next ${interval}H</div><div class="mm-value" style="color:${pColor}">${arrow} ${fmtFunding(d.predictedFunding)}</div><div class="mm-sub">${pAnnPct === 'N/A' ? '' : pAnnPct + '% APR'}</div></div>`;
+      })() : ''}
+      <div class="modal-metric">
+        <div class="mm-label">Maker / Taker Fee</div>
+        <div class="mm-value" style="font-size:13px">${(d.makerFee*100).toFixed(3)}% / ${(d.takerFee*100).toFixed(3)}%</div>
       </div>
     </div>
 
@@ -2069,6 +2153,13 @@ function renderCoverage() {
   `;
 }
 
+function setDivHold(days, el) {
+  divHoldDays = days;
+  document.querySelectorAll('#divSection .sr-btn').forEach(b => b.classList.remove('active'));
+  if (el) el.classList.add('active');
+  renderDivergence();
+}
+
 function renderDivergence() {
   const section = document.getElementById('divSection');
   const grouped = {};
@@ -2079,18 +2170,34 @@ function renderDivergence() {
   Object.values(grouped).forEach(a => {
     const vKeys = Object.keys(a.venues);
     if (vKeys.length < 2) return;
-    const rates = vKeys.map(v => ({venue:v, ann:annualize(a.venues[v].funding,v)})).filter(r => r.ann !== null);
+    const rates = vKeys.map(v => ({venue:v, ann:annualize(a.venues[v].funding,v), asset: a.venues[v]})).filter(r => r.ann !== null);
     // enumerate all positive vs negative pairs
     for (const p of rates) {
       for (const n of rates) {
         if (p.venue === n.venue) continue;
         if (p.ann <= 0 || n.ann >= 0) continue;
         if (p.ann < MIN_ANN || Math.abs(n.ann) < MIN_ANN) continue;
-        divergences.push({coin:a.coin, fullName:a.fullName, spread:p.ann - n.ann, posVenue:p, negVenue:n});
+        const grossSpread = p.ann - n.ann;
+        // Per-contract taker fees (open+close = ×2)
+        const feeP = (p.asset.takerFee || VENUES[p.venue].takerFee) * 2;
+        const feeN = (n.asset.takerFee || VENUES[n.venue].takerFee) * 2;
+        const feePMaker = p.asset.makerFee !== undefined ? p.asset.makerFee : VENUES[p.venue].makerFee;
+        const feeNMaker = n.asset.makerFee !== undefined ? n.asset.makerFee : VENUES[n.venue].makerFee;
+        const feePTaker = p.asset.takerFee || VENUES[p.venue].takerFee;
+        const feeNTaker = n.asset.takerFee || VENUES[n.venue].takerFee;
+        let netSpread, feeAnnualized;
+        if (divHoldDays <= 0) {
+          netSpread = grossSpread;
+          feeAnnualized = 0;
+        } else {
+          feeAnnualized = (feeP + feeN) * (365 / divHoldDays);
+          netSpread = grossSpread - feeAnnualized;
+        }
+        divergences.push({coin:a.coin, fullName:a.fullName, spread:grossSpread, netSpread, feeP, feeN, feePMaker, feeNMaker, feePTaker, feeNTaker, feeAnnualized, posVenue:p, negVenue:n});
       }
     }
   });
-  divergences.sort((a,b) => b.spread-a.spread);
+  divergences.sort((a,b) => b.netSpread-a.netSpread);
 
   let html = '';
   if (divergences.length === 0) {
@@ -2098,11 +2205,39 @@ function renderDivergence() {
   } else {
     html = divergences.map(d => {
       const sp = (d.spread*100).toFixed(2);
-      const sc = d.spread > 0.10 ? 'var(--positive)' : d.spread > 0.05 ? 'var(--accent)' : 'var(--foreground-sec)';
-      return `<div class="div-card"><div class="dc-coin">${d.coin} <span style="font-size:11px;font-weight:400;color:var(--foreground-dim)">${d.fullName}</span></div><div class="dc-spread" style="color:${sc};font-weight:700">Spread: ${sp}% APR</div><div class="dc-venues"><span class="venue-badge-sm ${d.posVenue.venue}" style="margin-right:4px">${VENUES[d.posVenue.venue].name}</span><span style="color:var(--positive)">+${(d.posVenue.ann*100).toFixed(2)}%</span> &nbsp;vs&nbsp; <span class="venue-badge-sm ${d.negVenue.venue}" style="margin-right:4px">${VENUES[d.negVenue.venue].name}</span><span style="color:var(--negative)">${(d.negVenue.ann*100).toFixed(2)}%</span></div></div>`;
+      const net = (d.netSpread*100).toFixed(2);
+      const isGross = divHoldDays <= 0;
+      const nc = isGross ? (d.spread > 0.10 ? 'var(--positive)' : d.spread > 0.05 ? 'var(--accent)' : 'var(--foreground-sec)') : (d.netSpread > 0.05 ? 'var(--positive)' : d.netSpread > 0 ? 'var(--accent)' : 'var(--negative)');
+      const pName = VENUES[d.posVenue.venue].name;
+      const nName = VENUES[d.negVenue.venue].name;
+      // Per-contract fees for tooltip
+      const pMk = (d.feePMaker*100).toFixed(3);
+      const pTk = (d.feePTaker*100).toFixed(3);
+      const nMk = (d.feeNMaker*100).toFixed(3);
+      const nTk = (d.feeNTaker*100).toFixed(3);
+      const pRT = (d.feeP*100).toFixed(3);
+      const nRT = (d.feeN*100).toFixed(3);
+      const feeBoth = ((d.feeP + d.feeN)*100).toFixed(3);
+      const feeAnn = (d.feeAnnualized * 100).toFixed(2);
+      const holdLabel = divHoldDays < 1 ? '8h' : divHoldDays + 'd';
+      const tipContent = isGross
+        ? `<div style="color:var(--foreground);font-weight:600;margin-bottom:4px">Gross APR</div><div>No fee deduction applied.</div><div>Select a hold period to see net returns.</div>`
+        : `<div style="color:var(--foreground);font-weight:600;margin-bottom:4px">Net APR Breakdown</div><div>Gross spread: <span style="color:var(--foreground)">${sp}%</span> APR</div><div style="margin-top:4px">${pName} <span style="color:var(--foreground-dim)">(m:${pMk}% / t:${pTk}%)</span></div><div>&nbsp;&nbsp;round-trip: <span style="color:var(--foreground)">-${pRT}%</span></div><div style="margin-top:2px">${nName} <span style="color:var(--foreground-dim)">(m:${nMk}% / t:${nTk}%)</span></div><div>&nbsp;&nbsp;round-trip: <span style="color:var(--foreground)">-${nRT}%</span></div><div style="margin-top:4px">Total: <span style="color:var(--foreground)">${feeBoth}%</span> → <span style="color:var(--foreground)">${feeAnn}%</span> ann. (${holdLabel})</div><div style="border-top:1px solid var(--border);margin-top:4px;padding-top:4px;color:var(--foreground);font-weight:600">Net: ${net}% APR</div>`;
+      return `<div class="div-card"><div class="dc-coin">${d.coin} <span style="font-size:11px;font-weight:400;color:var(--foreground-dim)">${d.fullName}</span></div><div class="dc-net" style="color:${nc};margin-bottom:6px">${isGross ? sp : net}% <span style="font-size:11px;font-weight:500">APR</span><div class="dc-tip">${tipContent}</div></div><div class="dc-venues"><span class="venue-badge-sm ${d.posVenue.venue}" style="margin-right:4px">${pName}</span><span style="color:var(--positive)">+${(d.posVenue.ann*100).toFixed(2)}%</span> &nbsp;vs&nbsp; <span class="venue-badge-sm ${d.negVenue.venue}" style="margin-right:4px">${nName}</span><span style="color:var(--negative)">${(d.negVenue.ann*100).toFixed(2)}%</span></div></div>`;
     }).join('');
   }
-  section.innerHTML = `<div class="section-title">Funding Rate Divergence</div><div class="section-subtitle">Assets with opposing funding rates across venues (both &gt; 1.5% APR annualized)</div><div class="div-cards">${html}</div>`;
+  const holdOptions = [
+    { val: 0, label: 'No Fees' },
+    { val: 1/3, label: '8h' },
+    { val: 1, label: '1d' },
+    { val: 5, label: '5d' },
+    { val: 15, label: '15d' },
+  ];
+  const holdBtns = holdOptions.map(o => `<button class="sr-btn ${divHoldDays === o.val ? 'active' : ''}" onclick="setDivHold(${o.val},this)">${o.label}</button>`).join('');
+  const subtitleText = divHoldDays <= 0
+    ? 'Gross APR · fees not deducted'
+    : `Net APR · entry+exit fees amortized over ${divHoldDays < 1 ? '8h' : divHoldDays + 'd'} position`;
+  section.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><div><div class="section-title">Funding Rate Divergence</div><div class="section-subtitle">${subtitleText}</div></div><div class="spark-range-btns" style="margin:0">${holdBtns}</div></div><div class="div-cards" style="margin-top:12px">${html}</div>`;
 }
 
 // ═══════════════════════════════════════════════════
@@ -2168,6 +2303,13 @@ function renderVenueTable(venue) {
       case 'volume':  va = a.volume; vb = b.volume; break;
       case 'oi':      va = a.oi; vb = b.oi; break;
       case 'funding': va = a.funding===null?-1:Math.abs(a.funding); vb = b.funding===null?-1:Math.abs(b.funding); break;
+      case 'posRate': {
+        const ca = fundingCache[`${venue}:${a.coin}`];
+        const cb = fundingCache[`${venue}:${b.coin}`];
+        const ra = ca && ca.data ? ca.data.map(d=>parseFloat(d.fundingRate||d.fundRate||0)).filter(r=>r>0).length / ca.data.length : -1;
+        const rb = cb && cb.data ? cb.data.map(d=>parseFloat(d.fundingRate||d.fundRate||0)).filter(r=>r>0).length / cb.data.length : -1;
+        va = ra; vb = rb; break;
+      }
       default:        va = a.volume; vb = b.volume;
     }
     return sortDir * (va - vb);
@@ -2200,6 +2342,7 @@ function renderVenueTable(venue) {
       <td class="mono">${fmtVolume(d.volume)}</td>
       <td class="mono">${fmtVolume(d.oi)}</td>
       <td><span class="funding-badge ${fundingClass(d.funding, venue)}">${fmtFunding(d.funding)}</span><span style="display:block;font-size:10px;color:var(--foreground-dim);margin-top:2px">${annPct === 'N/A' ? 'N/A' : annPct + '% APR'}</span></td>
+      <td id="pos_${venue}_${d.coin}" style="text-align:center"><span style="color:var(--foreground-dim);font-size:11px">—</span></td>
       <td id="${sparkId}"><span style="color:var(--foreground-dim);font-size:11px">—</span></td>
     `;
     tbody.appendChild(tr);
