@@ -62,6 +62,8 @@
   --gate-dim:     rgba(43,106,255,0.10);
   --binance:      #F0B90B;
   --binance-dim:  rgba(240,185,11,0.10);
+  --kraken:       #7D4CDB;
+  --kraken-dim:   rgba(125,76,219,0.10);
 
   /* ── Radius ── */
   --radius-sm: 6px;
@@ -183,6 +185,7 @@ body {
 .venue-dot.bitget { background: var(--bitget); }
 .venue-dot.gate { background: var(--gate); }
 .venue-dot.binance { background: var(--binance); }
+.venue-dot.kraken { background: var(--kraken); }
 
 /* ═══════════════════════════════════════════════════
    FILTER BAR
@@ -229,12 +232,140 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════
+   TOP-LEVEL PAGE TABS (Perpetuals / Spot / Cross-Analysis)
+   ═══════════════════════════════════════════════════ */
+.top-nav { display:flex; gap:0; padding:0 24px; background:var(--card); border-bottom:1px solid var(--border); }
+.top-tab { position:relative; padding:12px 24px; font-size:14px; font-weight:700; color:var(--foreground-dim); cursor:pointer; user-select:none; transition:color .15s; letter-spacing:0.01em; }
+.top-tab:hover { color:var(--foreground-sec); }
+.top-tab.active { color:var(--foreground); }
+.top-tab::after { content:''; position:absolute; bottom:0; left:12px; right:12px; height:2.5px; border-radius:2px; transform:scaleX(0); transition:transform .2s; }
+.top-tab.active::after { transform:scaleX(1); }
+.top-tab[data-p="perps"]::after { background:var(--accent); }
+.top-tab[data-p="spot"]::after { background:var(--positive); }
+.top-tab[data-p="cross"]::after { background:var(--gold); }
+.top-tab .t-icon { margin-right:7px; display:inline-flex; vertical-align:-3px; }
+.ic { display:inline-block; vertical-align:-0.18em; stroke:currentColor; stroke-width:1.75; fill:none; stroke-linecap:round; stroke-linejoin:round; }
+.ic-16 { width:16px; height:16px; }
+.ic-18 { width:18px; height:18px; vertical-align:-0.22em; }
+.section-title .ic { margin-right:8px; color:var(--foreground-dim); vertical-align:-0.24em; }
+.page-container { display:none; }
+.page-container.active { display:block; }
+
+/* ═══════════════════════════════════════════════════
    VIEW CONTAINERS
    ═══════════════════════════════════════════════════ */
 .view-container { display: none; }
 .view-container.active { display: block; }
 .sub-view { display: none; }
 .sub-view.active { display: block; }
+
+/* ═══════════════════════════════════════════════════
+   SPOT PAGE STYLES
+   ═══════════════════════════════════════════════════ */
+.spot-sub-nav { display:flex; gap:0; padding:0 24px; background:var(--background-alt); border-bottom:1px solid var(--border); }
+.spot-sub-tab { position:relative; padding:9px 18px; font-size:12px; font-weight:600; color:var(--foreground-dim); cursor:pointer; display:flex; align-items:center; gap:5px; transition:color .15s; }
+.spot-sub-tab:hover { color:var(--foreground-sec); }
+.spot-sub-tab.active { color:var(--foreground); background:var(--card); }
+.spot-sub-tab::after { content:''; position:absolute; bottom:0; left:8px; right:8px; height:1.5px; border-radius:1px; opacity:0; transition:opacity .15s; }
+.spot-sub-tab.active::after { opacity:0.6; }
+.spot-cnt { font-size:10px; padding:1px 6px; border-radius:99px; background:var(--muted); color:var(--foreground-dim); margin-left:2px; }
+
+/* Spot KPI row */
+.spot-kpi-row { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:16px; }
+.spot-kpi { background:var(--background-alt); border:1px solid var(--border); border-radius:var(--radius); padding:14px 16px; }
+.spot-kpi-label { font-size:11px; font-weight:600; color:var(--foreground-dim); text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px; }
+.spot-kpi-val { font-size:22px; font-weight:700; font-family:'JetBrains Mono',monospace; }
+.spot-kpi-sub { font-size:11px; color:var(--foreground-dim); margin-top:2px; }
+
+/* Spot venue cards */
+.spot-venue-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:16px; }
+.spot-vc { background:var(--background-alt); border:1px solid var(--border); border-radius:var(--radius); padding:16px; }
+.spot-vc-head { display:flex; align-items:baseline; gap:8px; margin-bottom:12px; }
+.spot-vc-name { font-size:13px; font-weight:700; }
+.spot-vc-pairs { font-family:'JetBrains Mono',monospace; font-size:18px; font-weight:700; color:var(--foreground); letter-spacing:-0.01em; margin-left:auto; }
+.spot-vc-pairs::after { content:' pairs'; font-family:Inter,sans-serif; font-size:10px; font-weight:500; color:var(--foreground-dim); margin-left:4px; letter-spacing:0.05em; text-transform:uppercase; }
+.arb-view-more { background:transparent; border:1px solid var(--border); color:var(--foreground-sec); padding:8px 20px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; transition:all .15s; font-family:Inter,sans-serif; }
+.arb-view-more:hover { border-color:var(--accent); color:var(--accent); background:rgba(90,155,255,0.05); }
+.op-col { color:var(--foreground-dim) !important; font-size:13px !important; font-weight:400 !important; padding:0 4px !important; width:14px; text-align:center !important; cursor:default !important; }
+th.op-col:hover { color:var(--foreground-dim) !important; }
+.coming-soon { display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:80px 24px; border:1px dashed var(--border); border-radius:var(--radius-lg); background:var(--background-alt); }
+.coming-soon-title { font-size:18px; font-weight:700; color:var(--foreground-sec); letter-spacing:0.02em; margin-bottom:8px; }
+.coming-soon-sub { font-size:12px; color:var(--foreground-dim); max-width:520px; line-height:1.6; }
+.spot-vc-row { display:flex; justify-content:space-between; padding:4px 0; font-size:12px; }
+.spot-vc-row-label { color:var(--foreground-dim); }
+.spot-vc-row-val { font-family:'JetBrains Mono',monospace; font-weight:600; }
+.spot-vc-divider { height:1px; background:var(--border); margin:8px 0; }
+.spot-vc-rt-note { font-size:10px; color:var(--foreground-dim); text-align:right; margin-top:2px; font-style:italic; }
+.spot-fee-src { font-size:9px; padding:1px 5px; border-radius:3px; font-weight:600; letter-spacing:.03em; margin-left:4px; vertical-align:middle; }
+.spot-fee-src.default { background:rgba(136,144,160,0.12); color:var(--foreground-muted); }
+.spot-fee-src.api { background:var(--positive-dim); color:var(--positive); }
+
+/* Spot category bar (in venue cards) */
+.spot-cb-track { display:flex; height:6px; border-radius:3px; overflow:hidden; gap:2px; margin-top:10px; }
+.spot-cb-seg { border-radius:2px; transition:flex .3s; }
+.spot-cb-legend { display:flex; gap:10px; margin-top:6px; flex-wrap:wrap; }
+.spot-cb-legend span { display:flex; align-items:center; gap:4px; font-size:10px; color:var(--foreground-dim); font-weight:500; }
+.spot-cb-legend i { display:inline-block; width:6px; height:6px; border-radius:2px; font-style:normal; }
+
+/* Spot All Assets table */
+.spot-table { width:100%; min-width:1080px; border-collapse:collapse; }
+.spot-table thead th { padding:8px 10px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; color:var(--foreground-dim); text-align:right; border-bottom:1px solid var(--border); white-space:nowrap; }
+.spot-table thead th:nth-child(1), .spot-table thead th:nth-child(2) { text-align:left; }
+.spot-table tbody td { padding:10px 10px; font-size:13px; text-align:right; border-bottom:1px solid rgba(46,50,69,0.4); font-family:'JetBrains Mono',monospace; font-weight:500; }
+.spot-table tbody td:first-child, .spot-table tbody td:nth-child(2) { text-align:left; font-family:'Inter',sans-serif; }
+
+.spot-row-parent { cursor:pointer; transition:background .15s; }
+.spot-row-parent:hover { background:var(--card-hover); }
+.spot-row-parent td:first-child { font-size:12px; color:var(--foreground-dim); text-align:center; }
+
+.spot-row-mid { background:var(--background-alt); cursor:pointer; transition:background .15s; position:relative; }
+.spot-row-mid:hover { background:var(--card-hover); }
+.spot-row-mid td:first-child { border:none; text-align:center; font-size:11px; color:var(--foreground-dim); }
+.spot-row-mid.hidden-row { display:none; }
+.spot-row-mid.expanded .mid-data { visibility:hidden; }
+.spot-row-mid.expanded { background:var(--background-alt); }
+.spot-row-mid.expanded td { border-bottom:2px solid transparent; border-image:linear-gradient(90deg,var(--accent) 0%,rgba(74,144,217,0.15) 30%,rgba(0,209,128,0.15) 70%,var(--positive) 100%) 1; }
+
+.spot-row-child { background:var(--background-alt); }
+.spot-row-child:hover { background:var(--muted); }
+.spot-row-child td:first-child { border:none; }
+.spot-row-child.hidden-row { display:none; }
+
+/* Issuer & category badges */
+.issuer-badge { display:inline-flex; align-items:center; padding:2px 8px; border-radius:5px; font-size:11px; font-weight:600; font-family:'Inter',sans-serif; border:1px solid; }
+.cat-chip { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; }
+.cat-dot-s { width:6px; height:6px; border-radius:2px; }
+.underlying-text { font-size:12px; color:var(--foreground-sec); font-family:'Inter',sans-serif; font-weight:500; }
+.perp-count-s { font-family:'JetBrains Mono',monospace; font-weight:600; font-size:13px; cursor:default; }
+.perp-tooltip-s { position:relative; display:inline-block; }
+.perp-tooltip-s .perp-tip-s { visibility:hidden; position:absolute; bottom:125%; left:50%; transform:translateX(-50%); background:var(--card); border:1px solid var(--border); border-radius:6px; padding:6px 10px; font-size:11px; white-space:nowrap; z-index:50; box-shadow:0 4px 12px rgba(0,0,0,0.3); color:var(--foreground-sec); font-family:'Inter',sans-serif; font-weight:500; display:flex; gap:6px; align-items:center; }
+.perp-tooltip-s:hover .perp-tip-s { visibility:visible; }
+.spot-cat-filter { padding:4px 12px; border-radius:99px; font-size:11px; font-weight:600; cursor:pointer; border:1px solid var(--border); background:transparent; color:var(--foreground-dim); transition:all .15s; }
+.spot-cat-filter:hover { border-color:var(--border-hover); color:var(--foreground-sec); }
+.spot-cat-filter.active { color:var(--foreground); background:var(--muted); }
+
+/* Spot venue table (per-exchange) */
+.spot-perp-sel { display:flex; align-items:center; gap:6px; }
+.spot-perp-sel label { font-size:11px; font-weight:600; color:var(--foreground-dim); text-transform:uppercase; letter-spacing:.04em; }
+.spot-perp-sel select { padding:4px 10px; border-radius:6px; background:var(--muted); border:1px solid var(--border); color:var(--foreground); font-size:12px; font-family:'Inter',sans-serif; cursor:pointer; outline:none; }
+.spot-perp-sel select:focus { border-color:var(--accent); }
+.hold-pills { display:inline-flex; background:var(--muted); border:1px solid var(--border); border-radius:6px; padding:2px; gap:2px; }
+.hold-pills .hold-pill { border:none; background:transparent; color:var(--foreground-dim); font-size:11px; font-weight:600; font-family:'Inter',sans-serif; padding:4px 10px; border-radius:4px; cursor:pointer; transition:background .12s, color .12s; }
+.hold-pills .hold-pill:hover { color:var(--foreground-sec); }
+.hold-pills .hold-pill.active { background:rgba(90,155,255,0.15); color:var(--accent); }
+.spot-arb { display:inline-flex; padding:2px 8px; border-radius:99px; font-size:11px; font-weight:600; }
+.spot-arb.g { background:var(--positive-dim); color:var(--positive); }
+.spot-arb.m { background:var(--gold-dim); color:var(--gold); }
+.spot-arb.l { background:rgba(136,144,160,0.08); color:var(--foreground-muted); }
+
+/* Spot placeholder */
+.spot-placeholder { padding:30px 20px; text-align:center; color:var(--foreground-dim); font-size:12px; border:1px dashed var(--border); border-radius:var(--radius); margin-top:12px; line-height:1.7; }
+
+@media(max-width:1280px) { .spot-venue-grid { grid-template-columns:repeat(2,1fr); } }
+@media(max-width:900px) {
+  .spot-kpi-row { grid-template-columns:repeat(2,1fr); }
+  .spot-venue-grid { grid-template-columns:1fr; }
+}
 
 /* ═══════════════════════════════════════════════════
    KPI STRIP
@@ -414,8 +545,36 @@ body {
 
 .th-info { position: relative; display: inline-flex; align-items: center; gap: 3px; }
 .th-info-icon { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; border-radius: 50%; border: 1px solid var(--foreground-dim); font-size: 9px; color: var(--foreground-dim); cursor: default; opacity: 0.5; font-style: italic; font-family: Georgia, serif; }
-.th-info-tip { display: none; position: absolute; right: 0; top: 100%; margin-top: 6px; background: var(--card); border: 1px solid var(--border-hover); border-radius: 8px; padding: 10px 14px; font-size: 11px; font-weight: 400; color: var(--foreground-sec); white-space: normal; width: 240px; z-index: 100; box-shadow: 0 8px 24px rgba(0,0,0,0.5); line-height: 1.6; text-transform: none; letter-spacing: 0; }
-.th-info-icon:hover + .th-info-tip { display: block; }
+.th-info-tip { display: none; position: fixed; background: var(--card); border: 1px solid var(--border-hover); border-radius: 8px; padding: 14px 16px; font-size: 11px; font-weight: 400; color: var(--foreground-sec); white-space: normal; width: 300px; z-index: 9999; box-shadow: 0 4px 24px rgba(0,0,0,0.5); line-height: 1.7; text-transform: none; letter-spacing: 0; pointer-events: none; }
+.th-info-tip .tip-title { display: block; color: var(--foreground); font-weight: 600; font-size: 12px; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.th-info-tip .tip-formula { display: block; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 4px; padding: 6px 10px; margin: 10px 0; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--accent); letter-spacing: 0.02em; line-height: 1.8; }
+.th-info-tip .tip-note { display: block; color: var(--foreground-dim); font-size: 10.5px; margin-top: 8px; line-height: 1.6; }
+
+/* ═══════════════════════════════════════════════════
+   REVENUE ESTIMATOR
+   ═══════════════════════════════════════════════════ */
+.rev-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 16px 0; }
+@media (max-width: 900px) { .rev-grid { grid-template-columns: repeat(2, 1fr); } }
+.rev-card { background: var(--muted); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+.rev-card-head { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; font-size: 13px; font-weight: 600; }
+.rev-card-value { font-family: 'JetBrains Mono', monospace; font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+.rev-card-sub { font-size: 11px; color: var(--foreground-dim); }
+.rev-ledger { margin-top: 16px; }
+.rev-ledger-title { font-size: 13px; font-weight: 600; margin-bottom: 10px; color: var(--foreground); }
+.rev-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-radius: var(--radius-sm); font-size: 12px; }
+.rev-row:nth-child(odd) { background: var(--muted); }
+.rev-row-label { color: var(--foreground-sec); display: flex; align-items: center; gap: 6px; }
+.rev-row-value { font-family: 'JetBrains Mono', monospace; font-weight: 600; }
+.rev-row.est { opacity: 0.6; border-left: 2px dashed var(--foreground-dim); }
+.rev-row.real { border-left: 2px solid var(--positive); }
+.rev-total { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 700; margin-top: 4px; border-top: 1px solid var(--border); }
+.rev-top-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.rev-top-item { background: var(--muted); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px; flex: 1; min-width: 180px; }
+.rev-top-rank { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 4px; font-size: 10px; font-weight: 700; margin-right: 6px; }
+.rev-legend { display: flex; gap: 16px; margin-top: 12px; font-size: 11px; color: var(--foreground-sec); }
+.rev-legend-item { display: flex; align-items: center; gap: 5px; }
+.rev-legend-line { width: 16px; height: 2px; border-radius: 1px; }
+.rev-legend-dash { width: 16px; height: 0; border-top: 2px dashed var(--foreground-dim); }
 
 /* ═══════════════════════════════════════════════════
    DATA TABLES
@@ -515,6 +674,7 @@ td:first-child { text-align: left; }
 .venue-badge-sm.bitget { background: var(--bitget-dim); color: var(--bitget); border: 1px solid rgba(0,209,128,0.2); }
 .venue-badge-sm.gate { background: var(--gate-dim); color: var(--gate); border: 1px solid rgba(43,106,255,0.2); }
 .venue-badge-sm.binance { background: var(--binance-dim); color: var(--binance); border: 1px solid rgba(240,185,11,0.2); }
+.venue-badge-sm.kraken { background: var(--kraken-dim); color: var(--kraken); border: 1px solid rgba(125,76,219,0.25); }
 
 .venue-subrow { background: var(--muted); cursor: pointer; }
 .venue-subrow:hover { background: var(--muted-hover) !important; }
@@ -750,7 +910,19 @@ input[type="checkbox"] {
   </div>
 </div>
 
-<!-- Top-level tabs -->
+<!-- ★★★ TOP-LEVEL PAGE TABS ★★★ -->
+<div class="top-nav" id="topNav">
+  <div class="top-tab active" data-p="perps" onclick="switchTopPage('perps')"><span class="t-icon"><svg class="ic ic-16" viewBox="0 0 24 24"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg></span>Perpetuals</div>
+  <div class="top-tab" data-p="spot" onclick="switchTopPage('spot')"><span class="t-icon"><svg class="ic ic-16" viewBox="0 0 24 24"><circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="M16.71 13.88l.7.71-2.82 2.82"/></svg></span>Spot</div>
+  <div class="top-tab" data-p="cross" onclick="switchTopPage('cross')"><span class="t-icon"><svg class="ic ic-16" viewBox="0 0 24 24"><circle cx="5" cy="6" r="3"/><circle cx="19" cy="18" r="3"/><path d="M12 6h2a2 2 0 0 1 2 2v7"/><path d="M12 18h-2a2 2 0 0 1-2-2V9"/><polyline points="15 9 12 6 15 3"/><polyline points="9 15 12 18 9 21"/></svg></span>Cross-Analysis</div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     PAGE: PERPETUALS
+     ═══════════════════════════════════════════ -->
+<div class="page-container active" id="page-perps">
+
+<!-- Perp sub-tabs -->
 <div class="nav-tabs">
   <div class="nav-tab active" onclick="switchView('allvenues', this)"><span class="tab-icon">◉</span>All Venues</div>
   <div class="nav-tab" onclick="switchView('asset', this)"><span class="tab-icon">⊞</span>By Asset</div>
@@ -774,6 +946,7 @@ input[type="checkbox"] {
       <div class="venue-cards-grid" id="venueCardsGrid"></div>
       <div class="section-card" id="coverageSection"></div>
       <div class="section-card" id="divSection"></div>
+      <div class="section-card" id="revenueSection"></div>
     </div>
   </div>
 
@@ -801,7 +974,7 @@ input[type="checkbox"] {
         <th data-sort="volume" onclick="setVenueSort('tradexyz','volume')">24h Volume <span class="arrow">▼</span></th>
         <th data-sort="oi" onclick="setVenueSort('tradexyz','oi')">Open Interest <span class="arrow"></span></th>
         <th data-sort="funding" onclick="setVenueSort('tradexyz','funding')">Funding Rate <span class="arrow"></span></th>
-        <th data-sort="posRate" onclick="setVenueSort('tradexyz','posRate')"><span class="th-info">% Positive <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip">Percentage of funding periods with a positive rate in the selected time window. Values near 100% or near 0% indicate the rate direction is highly consistent — these contracts are more suitable for longer-term funding arbitrage positions.</span></span></th>
+        <th data-sort="posRate" onclick="setVenueSort('tradexyz','posRate')"><span class="th-info">% 有效费率 <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip">排除年化 &lt; 1.5% 的无效周期，取正/负费率中占比更大的方向。绿色 = 多数时间正费率，红色 = 多数时间负费率。比例越高，费率方向越稳定，越适合持仓套利。</span></span></th>
         <th style="cursor:default"><div style="display:flex;align-items:center;gap:6px;justify-content:flex-end"><span>Funding</span>
           <div class="spark-range-btns"><button class="sr-btn active" onclick="setSparkRange('tradexyz',24,this)">24h</button><button class="sr-btn" onclick="setSparkRange('tradexyz',72,this)">3d</button><button class="sr-btn" onclick="setSparkRange('tradexyz',168,this)">7d</button></div>
         </div></th>
@@ -833,7 +1006,7 @@ input[type="checkbox"] {
         <th data-sort="volume" onclick="setVenueSort('bitget','volume')">24h Volume <span class="arrow">▼</span></th>
         <th data-sort="oi" onclick="setVenueSort('bitget','oi')">Open Interest <span class="arrow"></span></th>
         <th data-sort="funding" onclick="setVenueSort('bitget','funding')">Funding Rate <span class="arrow"></span></th>
-        <th data-sort="posRate" onclick="setVenueSort('bitget','posRate')"><span class="th-info">% Positive <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip">Percentage of funding periods with a positive rate in the selected time window. Values near 100% or near 0% indicate the rate direction is highly consistent — these contracts are more suitable for longer-term funding arbitrage positions.</span></span></th>
+        <th data-sort="posRate" onclick="setVenueSort('bitget','posRate')"><span class="th-info">% 有效费率 <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip">排除年化 &lt; 1.5% 的无效周期，取正/负费率中占比更大的方向。绿色 = 多数时间正费率，红色 = 多数时间负费率。比例越高，费率方向越稳定，越适合持仓套利。</span></span></th>
         <th style="cursor:default"><div style="display:flex;align-items:center;gap:6px;justify-content:flex-end"><span>Funding</span>
           <div class="spark-range-btns"><button class="sr-btn active" onclick="setSparkRange('bitget',24,this)">24h</button><button class="sr-btn" onclick="setSparkRange('bitget',72,this)">3d</button><button class="sr-btn" onclick="setSparkRange('bitget',168,this)">7d</button></div>
         </div></th>
@@ -864,7 +1037,7 @@ input[type="checkbox"] {
         <th data-sort="volume" onclick="setVenueSort('gate','volume')">24h Volume <span class="arrow">▼</span></th>
         <th data-sort="oi" onclick="setVenueSort('gate','oi')">Open Interest <span class="arrow"></span></th>
         <th data-sort="funding" onclick="setVenueSort('gate','funding')">Funding Rate <span class="arrow"></span></th>
-        <th data-sort="posRate" onclick="setVenueSort('gate','posRate')"><span class="th-info">% Positive <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip">Percentage of funding periods with a positive rate in the selected time window. Values near 100% or near 0% indicate the rate direction is highly consistent — these contracts are more suitable for longer-term funding arbitrage positions.</span></span></th>
+        <th data-sort="posRate" onclick="setVenueSort('gate','posRate')"><span class="th-info">% 有效费率 <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip">排除年化 &lt; 1.5% 的无效周期，取正/负费率中占比更大的方向。绿色 = 多数时间正费率，红色 = 多数时间负费率。比例越高，费率方向越稳定，越适合持仓套利。</span></span></th>
         <th style="cursor:default"><div style="display:flex;align-items:center;gap:6px;justify-content:flex-end"><span>Funding</span>
           <div class="spark-range-btns"><button class="sr-btn active" onclick="setSparkRange('gate',24,this)">24h</button><button class="sr-btn" onclick="setSparkRange('gate',72,this)">3d</button><button class="sr-btn" onclick="setSparkRange('gate',168,this)">7d</button></div>
         </div></th>
@@ -896,7 +1069,7 @@ input[type="checkbox"] {
         <th data-sort="volume" onclick="setVenueSort('binance','volume')">24h Volume <span class="arrow">▼</span></th>
         <th data-sort="oi" onclick="setVenueSort('binance','oi')">Open Interest <span class="arrow"></span></th>
         <th data-sort="funding" onclick="setVenueSort('binance','funding')">Funding Rate <span class="arrow"></span></th>
-        <th data-sort="posRate" onclick="setVenueSort('binance','posRate')"><span class="th-info">% Positive <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip">Percentage of funding periods with a positive rate in the selected time window. Values near 100% or near 0% indicate the rate direction is highly consistent — these contracts are more suitable for longer-term funding arbitrage positions.</span></span></th>
+        <th data-sort="posRate" onclick="setVenueSort('binance','posRate')"><span class="th-info">% 有效费率 <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip">排除年化 &lt; 1.5% 的无效周期，取正/负费率中占比更大的方向。绿色 = 多数时间正费率，红色 = 多数时间负费率。比例越高，费率方向越稳定，越适合持仓套利。</span></span></th>
         <th style="cursor:default"><div style="display:flex;align-items:center;gap:6px;justify-content:flex-end"><span>Funding</span>
           <div class="spark-range-btns"><button class="sr-btn active" onclick="setSparkRange('binance',24,this)">24h</button><button class="sr-btn" onclick="setSparkRange('binance',72,this)">3d</button><button class="sr-btn" onclick="setSparkRange('binance',168,this)">7d</button></div>
         </div></th>
@@ -956,6 +1129,231 @@ input[type="checkbox"] {
   </div>
 </div>
 
+
+</div><!-- END page-perps -->
+
+<!-- ═══════════════════════════════════════════
+     PAGE: SPOT
+     ═══════════════════════════════════════════ -->
+<div class="page-container" id="page-spot">
+  <div class="spot-sub-nav" id="spotSubNav">
+    <div class="spot-sub-tab active" onclick="switchSpotSub('overview',this)"><svg class="ic ic-16" viewBox="0 0 24 24" style="margin-right:6px;vertical-align:-3px"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>Overview</div>
+    <div class="spot-sub-tab" onclick="switchSpotSub('allAssets',this)">All Assets</div>
+    <div class="spot-sub-tab" onclick="switchSpotSub('gate',this)"><span class="venue-dot gate"></span> Gate.io <span class="spot-cnt">8</span></div>
+    <div class="spot-sub-tab" onclick="switchSpotSub('binance',this)"><span class="venue-dot binance"></span> Binance <span class="spot-cnt">2</span></div>
+    <div class="spot-sub-tab" onclick="switchSpotSub('bitget',this)"><span class="venue-dot bitget"></span> Bitget <span class="spot-cnt">5</span></div>
+    <div class="spot-sub-tab" onclick="switchSpotSub('kraken',this)"><span class="venue-dot kraken"></span> Kraken <span class="spot-cnt">5</span></div>
+  </div>
+
+  <!-- SPOT OVERVIEW -->
+  <div class="summary-page" id="spot-overview">
+    <div class="spot-kpi-row">
+      <div class="spot-kpi"><div class="spot-kpi-label">Spot Pairs Tracked</div><div class="spot-kpi-val" style="color:var(--accent)">20</div><div class="spot-kpi-sub">4 exchanges</div></div>
+      <div class="spot-kpi"><div class="spot-kpi-label">Total 24h Volume</div><div class="spot-kpi-val">$1.4B</div><div class="spot-kpi-sub">All RWA spot</div></div>
+      <div class="spot-kpi"><div class="spot-kpi-label">Avg Bid-Ask Spread</div><div class="spot-kpi-val" style="color:var(--positive)">0.021%</div><div class="spot-kpi-sub">Liquidity indicator</div></div>
+      <div class="spot-kpi"><div class="spot-kpi-label">Best Funding Arb</div><div class="spot-kpi-val" style="color:var(--positive)">131.4%</div><div class="spot-kpi-sub">MSTRx · Gate spot → Gate perp</div></div>
+    </div>
+
+    <div class="section-card">
+      <div class="section-title" style="margin-bottom:16px"><svg class="ic ic-18" viewBox="0 0 24 24"><path d="M3 21h18"/><path d="M3 10h18"/><path d="M5 6l7-3 7 3"/><path d="M4 10v11"/><path d="M20 10v11"/><path d="M8 14v3"/><path d="M12 14v3"/><path d="M16 14v3"/></svg>Exchange Summary</div>
+      <div class="spot-venue-grid">
+        <!-- Gate.io -->
+        <div class="spot-vc">
+          <div class="spot-vc-head"><span class="venue-dot gate"></span><span class="spot-vc-name">Gate.io</span><span class="spot-vc-pairs">8</span></div>
+          <div class="spot-vc-row"><span class="spot-vc-row-label">24h Volume</span><span class="spot-vc-row-val">$768M</span></div>
+          <div class="spot-vc-row"><span class="spot-vc-row-label">Avg Spread</span><span class="spot-vc-row-val" style="color:var(--positive)">1.9 bps</span></div>
+          <div class="spot-vc-divider"></div>
+          <div class="spot-vc-row"><span class="spot-vc-row-label">Maker Fee <span class="spot-fee-src default">DEFAULT</span></span><span class="spot-vc-row-val">0.10%</span></div>
+          <div class="spot-vc-row"><span class="spot-vc-row-label">Taker Fee <span class="spot-fee-src default">DEFAULT</span></span><span class="spot-vc-row-val">0.10%</span></div>
+          <div class="spot-vc-row"><span class="spot-vc-row-label">Est. Round-Trip</span><span class="spot-vc-row-val" style="color:var(--gold)">21.9 bps</span></div>
+          <div class="spot-vc-rt-note">Taker×2 + Avg Spread</div>
+          <div class="spot-cb-track"><div class="spot-cb-seg" style="flex:5;background:#8B8FE8" title="Equity (5)"></div><div class="spot-cb-seg" style="flex:2;background:var(--gold)" title="Commodity (2)"></div><div class="spot-cb-seg" style="flex:1;background:#3B82F6" title="Index (1)"></div></div>
+          <div class="spot-cb-legend"><span><i style="background:#8B8FE8"></i>Equity (5)</span><span><i style="background:var(--gold)"></i>Commodity (2)</span><span><i style="background:#3B82F6"></i>Index (1)</span></div>
+        </div>
+        <!-- Binance -->
+        <div class="spot-vc">
+          <div class="spot-vc-head"><span class="venue-dot binance"></span><span class="spot-vc-name">Binance</span><span class="spot-vc-pairs">2</span></div>
+          <div class="spot-vc-row"><span class="spot-vc-row-label">24h Volume</span><span class="spot-vc-row-val">$95M</span></div>
+          <div class="spot-vc-row"><span class="spot-vc-row-label">Avg Spread</span><span class="spot-vc-row-val" style="color:var(--positive)">2.0 bps</span></div>
+          <div class="spot-vc-divider"></div>
+          <div class="spot-vc-row"><span class="spot-vc-row-label">Maker Fee <span class="spot-fee-src default">DEFAULT</span></span><span class="spot-vc-row-val">0.10%</span></div>
+          <div class="spot-vc-row"><span class="spot-vc-row-label">Taker Fee <span class="spot-fee-src default">DEFAULT</span></span><span class="spot-vc-row-val">0.10%</span></div>
+          <div class="spot-vc-row"><span class="spot-vc-row-label">Est. Round-Trip</span><span class="spot-vc-row-val" style="color:var(--gold)">22.0 bps</span></div>
+          <div class="spot-vc-rt-note">Taker×2 + Avg Spread</div>
+          <div class="spot-cb-track"><div class="spot-cb-seg" style="flex:2;background:var(--gold)" title="Commodity (2)"></div></div>
+          <div class="spot-cb-legend"><span><i style="background:var(--gold)"></i>Commodity (2)</span></div>
+        </div>
+        <!-- Bitget -->
+        <div class="spot-vc">
+          <div class="spot-vc-head"><span class="venue-dot bitget"></span><span class="spot-vc-name">Bitget</span><span class="spot-vc-pairs">5</span></div>
+          <div class="spot-vc-row"><span class="spot-vc-row-label">24h Volume</span><span class="spot-vc-row-val">$635M</span></div>
+          <div class="spot-vc-row"><span class="spot-vc-row-label">Avg Spread</span><span class="spot-vc-row-val" style="color:var(--positive)">2.0 bps</span></div>
+          <div class="spot-vc-divider"></div>
+          <div class="spot-vc-row"><span class="spot-vc-row-label">Maker Fee <span class="spot-fee-src api">API</span></span><span class="spot-vc-row-val">0.10%</span></div>
+          <div class="spot-vc-row"><span class="spot-vc-row-label">Taker Fee <span class="spot-fee-src api">API</span></span><span class="spot-vc-row-val">0.10%</span></div>
+          <div class="spot-vc-row"><span class="spot-vc-row-label">Est. Round-Trip</span><span class="spot-vc-row-val" style="color:var(--gold)">22.0 bps</span></div>
+          <div class="spot-vc-rt-note">Taker×2 + Avg Spread</div>
+          <div class="spot-cb-track"><div class="spot-cb-seg" style="flex:3;background:#8B8FE8" title="Equity (3)"></div><div class="spot-cb-seg" style="flex:2;background:var(--gold)" title="Commodity (2)"></div></div>
+          <div class="spot-cb-legend"><span><i style="background:#8B8FE8"></i>Equity (3)</span><span><i style="background:var(--gold)"></i>Commodity (2)</span></div>
+        </div>
+        <!-- Kraken -->
+        <div class="spot-vc">
+          <div class="spot-vc-head"><span class="venue-dot kraken"></span><span class="spot-vc-name">Kraken</span><span class="spot-vc-pairs">5</span></div>
+          <div class="spot-vc-row"><span class="spot-vc-row-label">24h Volume</span><span class="spot-vc-row-val">$254M</span></div>
+          <div class="spot-vc-row"><span class="spot-vc-row-label">Avg Spread</span><span class="spot-vc-row-val" style="color:var(--positive)">2.4 bps</span></div>
+          <div class="spot-vc-divider"></div>
+          <div class="spot-vc-row"><span class="spot-vc-row-label">Maker Fee <span class="spot-fee-src default">DEFAULT</span></span><span class="spot-vc-row-val">0.16%</span></div>
+          <div class="spot-vc-row"><span class="spot-vc-row-label">Taker Fee <span class="spot-fee-src default">DEFAULT</span></span><span class="spot-vc-row-val">0.26%</span></div>
+          <div class="spot-vc-row"><span class="spot-vc-row-label">Est. Round-Trip</span><span class="spot-vc-row-val" style="color:var(--gold)">54.4 bps</span></div>
+          <div class="spot-vc-rt-note">Taker×2 + Avg Spread</div>
+          <div class="spot-cb-track"><div class="spot-cb-seg" style="flex:5;background:#8B8FE8" title="Equity (5)"></div></div>
+          <div class="spot-cb-legend"><span><i style="background:#8B8FE8"></i>Equity (5)</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ARB RANKING (inside Overview) -->
+    <div class="section-card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px">
+        <div class="section-title"><svg class="ic ic-18" viewBox="0 0 24 24"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>Cash-and-Carry Arb Ranking</div>
+        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+          <div class="spot-perp-sel">
+            <label>Hold</label>
+            <div class="hold-pills" id="arbHoldPills">
+              <button type="button" class="hold-pill active" data-hold="0">No Fees</button>
+              <button type="button" class="hold-pill" data-hold="0.333">8h</button>
+              <button type="button" class="hold-pill" data-hold="1">1d</button>
+              <button type="button" class="hold-pill" data-hold="5">5d</button>
+              <button type="button" class="hold-pill" data-hold="15">15d</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
+        <span style="font-size:11px;color:var(--foreground-dim);margin-right:4px">Direction:</span>
+        <span class="spot-cat-filter active" id="arbDirAll" onclick="setArbDir('all')">All</span>
+        <span class="spot-cat-filter" id="arbDirLong" onclick="setArbDir('long')">Long Spot / Short Perp</span>
+        <span class="spot-cat-filter" id="arbDirShort" onclick="setArbDir('short')">Short Spot / Long Perp</span>
+        <span style="font-size:11px;color:var(--foreground-dim);margin:0 8px 0 12px">Same-venue only:</span>
+        <label style="display:inline-flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;color:var(--foreground-sec)"><input type="checkbox" id="arbSameVenueChk" style="cursor:pointer"> on</label>
+        <span style="font-size:11px;color:var(--foreground-dim);margin-left:auto"><span id="arbRowCount">0</span> combos · sorted by <span id="arbSortLabel">Net APR (Funding)</span></span>
+      </div>
+      <div class="table-wrap">
+        <table class="spot-table" id="spotArbRankTable">
+          <thead><tr>
+            <th style="text-align:left;width:40px">#</th>
+            <th style="text-align:left" data-sort="coin" onclick="setArbRankSort('coin')">Asset <span class="arrow"></span></th>
+            <th style="text-align:left" data-sort="route">Route (Spot → Perp)</th>
+            <th data-sort="spot" onclick="setArbRankSort('spot')">Spot Last <span class="arrow"></span></th>
+            <th data-sort="mark" onclick="setArbRankSort('mark')">Perp Mark <span class="arrow"></span></th>
+            <th data-sort="funding" onclick="setArbRankSort('funding')">Funding Ann. <span class="arrow"></span></th>
+            <th class="op-col">−</th>
+            <th data-sort="cost" onclick="setArbRankSort('cost')">Cost Ann. <span class="arrow"></span></th>
+            <th class="op-col">=</th>
+            <th data-sort="netFund" onclick="setArbRankSort('netFund')">Net APR (Funding) <span class="arrow">▼</span></th>
+            <th data-sort="basis" onclick="setArbRankSort('basis')">Basis <span class="arrow"></span></th>
+            <th style="text-align:left">Direction</th>
+          </tr></thead>
+          <tbody id="spotArbRankBody"></tbody>
+        </table>
+      </div>
+      <div id="arbViewMoreWrap" style="display:none;text-align:center;margin-top:12px"></div>
+      <div style="font-size:10.5px;color:var(--foreground-dim);margin-top:10px;line-height:1.6">
+        <strong style="color:var(--foreground-sec)">Notes:</strong>
+        Net APR (Funding) = |Funding Ann.| − (SpotFee×2 + PerpFee×2 + Spread) × 365/Hold &nbsp;·&nbsp;
+        Basis = (Perp Mark − Spot) / Spot，仅作为 entry-edge 信号，不年化加到 APR（永续合约的收敛已经在 funding 中表达，避免双重计数）&nbsp;·&nbsp;
+        Hold = No Fees 时 Net APR 显示毛年化 &nbsp;·&nbsp;
+        匹配 key 用 underlying（AAPLX/AAPLon 都对 AAPL perp）&nbsp;·&nbsp;
+        跨所组合未扣减提币/资金占用成本。
+      </div>
+    </div>
+  </div>
+
+  <!-- SPOT ALL ASSETS -->
+  <div class="summary-page" id="spot-allAssets" style="display:none">
+    <div class="section-card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+        <div class="section-title"><svg class="ic ic-18" viewBox="0 0 24 24"><line x1="9" y1="6" x2="21" y2="6"/><line x1="9" y1="12" x2="21" y2="12"/><line x1="9" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>All RWA Spot Assets</div>
+        <div style="display:flex;gap:6px" id="spotCatFilters"></div>
+      </div>
+      <div class="table-wrap">
+      <table class="spot-table">
+        <thead><tr>
+          <th style="width:30px"></th>
+          <th data-sort="underlying" onclick="setSpotAllSort('underlying')" style="text-align:left">Underlying <span class="arrow"></span></th>
+          <th>Tickers</th>
+          <th>Issuer(s)</th>
+          <th data-sort="category" onclick="setSpotAllSort('category')">Category <span class="arrow"></span></th>
+          <th data-sort="exchanges" onclick="setSpotAllSort('exchanges')">Exchanges <span class="arrow"></span></th>
+          <th data-sort="perp" onclick="setSpotAllSort('perp')">Perp <span class="arrow"></span></th>
+          <th data-sort="price" onclick="setSpotAllSort('price')">Price Range <span class="arrow"></span></th>
+          <th data-sort="chg" onclick="setSpotAllSort('chg')">24h Chg <span class="arrow">▼</span></th>
+          <th data-sort="spread" onclick="setSpotAllSort('spread')">Bid-Ask <span class="arrow"></span></th>
+          <th data-sort="vol" onclick="setSpotAllSort('vol')">24h Vol <span class="arrow"></span></th>
+        </tr></thead>
+        <tbody id="spotAllAssetsBody"></tbody>
+      </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- SPOT SINGLE EXCHANGE VIEW -->
+  <div class="summary-page" id="spot-venue" style="display:none">
+    <div class="section-card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+        <div class="section-title" id="spotVenueTitle"><svg class="ic ic-18" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>Gate.io Spot</div>
+        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+          <div class="spot-perp-sel">
+            <label>Basis vs</label>
+            <select id="spotPerpSel">
+              <option value="gate">Gate.io Perp</option>
+              <option value="binance">Binance Perp</option>
+              <option value="bitget">Bitget Perp</option>
+              <option value="tradexyz">trade.xyz Perp</option>
+            </select>
+          </div>
+          <div class="spot-perp-sel">
+            <label>Hold</label>
+            <div class="hold-pills" id="spotHoldPills">
+              <button type="button" class="hold-pill active" data-hold="0">No Fees</button>
+              <button type="button" class="hold-pill" data-hold="0.333">8h</button>
+              <button type="button" class="hold-pill" data-hold="1">1d</button>
+              <button type="button" class="hold-pill" data-hold="5">5d</button>
+              <button type="button" class="hold-pill" data-hold="15">15d</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table><thead><tr>
+          <th style="text-align:left" data-sort="name" onclick="setSpotVenueSort('name')">Asset <span class="arrow"></span></th><th data-sort="price" onclick="setSpotVenueSort('price')">Last Price <span class="arrow"></span></th><th data-sort="mark" onclick="setSpotVenueSort('mark')">Perp Mark <span class="arrow"></span></th><th data-sort="basis" onclick="setSpotVenueSort('basis')"><span class="th-info">Basis <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip"><span class="tip-title">基差 — 永续与现货的价差</span>衡量建仓成本：基差越小，做 cash-and-carry 的入场成本越低。负基差意味着 funding 可能转负，不适合做空永续。<span class="tip-formula">(Perp Mark − Spot Last) / Spot Last</span><span class="tip-note">✦ Ideal ±0.1%&ensp;·&ensp;● Good 0.1–0.3%&ensp;·&ensp;△ Wide &gt;0.3%&ensp;·&ensp;⚠ Avoid &lt;−0.1%</span></span></span></th><th data-sort="chg" onclick="setSpotVenueSort('chg')">24h Chg <span class="arrow"></span></th><th data-sort="vol" onclick="setSpotVenueSort('vol')">24h Vol <span class="arrow">▼</span></th><th>24h H / L</th><th data-sort="spread" onclick="setSpotVenueSort('spread')">Bid-Ask <span class="arrow"></span></th><th data-sort="funding" onclick="setSpotVenueSort('funding')"><span class="th-info">Funding Ann. <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip"><span class="tip-title">年化资金费率 — 做空永续可获得的收益</span>永续合约定期结算资金费，正费率时多头付给空头。将最近一期费率按每日结算次数 × 365 天折算为年化收益率。结算频率因交易所而异（如 8h = 3次/天，1h = 24次/天）。<span class="tip-formula">Funding Rate × settlesPerDay × 365</span><span class="tip-note">数据来源：右上角所选永续交易所的最新一期费率。正值 = 空头收息，负值 = 空头付息。</span></span></span></th><th data-sort="arb" onclick="setSpotVenueSort('arb')"><span class="th-info">Arb APR <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip"><span class="tip-title">套利年化 — 扣除成本后的净收益</span>买入现货 + 做空永续的 cash-and-carry 策略净年化收益。用 funding 年化收入减去交易摩擦成本（开平仓手续费 + 滑点），再按持仓周期折算成全年。<span class="tip-formula">Cost = (SpotFee×2 + PerpFee×2 + Spread) × 365/Hold<br>APR = |Funding Ann.| − Cost</span><span class="tip-note">通过右上角 Hold 调整持仓周期。No Fees = 不扣成本，显示毛年化 funding。绿 ≥15%&ensp;·&ensp;黄 ≥5%&ensp;·&ensp;红 &lt;5%</span></span></span></th>
+        </tr></thead><tbody id="spotVenueBody"></tbody></table>
+      </div>
+    </div>
+  </div>
+
+
+</div><!-- END page-spot -->
+
+<!-- ═══════════════════════════════════════════
+     PAGE: CROSS-ANALYSIS
+     ═══════════════════════════════════════════ -->
+<div class="page-container" id="page-cross">
+  <div class="spot-sub-nav">
+    <div class="spot-sub-tab active"><svg class="ic ic-16" viewBox="0 0 24 24" style="margin-right:6px;vertical-align:-3px"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>Overview</div>
+    <div class="spot-sub-tab">Basis Monitor</div>
+    <div class="spot-sub-tab">Arb Scanner</div>
+    <div class="spot-sub-tab">Funding vs Basis</div>
+  </div>
+  <div class="summary-page">
+    <div class="coming-soon">
+      <svg class="ic" viewBox="0 0 24 24" style="width:36px;height:36px;stroke-width:1.25;color:var(--foreground-dim);margin-bottom:14px"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      <div class="coming-soon-title">Coming Soon</div>
+      <div class="coming-soon-sub">Cross-venue basis heatmap, arb opportunity scanner, funding–basis correlation, and execution cost calculator are in development.</div>
+    </div>
+  </div>
+</div><!-- END page-cross -->
+
 <!-- Modal -->
 <div class="modal-overlay" id="assetModal" onclick="if(event.target===this)closeModal()">
   <div class="modal-box">
@@ -975,6 +1373,38 @@ input[type="checkbox"] {
 </div>
 
 <script>
+// ── Tooltip positioning (fixed, avoids overflow clipping) ──
+(function(){
+  document.addEventListener('mouseover', function(e){
+    const icon = e.target.closest('.th-info-icon');
+    if (!icon) return;
+    const tip = icon.nextElementSibling;
+    if (!tip || !tip.classList.contains('th-info-tip')) return;
+    const r = icon.getBoundingClientRect();
+    const tw = 300, pad = 12;
+    // horizontal: try right-align to icon, clamp to viewport
+    let left = r.right - tw;
+    if (left < pad) left = pad;
+    if (left + tw > window.innerWidth - pad) left = window.innerWidth - pad - tw;
+    // vertical: prefer below, flip above if not enough space
+    let top = r.bottom + 8;
+    tip.style.display = 'block';
+    const th = tip.offsetHeight;
+    if (top + th > window.innerHeight - pad) {
+      top = r.top - th - 8;
+    }
+    if (top < pad) top = pad;
+    tip.style.left = left + 'px';
+    tip.style.top = top + 'px';
+  });
+  document.addEventListener('mouseout', function(e){
+    const icon = e.target.closest('.th-info-icon');
+    if (!icon) return;
+    const tip = icon.nextElementSibling;
+    if (tip && tip.classList.contains('th-info-tip')) tip.style.display = 'none';
+  });
+})();
+
 // ═══════════════════════════════════════════════════
 // CONFIG (identical to production)
 // ═══════════════════════════════════════════════════
@@ -1607,13 +2037,30 @@ async function loadSparkline(venue, asset) {
   }
   cell.innerHTML = renderSparkSVG(rates, asset.predictedFunding);
 
-  // Update % Positive cell
+  // Update % 有效费率 cell
   const posCell = document.getElementById(`pos_${venue}_${asset.coin}`);
   if (posCell && rates.length > 0) {
-    const posCount = rates.filter(r => r > 0).length;
-    const pct = Math.round((posCount / rates.length) * 100);
-    const col = pct >= 70 ? 'var(--positive)' : pct >= 40 ? 'var(--accent)' : pct > 0 ? 'var(--foreground-sec)' : 'var(--negative)';
-    posCell.innerHTML = `<span style="color:${col};font-weight:600;font-size:12px">${pct}%</span><span style="display:block;font-size:10px;color:var(--foreground-dim)">${posCount}/${rates.length}</span>`;
+    const interval = VENUES[venue].fundingInterval;
+    const annFactor = 8760 / interval;
+    const APR_THRESHOLD = 0.015; // 1.5% annualized
+    // Expected periods for this time window
+    const expectedPeriods = Math.round(sparkHours[venue] / interval);
+    const total = Math.max(rates.length, expectedPeriods);
+    const validRates = rates.filter(r => Math.abs(r * annFactor) >= APR_THRESHOLD);
+    if (validRates.length === 0) {
+      posCell.innerHTML = `<span style="color:var(--foreground-dim);font-size:11px">—</span>`;
+    } else {
+      const posCount = validRates.filter(r => r > 0).length;
+      const negCount = validRates.filter(r => r < 0).length;
+      const dominant = posCount >= negCount ? 'pos' : 'neg';
+      const domCount = dominant === 'pos' ? posCount : negCount;
+      const pct = Math.round((domCount / total) * 100);
+      const col = pct >= 70
+        ? (dominant === 'pos' ? 'var(--positive)' : 'var(--negative)')
+        : 'var(--accent)';
+      const label = dominant === 'pos' ? '+' : '−';
+      posCell.innerHTML = `<span style="color:${col};font-weight:600;font-size:12px">${label}${pct}%</span><span style="display:block;font-size:10px;color:var(--foreground-dim)">${domCount}/${total}</span>`;
+    }
   }
 }
 
@@ -2151,7 +2598,7 @@ function switchSubTab(sub, tabEl) {
 // VIEW 1: ALL VENUES OVERVIEW
 // ═══════════════════════════════════════════════
 
-function renderOverview() { renderKPIs(); renderVenueCards(); renderCoverage(); renderDivergence(); }
+function renderOverview() { renderKPIs(); renderVenueCards(); renderCoverage(); renderDivergence(); renderRevenue(); }
 
 function renderKPIs() {
   const strip = document.getElementById('kpiStrip');
@@ -2408,6 +2855,376 @@ function renderDivergence() {
 }
 
 // ═══════════════════════════════════════════════════
+// REVENUE ESTIMATOR
+// ═══════════════════════════════════════════════════
+
+let revPeriod = 'daily'; // daily | weekly | monthly | ytd
+let revChartRange = 'month'; // week | month | 3m | ytd | 1y
+const REV_STORAGE_KEY = 'rwa_rev_history';
+
+function getRevHistory() {
+  try { return JSON.parse(localStorage.getItem(REV_STORAGE_KEY) || '{}'); } catch { return {}; }
+}
+
+function saveRevSnapshot(venueRevenue) {
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const history = getRevHistory();
+  // Save per-venue daily revenue
+  const snap = {};
+  Object.entries(venueRevenue).forEach(([v, d]) => { snap[v] = d.daily; });
+  snap._total = Object.values(venueRevenue).reduce((s, d) => s + d.daily, 0);
+  history[today] = snap;
+  // Keep max 400 days
+  const keys = Object.keys(history).sort();
+  if (keys.length > 400) { keys.slice(0, keys.length - 400).forEach(k => delete history[k]); }
+  try { localStorage.setItem(REV_STORAGE_KEY, JSON.stringify(history)); } catch {}
+}
+
+function calcVenueRevenue() {
+  const venueRevenue = {};
+  let totalDailyRev = 0;
+  Object.keys(VENUES).forEach(v => {
+    const vData = allData.filter(d => d.venue === v);
+    let rev = 0;
+    vData.forEach(d => {
+      const mk = d.makerFee !== undefined ? d.makerFee : VENUES[v].makerFee;
+      const tk = d.takerFee !== undefined ? d.takerFee : VENUES[v].takerFee;
+      rev += d.volume * (mk + tk);
+    });
+    venueRevenue[v] = { daily: rev, assets: vData.length, volume: vData.reduce((s,d) => s+d.volume, 0) };
+    totalDailyRev += rev;
+  });
+  return { venueRevenue, totalDailyRev };
+}
+
+function getMultiplier(period) {
+  if (period === 'daily') return 1;
+  if (period === 'weekly') return 7;
+  if (period === 'monthly') return 30;
+  if (period === 'ytd') {
+    const now = new Date();
+    const jan1 = new Date(now.getFullYear(), 0, 1);
+    return Math.ceil((now - jan1) / 86400000);
+  }
+  return 1;
+}
+
+function getPeriodLabel(period) {
+  if (period === 'daily') return 'Daily';
+  if (period === 'weekly') return 'Weekly';
+  if (period === 'monthly') return 'Monthly (30d)';
+  if (period === 'ytd') return 'Year to Date';
+  return '';
+}
+
+function getPeriodRevenue(venueRevenue, period) {
+  const history = getRevHistory();
+  const dates = Object.keys(history).sort();
+  const mult = getMultiplier(period);
+
+  if (period === 'daily' || dates.length < 2) {
+    // Use current snapshot × multiplier
+    const result = {};
+    Object.entries(venueRevenue).forEach(([v, d]) => {
+      result[v] = d.daily * mult;
+    });
+    result._total = Object.values(venueRevenue).reduce((s, d) => s + d.daily, 0) * mult;
+    result._method = dates.length < 2 ? 'projected' : 'real';
+    return result;
+  }
+
+  // Use real historical data where available
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - mult);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  const relevantDates = dates.filter(d => d >= cutoffStr);
+
+  if (relevantDates.length < 2) {
+    // Not enough history, use projection
+    const result = {};
+    Object.entries(venueRevenue).forEach(([v, d]) => { result[v] = d.daily * mult; });
+    result._total = Object.values(venueRevenue).reduce((s, d) => s + d.daily, 0) * mult;
+    result._method = 'projected';
+    return result;
+  }
+
+  // Sum real daily snapshots + fill missing days with average
+  const result = {};
+  Object.keys(VENUES).forEach(v => { result[v] = 0; });
+  result._total = 0;
+  relevantDates.forEach(dt => {
+    const snap = history[dt];
+    Object.keys(VENUES).forEach(v => { result[v] += (snap[v] || 0); });
+    result._total += (snap._total || 0);
+  });
+
+  // If we have fewer days than the period, scale up proportionally
+  if (relevantDates.length < mult) {
+    const scale = mult / relevantDates.length;
+    Object.keys(VENUES).forEach(v => { result[v] *= scale; });
+    result._total *= scale;
+    result._method = 'partial';
+    result._realDays = relevantDates.length;
+  } else {
+    result._method = 'real';
+    result._realDays = relevantDates.length;
+  }
+  return result;
+}
+
+function setRevPeriod(period, el) {
+  revPeriod = period;
+  document.querySelectorAll('#revenueSection .rev-period-btn').forEach(b => b.classList.remove('active'));
+  if (el) el.classList.add('active');
+  renderRevenue();
+}
+
+function setRevChartRange(range, el) {
+  revChartRange = range;
+  document.querySelectorAll('#revenueSection .rev-chart-btn').forEach(b => b.classList.remove('active'));
+  if (el) el.classList.add('active');
+  renderRevenue();
+}
+
+function renderRevChart() {
+  const history = getRevHistory();
+  const dates = Object.keys(history).sort();
+  if (dates.length < 1) {
+    return `<div style="text-align:center;padding:30px 0;color:var(--foreground-dim);font-size:12px;font-style:italic">Revenue history will appear here as data accumulates daily. First data point saved today.</div>`;
+  }
+
+  // Filter by range
+  const rangeDays = { week: 7, month: 30, '3m': 90, ytd: null, '1y': 365 };
+  let cutoff;
+  if (revChartRange === 'ytd') {
+    cutoff = new Date().getFullYear() + '-01-01';
+  } else {
+    const d = new Date();
+    d.setDate(d.getDate() - (rangeDays[revChartRange] || 30));
+    cutoff = d.toISOString().slice(0, 10);
+  }
+  const filtered = dates.filter(d => d >= cutoff);
+  if (filtered.length < 1) {
+    return `<div style="text-align:center;padding:30px 0;color:var(--foreground-dim);font-size:12px;font-style:italic">No data in selected range yet.</div>`;
+  }
+
+  const W = 600, H = 160, PAD = 40, PADR = 20, PADT = 10, PADB = 30;
+  const cw = W - PAD - PADR, ch = H - PADT - PADB;
+
+  // Get all venue totals and per-venue data
+  const totals = filtered.map(d => history[d]._total || 0);
+  const vKeys = Object.keys(VENUES);
+
+  // Collect ALL values (per-venue + totals) to determine Y range
+  let allVals = [...totals];
+  vKeys.forEach(v => { filtered.forEach(d => { allVals.push(history[d][v] || 0); }); });
+  allVals = allVals.filter(v => v > 0);
+  const maxVal = Math.max(...allVals, 1);
+  const rawMin = allVals.length > 0 ? Math.min(...allVals) : 0;
+  // Use a floor that's ~80% of min to give breathing room, but never below 0
+  const minVal = filtered.length <= 2 ? Math.max(0, rawMin * 0.80) : 0;
+  const yRange = maxVal - minVal || 1;
+
+  // Helper: map value to Y coordinate
+  function valToY(val) { return PADT + ch - ((val - minVal) / yRange) * ch; }
+
+  // Build paths per venue
+  const paths = {};
+  vKeys.forEach(v => {
+    const pts = filtered.map((d, i) => {
+      const x = PAD + (filtered.length === 1 ? cw / 2 : (i / (filtered.length - 1)) * cw);
+      const val = history[d][v] || 0;
+      return `${x},${valToY(val)}`;
+    });
+    paths[v] = pts.join(' ');
+  });
+
+  // Total line
+  const totalPts = filtered.map((d, i) => {
+    const x = PAD + (filtered.length === 1 ? cw / 2 : (i / (filtered.length - 1)) * cw);
+    return `${x},${valToY(totals[i])}`;
+  });
+
+  // Y-axis labels
+  const yLabels = [minVal, minVal + yRange / 2, maxVal].map((val) => {
+    const y = valToY(val);
+    return `<text x="${PAD - 4}" y="${y + 3}" fill="var(--foreground-dim)" font-size="9" text-anchor="end" font-family="JetBrains Mono,monospace">$${fmtRevenue(val)}</text>`;
+  }).join('');
+
+  // X-axis labels (first, mid, last)
+  const xIdxs = filtered.length <= 3 ? filtered.map((_, i) => i) : [0, Math.floor(filtered.length / 2), filtered.length - 1];
+  const xLabels = xIdxs.map(i => {
+    const x = PAD + (filtered.length === 1 ? cw / 2 : (i / (filtered.length - 1)) * cw);
+    return `<text x="${x}" y="${H - 4}" fill="var(--foreground-dim)" font-size="9" text-anchor="middle" font-family="JetBrains Mono,monospace">${filtered[i].slice(5)}</text>`;
+  }).join('');
+
+  // Grid lines
+  const gridLines = [0, 0.5, 1].map(frac => {
+    const y = PADT + ch * (1 - frac);
+    return `<line x1="${PAD}" x2="${W - PADR}" y1="${y}" y2="${y}" stroke="var(--border)" stroke-width="0.5"/>`;
+  }).join('');
+
+  // Venue lines
+  const venueLines = vKeys.map(v => {
+    if (!paths[v]) return '';
+    return `<polyline points="${paths[v]}" fill="none" stroke="${VENUES[v].color}" stroke-width="1.5" opacity="0.6"/>`;
+  }).join('');
+
+  // Dots for single point
+  let dots = '';
+  if (filtered.length === 1) {
+    const x = PAD + cw / 2;
+    vKeys.forEach(v => {
+      const val = history[filtered[0]][v] || 0;
+      const y = valToY(val);
+      dots += `<circle cx="${x}" cy="${y}" r="3" fill="${VENUES[v].color}"/>`;
+    });
+    const ty = valToY(totals[0]);
+    dots += `<circle cx="${x}" cy="${ty}" r="4" fill="var(--foreground)"/>`;
+  }
+
+  return `<svg width="100%" viewBox="0 0 ${W} ${H}" style="margin-top:8px">
+    ${gridLines}
+    ${venueLines}
+    <polyline points="${totalPts.join(' ')}" fill="none" stroke="var(--foreground)" stroke-width="2"/>
+    ${dots}
+    ${yLabels}${xLabels}
+  </svg>
+  <div style="display:flex;gap:12px;margin-top:6px;flex-wrap:wrap">
+    ${vKeys.map(v => `<span style="font-size:10px;color:${VENUES[v].color};display:flex;align-items:center;gap:4px"><span style="width:12px;height:2px;background:${VENUES[v].color};border-radius:1px;display:inline-block"></span>${VENUES[v].name}</span>`).join('')}
+    <span style="font-size:10px;color:var(--foreground);display:flex;align-items:center;gap:4px"><span style="width:12px;height:2px;background:var(--foreground);border-radius:1px;display:inline-block"></span>Total</span>
+  </div>`;
+}
+
+function renderRevenue() {
+  const section = document.getElementById('revenueSection');
+  if (!section) return;
+
+  const { venueRevenue, totalDailyRev } = calcVenueRevenue();
+
+  // Save today's snapshot
+  saveRevSnapshot(venueRevenue);
+
+  // Get period-adjusted revenue
+  const periodRev = getPeriodRevenue(venueRevenue, revPeriod);
+  const mult = getMultiplier(revPeriod);
+  const periodLabel = getPeriodLabel(revPeriod);
+  const methodTag = periodRev._method === 'real'
+    ? `<span style="color:var(--positive);font-size:10px;border:1px solid var(--positive);padding:1px 6px;border-radius:10px;margin-left:8px">Real</span>`
+    : periodRev._method === 'partial'
+    ? `<span style="color:var(--accent);font-size:10px;border:1px solid var(--accent);padding:1px 6px;border-radius:10px;margin-left:8px">${periodRev._realDays}d real + projected</span>`
+    : `<span style="color:var(--foreground-dim);font-size:10px;border:1px solid var(--border);padding:1px 6px;border-radius:10px;margin-left:8px">Projected</span>`;
+
+  // ── Period selector buttons ──
+  const periodBtns = ['daily', 'weekly', 'monthly', 'ytd'].map(p =>
+    `<button class="sr-btn rev-period-btn ${revPeriod === p ? 'active' : ''}" onclick="setRevPeriod('${p}',this)">${p === 'ytd' ? 'YTD' : p.charAt(0).toUpperCase() + p.slice(1)}</button>`
+  ).join('');
+
+  // ── Venue cards ──
+  const maxRev = Math.max(...Object.keys(VENUES).map(v => periodRev[v] || 0), 1);
+  const venueCardsHTML = Object.entries(VENUES).map(([vKey, vInfo]) => {
+    const vr = venueRevenue[vKey];
+    if (!vr || vr.assets === 0) return '';
+    const thisRev = periodRev[vKey] || 0;
+    const pct = periodRev._total > 0 ? (thisRev / periodRev._total * 100) : 0;
+    const barW = maxRev > 0 ? (thisRev / maxRev * 100) : 0;
+    return `<div class="rev-card">
+      <div class="rev-card-head"><span class="venue-dot ${vKey}"></span>${vInfo.name}</div>
+      <div class="rev-card-value" style="color:${vInfo.color}">$${fmtRevenue(thisRev)}</div>
+      <div class="rev-card-sub">${vr.assets} assets · ${fmtVolume(vr.volume)} 24h vol</div>
+      <div style="margin-top:10px;height:4px;background:var(--border);border-radius:2px;overflow:hidden"><div style="width:${barW}%;height:100%;background:${vInfo.color};border-radius:2px"></div></div>
+      <div style="font-size:11px;color:var(--foreground-sec);margin-top:4px;font-family:'JetBrains Mono',monospace">${pct.toFixed(1)}% share</div>
+    </div>`;
+  }).join('');
+
+  // ── Annual projection per venue + total (会计式 ledger) ──
+  let projRows = '';
+  let totalAnnBase = 0;
+  let totalAnnEst = 0;
+  Object.entries(VENUES).forEach(([vKey, vInfo]) => {
+    const vr = venueRevenue[vKey];
+    if (!vr || vr.daily === 0) return;
+    const annBase = vr.daily * 365;
+    const annEst = annBase * 1.10; // +10% growth
+    const estLiq = annBase * 0.02; // +2% liquidation
+    totalAnnBase += annBase;
+    totalAnnEst += annEst + estLiq;
+    projRows += `
+      <div style="margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:12px;font-weight:600;color:${vInfo.color}"><span class="venue-dot ${vKey}"></span>${vInfo.name}</div>
+        <div class="rev-row real">
+          <span class="rev-row-label">Trading Fees (${fmtRevenue(vr.daily)}/d × 365)</span>
+          <span class="rev-row-value" style="color:var(--foreground)">$${fmtRevenue(annBase)}</span>
+        </div>
+        <div class="rev-row est">
+          <span class="rev-row-label">+ Growth Adj. (+10%)</span>
+          <span class="rev-row-value" style="color:var(--foreground-sec)">$${fmtRevenue(annEst - annBase)}</span>
+        </div>
+        <div class="rev-row est">
+          <span class="rev-row-label">+ Liquidation Est. (~2%)</span>
+          <span class="rev-row-value" style="color:var(--foreground-sec)">$${fmtRevenue(estLiq)}</span>
+        </div>
+      </div>`;
+  });
+
+  // ── Chart range buttons ──
+  const chartBtns = ['week', 'month', '3m', 'ytd', '1y'].map(r =>
+    `<button class="sr-btn rev-chart-btn ${revChartRange === r ? 'active' : ''}" onclick="setRevChartRange('${r}',this)">${r === '3m' ? '3M' : r === 'ytd' ? 'YTD' : r === '1y' ? '1Y' : r.charAt(0).toUpperCase() + r.slice(1)}</button>`
+  ).join('');
+
+  const chartHTML = renderRevChart();
+
+  // ── Assemble ──
+  section.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <div>
+        <div class="section-title">RWA Revenue Estimator</div>
+        <div class="section-subtitle">Volume × (Maker + Taker Fee) · ${periodLabel}${methodTag}</div>
+      </div>
+      <div class="spark-range-btns" style="margin:0">${periodBtns}</div>
+    </div>
+    <div style="display:flex;align-items:baseline;gap:12px;margin:12px 0 4px">
+      <span style="font-family:'JetBrains Mono',monospace;font-size:28px;font-weight:800;color:var(--foreground)">$${fmtRevenue(periodRev._total)}</span>
+      <span style="font-size:13px;color:var(--foreground-sec)">${periodLabel.toLowerCase()} across ${Object.keys(venueRevenue).filter(v => venueRevenue[v].assets > 0).length} venues</span>
+    </div>
+    <div class="rev-grid">${venueCardsHTML}</div>
+
+    <div style="margin-top:24px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div class="rev-ledger-title">Revenue Trend</div>
+        <div class="spark-range-btns" style="margin:0">${chartBtns}</div>
+      </div>
+      ${chartHTML}
+    </div>
+
+    <div class="rev-ledger" style="margin-top:24px">
+      <div class="rev-ledger-title">Annual Revenue Projection</div>
+      <div class="rev-legend">
+        <div class="rev-legend-item"><div class="rev-legend-line" style="background:var(--positive)"></div>Real data</div>
+        <div class="rev-legend-item"><div class="rev-legend-dash"></div>Estimated</div>
+      </div>
+      <div style="margin-top:12px">
+        ${projRows}
+        <div class="rev-total" style="background:var(--muted)">
+          <span style="color:var(--foreground-sec)">Total Base (Real Data Only)</span>
+          <span style="color:var(--foreground);font-family:'JetBrains Mono',monospace">$${fmtRevenue(totalAnnBase)}</span>
+        </div>
+        <div class="rev-total" style="background:var(--positive-dim);margin-top:4px">
+          <span style="color:var(--positive)">Total With Estimates</span>
+          <span style="color:var(--positive);font-family:'JetBrains Mono',monospace">$${fmtRevenue(totalAnnEst)}</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function fmtRevenue(val) {
+  if (val >= 1e6) return (val / 1e6).toFixed(2) + 'M';
+  if (val >= 1e3) return (val / 1e3).toFixed(1) + 'K';
+  return val.toFixed(0);
+}
+
+// ═══════════════════════════════════════════════════
 // VENUE TABLES
 // ═══════════════════════════════════════════════════
 
@@ -2472,11 +3289,21 @@ function renderVenueTable(venue) {
       case 'oi':      va = a.oi; vb = b.oi; break;
       case 'funding': va = a.funding===null?-1:Math.abs(a.funding); vb = b.funding===null?-1:Math.abs(b.funding); break;
       case 'posRate': {
+        const intv = VENUES[venue].fundingInterval;
+        const af = 8760 / intv;
+        const ep = Math.round(sparkHours[venue] / intv);
         const ca = fundingCache[`${venue}:${a.coin}`];
         const cb = fundingCache[`${venue}:${b.coin}`];
-        const ra = ca && ca.data ? ca.data.map(d=>parseFloat(d.fundingRate||d.fundRate||0)).filter(r=>r>0).length / ca.data.length : -1;
-        const rb = cb && cb.data ? cb.data.map(d=>parseFloat(d.fundingRate||d.fundRate||0)).filter(r=>r>0).length / cb.data.length : -1;
-        va = ra; vb = rb; break;
+        const calcDom = (c) => {
+          if (!c || !c.data) return -1;
+          const allR = c.data.map(d=>parseFloat(d.fundingRate||d.fundRate||0));
+          const total = Math.max(allR.length, ep);
+          const rs = allR.filter(r=>Math.abs(r*af)>=0.015);
+          if (rs.length === 0) return -1;
+          const pos = rs.filter(r=>r>0).length, neg = rs.filter(r=>r<0).length;
+          return Math.max(pos, neg) / total;
+        };
+        va = calcDom(ca); vb = calcDom(cb); break;
       }
       default:        va = a.volume; vb = b.volume;
     }
@@ -2711,6 +3538,661 @@ function renderHeatmap() {
       grid.innerHTML += `<div class="hm-cell" style="background:${bg};color:${col}" onclick="openHeatmapModal('${a.coin}','${v}')"><div class="hm-val">${fmtFunding(r)}</div><div class="hm-ann">${fmtAnnual(r,v)} APR</div></div>`;
     });
   });
+}
+
+// ═══════════════════════════════════════════════
+// TOP-LEVEL PAGE SWITCH (Perpetuals / Spot / Cross)
+// ═══════════════════════════════════════════════
+
+function switchTopPage(page) {
+  document.querySelectorAll('.top-tab').forEach(t => t.classList.toggle('active', t.dataset.p === page));
+  ['perps','spot','cross'].forEach(p => {
+    const el = document.getElementById('page-'+p);
+    if (el) el.classList.toggle('active', p === page);
+  });
+}
+
+// ═══════════════════════════════════════════════
+// SPOT DATA & LOGIC
+// ═══════════════════════════════════════════════
+
+const SPOT_DATA = {
+  gate: [
+    { coin:'PAXG',  pair:'PAXG_USDT',  last:3028.50, chg:0.82,  vol:185400,  hi:3045,   lo:3002.10, bid:3028.10, ask:3028.90 },
+    { coin:'XAUT',  pair:'XAUT_USDT',  last:3025.80, chg:0.75,  vol:42300,   hi:3041.20,lo:2999.50, bid:3025.30, ask:3026.30 },
+    { coin:'AAPLX', pair:'AAPLX_USDT', last:228.35,  chg:-1.20, vol:312000,  hi:232.10, lo:227.50,  bid:228.20,  ask:228.50  },
+    { coin:'TSLAX', pair:'TSLAX_USDT', last:265.80,  chg:2.35,  vol:890000,  hi:268.40, lo:259.20,  bid:265.60,  ask:266.00  },
+    { coin:'NVDAX', pair:'NVDAX_USDT', last:118.42,  chg:-0.55, vol:1250000, hi:120.30, lo:117.80,  bid:118.30,  ask:118.55  },
+    { coin:'GOOGLX',pair:'GOOGLX_USDT',last:176.20,  chg:0.30,  vol:156000,  hi:177.80, lo:175.10,  bid:176.05,  ask:176.35  },
+    { coin:'SPYx',  pair:'SPYx_USDT',  last:562.15,  chg:-0.18, vol:420000,  hi:565.40, lo:560.80,  bid:562.00,  ask:562.30  },
+    { coin:'MSTRx', pair:'MSTRx_USDT', last:1780.50, chg:3.80,  vol:67000,   hi:1810,   lo:1715,    bid:1779.00, ask:1782.00 },
+  ],
+  binance: [
+    { coin:'PAXG', pair:'PAXGUSDT', last:3029.10, chg:0.84, vol:520000, hi:3046, lo:3003, bid:3028.90, ask:3029.30 },
+    { coin:'XAUT', pair:'XAUTUSDT', last:3026.20, chg:0.78, vol:98000,  hi:3042, lo:3000.10, bid:3025.90, ask:3026.50 },
+  ],
+  bitget: [
+    { coin:'PAXG',   pair:'PAXGUSDT',   last:3028.80, chg:0.80,  vol:210000,  hi:3044.50, lo:3001.50, bid:3028.40, ask:3029.20 },
+    { coin:'XAUT',   pair:'XAUTUSDT',   last:3026.00, chg:0.72,  vol:35000,   hi:3040.50, lo:2998.80, bid:3025.50, ask:3026.50 },
+    { coin:'TSLAon', pair:'TSLAUSDT',   last:265.50,  chg:2.28,  vol:1820000, hi:268.10,  lo:258.90,  bid:265.30,  ask:265.70 },
+    { coin:'NVDAon', pair:'NVDAUSDT',   last:118.20,  chg:-0.62, vol:2450000, hi:120.10,  lo:117.50,  bid:118.05,  ask:118.35 },
+    { coin:'AAPLon', pair:'AAPLUSDT',   last:228.10,  chg:-1.28, vol:980000,  hi:231.80,  lo:227.20,  bid:227.90,  ask:228.30 },
+  ],
+  kraken: [
+    { coin:'AAPLX', pair:'AAPLX/USD', last:228.42,  chg:-1.15, vol:145000, hi:232.20, lo:227.60, bid:228.28, ask:228.56 },
+    { coin:'TSLAX', pair:'TSLAX/USD', last:265.95,  chg:2.40,  vol:362000, hi:268.60, lo:259.35, bid:265.78, ask:266.12 },
+    { coin:'NVDAX', pair:'NVDAX/USD', last:118.55,  chg:-0.48, vol:518000, hi:120.40, lo:117.90, bid:118.42, ask:118.68 },
+    { coin:'COINX', pair:'COINX/USD', last:212.30,  chg:1.55,  vol: 84000, hi:215.80, lo:208.40, bid:212.15, ask:212.45 },
+    { coin:'MSTRX', pair:'MSTRX/USD', last:1781.20, chg:3.72,  vol: 28500, hi:1812,   lo:1716,   bid:1779.50,ask:1782.90 },
+  ],
+};
+
+const SPOT_PERP = {
+  gate:     { PAXG:{mark:3031.20,f:0.0003}, XAUT:{mark:3028.50,f:0.00025}, AAPLX:{mark:228.80,f:-0.0002}, TSLAX:{mark:266.50,f:0.0008}, NVDAX:{mark:118.90,f:0.0004}, GOOGLX:{mark:176.60,f:0.00015}, SPYx:{mark:562.80,f:0.0001}, MSTRx:{mark:1788,f:0.0012} },
+  binance:  { PAXG:{mark:3030.80,f:0.00028}, XAUT:{mark:3028.10,f:0.00022}, AAPLX:{mark:229.10,f:-0.00015}, TSLAX:{mark:266.80,f:0.00075}, NVDAX:{mark:119,f:0.00035}, GOOGLX:{mark:176.50,f:0.00012}, SPYx:{mark:563,f:0.00008}, MSTRx:{mark:1786,f:0.0011} },
+  bitget:   { PAXG:{mark:3030.50,f:0.00032}, XAUT:{mark:3027.80,f:0.0002}, TSLAX:{mark:266.20,f:0.0007}, NVDAX:{mark:118.70,f:0.00038}, MSTRx:{mark:1785,f:0.001}, TSLAon:{mark:266.20,f:0.0007}, NVDAon:{mark:118.70,f:0.00038}, AAPLon:{mark:228.80,f:-0.0002} },
+  tradexyz: { PAXG:{mark:3030,f:0.00035}, XAUT:{mark:3027.50,f:0.00028}, TSLAX:{mark:267,f:0.00085}, NVDAX:{mark:119.20,f:0.00042} },
+};
+
+const SPOT_VENUE_NAMES = { gate:'Gate.io', binance:'Binance', bitget:'Bitget', kraken:'Kraken' };
+const SPOT_PERP_VENUES = { gate:{name:'Gate.io',settlesPerDay:3}, binance:{name:'Binance',settlesPerDay:3}, bitget:{name:'Bitget',settlesPerDay:3}, tradexyz:{name:'trade.xyz',settlesPerDay:24} };
+
+const ASSET_META = {
+  PAXG:   { underlying:'Gold (XAU)',     issuer:'Paxos',          category:'commodity' },
+  XAUT:   { underlying:'Gold (XAU)',     issuer:'Tether',         category:'commodity' },
+  AAPLX:  { underlying:'Apple (AAPL)',   issuer:'Backed Finance', category:'equity' },
+  TSLAX:  { underlying:'Tesla (TSLA)',   issuer:'Backed Finance', category:'equity' },
+  NVDAX:  { underlying:'Nvidia (NVDA)',  issuer:'Backed Finance', category:'equity' },
+  GOOGLX: { underlying:'Google (GOOGL)', issuer:'Backed Finance', category:'equity' },
+  SPYx:   { underlying:'S&P 500 (SPY)', issuer:'Backed Finance', category:'index' },
+  MSTRx:  { underlying:'MicroStrategy (MSTR)', issuer:'Backed Finance', category:'equity' },
+  MSTRX:  { underlying:'MicroStrategy (MSTR)', issuer:'Backed Finance', category:'equity' },
+  COINX:  { underlying:'Coinbase (COIN)',      issuer:'Backed Finance', category:'equity' },
+  TSLAon: { underlying:'Tesla (TSLA)',   issuer:'Ondo Finance',   category:'equity' },
+  NVDAon: { underlying:'Nvidia (NVDA)',  issuer:'Ondo Finance',   category:'equity' },
+  AAPLon: { underlying:'Apple (AAPL)',   issuer:'Ondo Finance',   category:'equity' },
+};
+
+const ISSUER_STYLES = {
+  'Paxos':          { bg:'rgba(0,209,128,0.10)', color:'#00D180', border:'rgba(0,209,128,0.25)' },
+  'Tether':         { bg:'rgba(80,175,149,0.10)', color:'#50AF95', border:'rgba(80,175,149,0.25)' },
+  'Backed Finance': { bg:'rgba(43,106,255,0.10)', color:'#2B6AFF', border:'rgba(43,106,255,0.25)' },
+  'Ondo Finance':   { bg:'rgba(139,143,232,0.10)', color:'#8B8FE8', border:'rgba(139,143,232,0.25)' },
+};
+const ISSUER_SHORT = { 'Paxos':'Paxos','Tether':'Tether','Backed Finance':'Backed','Ondo Finance':'Ondo' };
+function issuerShort(n) { return ISSUER_SHORT[n] || n; }
+
+const SPOT_FEES = {
+  spot:  { gate:{maker:0.001,taker:0.001}, binance:{maker:0.001,taker:0.001}, bitget:{maker:0.001,taker:0.001}, kraken:{maker:0.0016,taker:0.0026} },
+  perp:  { gate:{maker:0.0002,taker:0.0005}, binance:{maker:0.0002,taker:0.0005}, bitget:{maker:0.0002,taker:0.0006}, tradexyz:{maker:0.0003,taker:0.0009} },
+};
+let SPOT_HOLD_DAYS = 0; // 0 = "No Fees" mode (show gross funding APR)
+
+function spotCalcArbAPR(fundingAnn, spotVenue, perpVenue, spreadPct) {
+  if (SPOT_HOLD_DAYS <= 0) return Math.abs(fundingAnn); // No Fees mode
+  const sf = SPOT_FEES.spot[spotVenue] || {taker:0.001};
+  const pf = SPOT_FEES.perp[perpVenue] || {taker:0.0005};
+  const oneTimeCost = sf.taker*2 + pf.taker*2 + (spreadPct||0);
+  const annualizedCost = oneTimeCost * (365/SPOT_HOLD_DAYS);
+  return Math.abs(fundingAnn) - annualizedCost;
+}
+
+function spotFP(v) {
+  if (v>=1000) return v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  if (v>=10) return v.toFixed(2);
+  return v.toFixed(4);
+}
+function spotFV(v) {
+  if (v>=1e9) return (v/1e9).toFixed(1)+'B';
+  if (v>=1e6) return (v/1e6).toFixed(1)+'M';
+  if (v>=1e3) return (v/1e3).toFixed(0)+'K';
+  return v.toFixed(0);
+}
+
+// ── Spot Sub-Tab Switch ──
+let spotSubView = 'overview';
+
+function switchSpotSub(view, el) {
+  spotSubView = view;
+  document.querySelectorAll('#spotSubNav .spot-sub-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('spot-overview').style.display = 'none';
+  document.getElementById('spot-allAssets').style.display = 'none';
+  document.getElementById('spot-venue').style.display = 'none';
+
+  if (view === 'overview') {
+    document.getElementById('spot-overview').style.display = '';
+    renderSpotArbRank();
+  } else if (view === 'allAssets') {
+    document.getElementById('spot-allAssets').style.display = '';
+    renderSpotAllAssets();
+  } else {
+    document.getElementById('spot-venue').style.display = '';
+    renderSpotVenueTable(view);
+  }
+}
+
+// ── Spot Venue Table ──
+let spotVenueSort = { key: 'vol', dir: -1 };
+
+function setSpotVenueSort(key) {
+  if (spotVenueSort.key === key) spotVenueSort.dir *= -1;
+  else { spotVenueSort.key = key; spotVenueSort.dir = -1; }
+  document.querySelectorAll('#spot-venue thead th[data-sort]').forEach(th => {
+    const arrow = th.querySelector('.arrow');
+    if (!arrow) return;
+    if (th.dataset.sort === key) {
+      th.classList.add('sorted');
+      arrow.textContent = spotVenueSort.dir > 0 ? '▲' : '▼';
+    } else {
+      th.classList.remove('sorted');
+      arrow.textContent = '';
+    }
+  });
+  if (spotSubView !== 'overview' && spotSubView !== 'allAssets') renderSpotVenueTable(spotSubView);
+}
+
+function renderSpotVenueTable(venue) {
+  const assets = SPOT_DATA[venue] || [];
+  const pv = document.getElementById('spotPerpSel').value;
+  const pd = SPOT_PERP[pv] || {};
+  document.getElementById('spotVenueTitle').innerHTML = '<svg class="ic ic-18" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>' + (SPOT_VENUE_NAMES[venue]||venue) + ' Spot';
+
+  // Pre-compute sort values
+  const perpSettles = (SPOT_PERP_VENUES[pv]||{}).settlesPerDay || 3;
+  const rows = assets.map(a => {
+    const p = pd[a.coin];
+    const basis = p ? (p.mark - a.last)/a.last : -999;
+    const fAnn = p ? p.f*perpSettles*365 : 0;
+    const spreadRate = (a.ask-a.bid)/a.last;
+    const netArb = p ? spotCalcArbAPR(fAnn, venue, pv, spreadRate)*100 : -999;
+    return { a, p, _name: a.coin, _price: a.last, _mark: p?p.mark:0, _basis: basis, _chg: a.chg, _vol: a.vol*a.last, _spread: spreadRate*10000, _funding: fAnn, _arb: netArb };
+  });
+
+  const sk = spotVenueSort.key, sd = spotVenueSort.dir;
+  const keyMap = { name:'_name', price:'_price', mark:'_mark', basis:'_basis', chg:'_chg', vol:'_vol', spread:'_spread', funding:'_funding', arb:'_arb' };
+  const prop = keyMap[sk] || '_vol';
+  rows.sort((a,b) => {
+    let va = a[prop], vb = b[prop];
+    if (typeof va === 'string') return sd * va.localeCompare(vb);
+    return sd * (va - vb);
+  });
+
+  let h = '';
+  rows.forEach(({a, p}) => {
+    const cc = a.chg >= 0 ? 'pos' : 'neg';
+    const cs = a.chg >= 0 ? '+' : '';
+    const spBps = ((a.ask - a.bid)/a.last*10000).toFixed(1);
+
+    let markH='<span class="dim">—</span>', basisH='<span class="dim">—</span>', fundH='<span class="dim">—</span>', arbH='<span class="spot-arb l">N/A</span>';
+
+    if (p) {
+      markH = spotFP(p.mark);
+      const basis = (p.mark - a.last)/a.last;
+      const bPct = (basis*100).toFixed(3);
+      const absBasis = Math.abs(basis);
+      let bLabel, bLabelCol;
+      if (basis < -0.001) {
+        bLabel = '⚠ Avoid'; bLabelCol = 'var(--negative)';
+      } else if (absBasis <= 0.001) {
+        bLabel = '✦ Ideal'; bLabelCol = 'var(--positive)';
+      } else if (basis <= 0.003) {
+        bLabel = '● Good'; bLabelCol = 'var(--accent)';
+      } else {
+        bLabel = '△ Wide'; bLabelCol = 'var(--negative)';
+      }
+      const bCol = basis>0.001?'pos':basis<-0.001?'neg':'dim';
+      basisH = '<span class="'+bCol+'" style="font-weight:600">'+(basis>=0?'+':'')+bPct+'%</span><br><span style="font-size:10px;font-family:Inter,sans-serif;color:'+bLabelCol+'">'+bLabel+'</span>';
+
+      const fAnn = p.f*perpSettles*365;
+      const fAnnPct = fAnn*100;
+      fundH = '<span class="'+(fAnn>=0?'pos':'neg')+'" style="font-weight:600">'+(fAnn>=0?'+':'')+fAnnPct.toFixed(1)+'%</span>';
+
+      const spreadRate = (a.ask-a.bid)/a.last;
+      const netArb = spotCalcArbAPR(fAnn, venue, pv, spreadRate)*100;
+      const arbCls = netArb>=15?'g':netArb>=5?'m':'l';
+      arbH = netArb>0?'<span class="spot-arb '+arbCls+'">'+netArb.toFixed(1)+'%</span>':'<span class="spot-arb l">'+netArb.toFixed(1)+'%</span>';
+    }
+
+    h += '<tr><td style="text-align:left;font-family:Inter,sans-serif;font-weight:600">'+a.coin+'</td><td>'+spotFP(a.last)+'</td><td>'+markH+'</td><td>'+basisH+'</td>';
+    h += '<td class="'+cc+'">'+cs+a.chg.toFixed(2)+'%</td><td>$'+spotFV(a.vol*a.last)+'</td>';
+    h += '<td style="font-size:11px;color:var(--foreground-sec)">'+spotFP(a.hi)+' / '+spotFP(a.lo)+'</td>';
+    h += '<td>'+spBps+' bps</td><td>'+fundH+'</td><td>'+arbH+'</td></tr>';
+  });
+  document.getElementById('spotVenueBody').innerHTML = h;
+}
+
+document.getElementById('spotPerpSel').addEventListener('change', () => {
+  if (spotSubView !== 'overview' && spotSubView !== 'allAssets') renderSpotVenueTable(spotSubView);
+});
+function _syncHoldPills(hold) {
+  document.querySelectorAll('#spotHoldPills .hold-pill, #arbHoldPills .hold-pill').forEach(b => {
+    b.classList.toggle('active', parseFloat(b.dataset.hold) === hold);
+  });
+}
+document.getElementById('spotHoldPills').addEventListener('click', (e) => {
+  const btn = e.target.closest('.hold-pill');
+  if (!btn) return;
+  SPOT_HOLD_DAYS = parseFloat(btn.dataset.hold);
+  _syncHoldPills(SPOT_HOLD_DAYS);
+  if (spotSubView === 'overview') renderSpotArbRank();
+  else if (spotSubView !== 'allAssets') renderSpotVenueTable(spotSubView);
+});
+document.getElementById('arbHoldPills').addEventListener('click', (e) => {
+  const btn = e.target.closest('.hold-pill');
+  if (!btn) return;
+  SPOT_HOLD_DAYS = parseFloat(btn.dataset.hold);
+  _syncHoldPills(SPOT_HOLD_DAYS);
+  renderSpotArbRank();
+});
+
+// ── Spot Arb Ranking (all spot × perp venue combos) ──
+let arbRankSort = { key:'netFund', dir:-1 };
+let arbDirFilter = 'all'; // 'all' | 'long' | 'short'
+let arbRowLimit = 20;
+function setArbDir(d) {
+  arbDirFilter = d;
+  arbRowLimit = 20; // reset pagination on filter change
+  ['All','Long','Short'].forEach(k=>{
+    const el = document.getElementById('arbDir'+k);
+    if (el) el.classList.toggle('active', d === k.toLowerCase());
+  });
+  renderSpotArbRank();
+}
+function arbShowMore() {
+  arbRowLimit += 20;
+  renderSpotArbRank();
+}
+function arbCollapse() {
+  arbRowLimit = 20;
+  renderSpotArbRank();
+  document.getElementById('spotArbRankTable')?.scrollIntoView({behavior:'smooth', block:'start'});
+}
+function setArbRankSort(key) {
+  if (arbRankSort.key === key) arbRankSort.dir *= -1;
+  else { arbRankSort.key = key; arbRankSort.dir = -1; }
+  arbRowLimit = 20; // reset pagination on sort change
+  document.querySelectorAll('#spotArbRankTable thead th[data-sort]').forEach(th => {
+    const arrow = th.querySelector('.arrow');
+    if (!arrow) return;
+    if (th.dataset.sort === key) { th.classList.add('sorted'); arrow.textContent = arbRankSort.dir > 0 ? '▲' : '▼'; }
+    else { th.classList.remove('sorted'); arrow.textContent = ''; }
+  });
+  renderSpotArbRank();
+}
+
+// Match SPOT↔PERP by UNDERLYING symbol, not literal ticker.
+// Spot tickers carry issuer suffix (AAPLX=Backed, AAPLon=Ondo); perps are bare (AAPL).
+// Priority: ASSET_META lookup → crypto exception list → heuristic suffix strip.
+const _CRYPTO_TICKER_KEEP = new Set([
+  'AVAX','TRX','HEX','BNB','BTC','ETH','SOL','MATIC','LINK','OP','ARB','TIA','SEI','PEPE',
+  'ONDO','PENDLE','WIF','BONK','HYPE','JUP','KAS','SUI','APT','INJ','TAO','FTM','NEAR',
+  'ATOM','ADA','DOT','XRP','LTC','DOGE','SHIB','UNI','AAVE','LDO','MKR','CRV','GMX','DYDX',
+  'RAY','ORCA','JTO','PYTH','ENS','FXS','COMP','SNX','1INCH','XYZ100','SP500'
+]);
+function _arbUnderlyingKey(t) {
+  if (!t) return '';
+  // 1) ASSET_META explicit mapping (handles PAXG→XAU, XAUT→XAU, SPYx→SPY etc.)
+  const meta = (typeof ASSET_META !== 'undefined') && (ASSET_META[t] || ASSET_META[String(t).toUpperCase()]);
+  if (meta && meta.underlying) {
+    const m = meta.underlying.match(/\(([A-Z0-9]+)\)/);
+    if (m) return m[1];
+  }
+  const up = String(t).toUpperCase();
+  // 2) Known crypto tickers — never transform
+  if (_CRYPTO_TICKER_KEEP.has(up)) return up;
+  // 3) Heuristic suffix strip for tokenized stocks
+  if (up.length >= 5 && up.endsWith('ON')) return up.slice(0, -2);  // AAPLON → AAPL
+  if (up.length >= 5 && up.endsWith('X'))  return up.slice(0, -1);  // AAPLX  → AAPL (length≥5 protects AVAX)
+  return up;
+}
+// back-compat alias (old name still referenced elsewhere)
+function _arbTickerKey(t) { return _arbUnderlyingKey(t); }
+
+function renderSpotArbRank() {
+  // sync sorted-column CSS class with current sort state
+  document.querySelectorAll('#spotArbRankTable thead th[data-sort]').forEach(th => {
+    const arrow = th.querySelector('.arrow');
+    if (!arrow) return;
+    if (th.dataset.sort === arbRankSort.key) { th.classList.add('sorted'); arrow.textContent = arbRankSort.dir > 0 ? '▲' : '▼'; }
+    else { th.classList.remove('sorted'); arrow.textContent = ''; }
+  });
+  const sameVenueOnly = !!document.getElementById('arbSameVenueChk')?.checked;
+  const rows = [];
+  const perpVenues = Object.keys(SPOT_PERP);
+
+  Object.entries(SPOT_DATA).forEach(([sVenue, arr]) => {
+    const sFee = SPOT_FEES.spot[sVenue] || {taker:0.001};
+    arr.forEach(a => {
+      const spreadRate = (a.ask-a.bid)/a.last;
+      const coinKey = _arbTickerKey(a.coin);
+      perpVenues.forEach(pVenue => {
+        if (sameVenueOnly && pVenue !== sVenue) return;
+        const pMap = SPOT_PERP[pVenue] || {};
+        // find perp entry by case-insensitive ticker match
+        let p = null;
+        for (const k of Object.keys(pMap)) { if (_arbTickerKey(k) === coinKey) { p = pMap[k]; break; } }
+        if (!p) return;
+        const pFee = SPOT_FEES.perp[pVenue] || {taker:0.0005};
+        const settles = (SPOT_PERP_VENUES[pVenue]||{}).settlesPerDay || 3;
+        const fAnn = p.f * settles * 365;            // signed annualized funding
+        const basis = (p.mark - a.last) / a.last;    // signed basis
+        const oneTimeCost = sFee.taker*2 + pFee.taker*2 + spreadRate;
+        const hold = SPOT_HOLD_DAYS;
+        // direction: long spot / short perp when fAnn>=0 else reverse
+        const dir = fAnn >= 0 ? 'long' : 'short';
+        // gross funding leg (per direction, always positive by flipping)
+        const grossFundAPR = Math.abs(fAnn);
+        let costAnn;
+        if (hold <= 0) costAnn = 0;
+        else costAnn = oneTimeCost * (365/hold);
+        const netFund = grossFundAPR - costAnn;
+        rows.push({
+          coin: a.coin, sVenue, pVenue,
+          spot: a.last, mark: p.mark, basis, fAnn, costAnn, netFund, dir
+        });
+      });
+    });
+  });
+
+  // Filter by direction
+  const filtered = rows.filter(r => arbDirFilter === 'all' || r.dir === arbDirFilter);
+
+  // Sort
+  const sk = arbRankSort.key, sd = arbRankSort.dir;
+  const strKeys = new Set(['coin','route']);
+  filtered.sort((x,y) => {
+    let va, vb;
+    if (sk === 'route') { va = x.sVenue+'_'+x.pVenue; vb = y.sVenue+'_'+y.pVenue; }
+    else if (sk === 'basis') { va = (x.dir==='long'?x.basis:-x.basis); vb = (y.dir==='long'?y.basis:-y.basis); }
+    else { va = x[sk]; vb = y[sk]; }
+    if (strKeys.has(sk) || typeof va === 'string') return sd * String(va).localeCompare(String(vb));
+    return sd * (va - vb);
+  });
+
+  // Render
+  const fmtPct = (v, digits) => (v>=0?'+':'') + (v*100).toFixed(digits||1) + '%';
+  const clsPct = (v) => v>0?'pos':v<0?'neg':'dim';
+  const clsAPR = (v) => v>=0.15?'g':v>=0.05?'m':'l';
+  const totalCount = filtered.length;
+  const shown = filtered.slice(0, arbRowLimit);
+  let h = '';
+  shown.forEach((r,i) => {
+    const sVenueName = SPOT_VENUE_NAMES[r.sVenue]||r.sVenue;
+    const pVenueName = (SPOT_PERP_VENUES[r.pVenue]||{}).name || r.pVenue;
+    const crossBadge = r.sVenue !== r.pVenue ? ' <span style="font-size:9px;color:var(--foreground-dim);padding:1px 4px;border:1px solid var(--border);border-radius:3px;margin-left:4px">cross</span>' : '';
+    const routeH = '<span class="venue-dot '+r.sVenue+'"></span> <span style="font-size:11px;color:var(--foreground-sec)">'+sVenueName+'</span>'
+                 + ' <span style="color:var(--foreground-dim);margin:0 4px">→</span> '
+                 + '<span class="venue-dot '+r.pVenue+'"></span> <span style="font-size:11px;color:var(--foreground-sec)">'+pVenueName+'</span>'
+                 + crossBadge;
+    const dirBadge = r.dir === 'long'
+      ? '<span style="font-size:10px;padding:2px 6px;border-radius:3px;background:rgba(0,209,128,0.12);color:var(--positive)">Long Spot / Short Perp</span>'
+      : '<span style="font-size:10px;padding:2px 6px;border-radius:3px;background:rgba(255,122,122,0.12);color:var(--negative)">Short Spot / Long Perp</span>';
+    const netFundCls = r.netFund>=0 ? 'spot-arb '+clsAPR(r.netFund) : 'spot-arb l';
+    // basis is shown raw (direction-signed) as entry-edge signal, NOT annualized — avoids double-counting vs funding
+    const basisDirRaw = r.dir==='long' ? r.basis : -r.basis;
+    h += '<tr>'
+       + '<td style="text-align:left;color:var(--foreground-dim);font-size:11px">'+(i+1)+'</td>'
+       + '<td style="text-align:left;font-family:Inter,sans-serif;font-weight:600">'+r.coin+'</td>'
+       + '<td style="text-align:left">'+routeH+'</td>'
+       + '<td>'+spotFP(r.spot)+'</td>'
+       + '<td>'+spotFP(r.mark)+'</td>'
+       + '<td class="'+clsPct(r.fAnn)+'" style="font-weight:600">'+fmtPct(r.fAnn,1)+'</td>'
+       + '<td class="op-col">−</td>'
+       + '<td style="color:var(--foreground-dim)">'+(r.costAnn>0?(r.costAnn*100).toFixed(1)+'%':'—')+'</td>'
+       + '<td class="op-col">=</td>'
+       + '<td><span class="'+netFundCls+'">'+(r.netFund>=0?'+':'')+(r.netFund*100).toFixed(1)+'%</span></td>'
+       + '<td class="'+clsPct(basisDirRaw)+'" style="font-weight:600">'+(basisDirRaw>=0?'+':'')+(basisDirRaw*100).toFixed(3)+'%</td>'
+       + '<td style="text-align:left">'+dirBadge+'</td>'
+       + '</tr>';
+  });
+  document.getElementById('spotArbRankBody').innerHTML = h || '<tr><td colspan="11" style="text-align:center;color:var(--foreground-dim);padding:24px">No combos match the current filters.</td></tr>';
+  const shownCount = shown.length;
+  const remaining = totalCount - shownCount;
+  const vm = document.getElementById('arbViewMoreWrap');
+  if (vm) {
+    if (remaining > 0) {
+      const nextBatch = Math.min(20, remaining);
+      vm.innerHTML = '<button type="button" class="arb-view-more" onclick="arbShowMore()">View ' + nextBatch + ' more <span style="color:var(--foreground-dim);font-weight:500">· ' + shownCount + ' / ' + totalCount + '</span></button>';
+      vm.style.display = '';
+    } else if (totalCount > 20) {
+      vm.innerHTML = '<button type="button" class="arb-view-more" onclick="arbCollapse()">Collapse <span style="color:var(--foreground-dim);font-weight:500">· showing all ' + totalCount + '</span></button>';
+      vm.style.display = '';
+    } else {
+      vm.style.display = 'none';
+    }
+  }
+  document.getElementById('arbRowCount').textContent = totalCount;
+  const labels = {coin:'Asset',route:'Route',spot:'Spot Last',mark:'Perp Mark',basis:'Basis',funding:'Funding Ann.',cost:'Cost Ann.',netFund:'Net APR (Funding)'};
+  document.getElementById('arbSortLabel').textContent = (labels[arbRankSort.key]||'Net APR') + (arbRankSort.dir>0?' ↑':' ↓');
+}
+document.getElementById('arbSameVenueChk').addEventListener('change', renderSpotArbRank);
+renderSpotArbRank(); // initial render on page load (overview is default)
+
+// ── Spot All Assets (3-level expandable) ──
+let spotCatFilter = 'all';
+let spotAllSort = { key: 'chg', dir: -1 };
+
+function setSpotAllSort(key) {
+  if (spotAllSort.key === key) spotAllSort.dir *= -1;
+  else { spotAllSort.key = key; spotAllSort.dir = -1; }
+  // Update arrow indicators
+  document.querySelectorAll('.spot-table thead th[data-sort]').forEach(th => {
+    const arrow = th.querySelector('.arrow');
+    if (!arrow) return;
+    if (th.dataset.sort === key) {
+      th.classList.add('sorted');
+      arrow.textContent = spotAllSort.dir > 0 ? '▲' : '▼';
+    } else {
+      th.classList.remove('sorted');
+      arrow.textContent = '';
+    }
+  });
+  renderSpotAllAssets();
+}
+
+function renderSpotAllAssets() {
+  const allEntries = [];
+  Object.entries(SPOT_DATA).forEach(([venue, arr]) => {
+    arr.forEach(a => allEntries.push({...a, venue}));
+  });
+
+  const underlyingMap = {};
+  allEntries.forEach(e => {
+    const meta = ASSET_META[e.coin] || {underlying:e.coin, issuer:'—', category:'other'};
+    const uKey = meta.underlying;
+    if (!underlyingMap[uKey]) underlyingMap[uKey] = {category:meta.category, coins:{}};
+    if (!underlyingMap[uKey].coins[e.coin]) underlyingMap[uKey].coins[e.coin] = [];
+    underlyingMap[uKey].coins[e.coin].push(e);
+  });
+
+  // Category chips
+  const catCounts = {};
+  Object.values(underlyingMap).forEach(g => { catCounts[g.category] = (catCounts[g.category]||0)+1; });
+  let chipH = '<span class="spot-cat-filter '+(spotCatFilter==='all'?'active':'')+'" onclick="setSpotCatFilter(\'all\')">All ('+Object.keys(underlyingMap).length+')</span>';
+  Object.entries(catCounts).forEach(([cat, cnt]) => {
+    chipH += '<span class="spot-cat-filter '+(spotCatFilter===cat?'active':'')+'" onclick="setSpotCatFilter(\''+cat+'\')"><span class="cat-dot-s" style="background:'+CAT_COLORS[cat]+';display:inline-block;width:6px;height:6px;border-radius:2px;margin-right:4px"></span>'+CAT_LABELS[cat]+' ('+cnt+')</span>';
+  });
+  document.getElementById('spotCatFilters').innerHTML = chipH;
+
+  const vColors = {gate:'var(--gate)', binance:'var(--binance)', bitget:'var(--bitget)', kraken:'var(--kraken)'};
+  const perpVenueKeys = ['gate','binance','bitget','tradexyz'];
+  const perpVenueColors = {gate:'var(--gate)', binance:'var(--binance)', bitget:'var(--bitget)', tradexyz:'var(--tradexyz)'};
+
+  function bpsRange(entries) {
+    const arr = entries.map(e=>(e.ask-e.bid)/e.last*10000);
+    const mn=Math.min(...arr), mx=Math.max(...arr);
+    if (entries.length===1||Math.abs(mn-mx)<0.05) return mn.toFixed(1)+' bps';
+    return mn.toFixed(1)+'–'+mx.toFixed(1)+' bps';
+  }
+
+  // Pre-compute sortable values per underlying group
+  let sortableGroups = Object.entries(underlyingMap)
+    .filter(([, group]) => spotCatFilter==='all' || group.category===spotCatFilter)
+    .map(([underlying, group]) => {
+      const coinKeys = Object.keys(group.coins);
+      const entries = coinKeys.flatMap(c=>group.coins[c]);
+      const prices = entries.map(e=>e.last);
+      const avgPrice = prices.reduce((a,b)=>a+b,0)/prices.length;
+      const avgChg = entries.reduce((s,e)=>s+e.chg,0)/entries.length;
+      const totalVol = entries.reduce((s,e)=>s+e.vol*e.last,0);
+      const venueCount = new Set(entries.map(e=>e.venue)).size;
+      const spreadArr = entries.map(e=>(e.ask-e.bid)/e.last*10000);
+      const avgSpread = spreadArr.reduce((a,b)=>a+b,0)/spreadArr.length;
+      const perpVKeys = ['gate','binance','bitget','tradexyz'];
+      const perpSet = new Set();
+      coinKeys.forEach(c=>{ perpVKeys.forEach(pv=>{ if(SPOT_PERP[pv]&&SPOT_PERP[pv][c]) perpSet.add(pv); }); });
+      return { underlying, group, _name: underlying, _cat: group.category, _price: avgPrice, _chg: avgChg, _vol: totalVol, _exchanges: venueCount, _spread: avgSpread, _perp: perpSet.size };
+    });
+
+  const sk = spotAllSort.key, sd = spotAllSort.dir;
+  const sortKeyMap = { underlying:'_name', category:'_cat', price:'_price', chg:'_chg', vol:'_vol', exchanges:'_exchanges', spread:'_spread', perp:'_perp' };
+  const sortProp = sortKeyMap[sk] || '_chg';
+  sortableGroups.sort((a,b) => {
+    let va = a[sortProp], vb = b[sortProp];
+    if (typeof va === 'string') return sd * va.localeCompare(vb);
+    return sd * (va - vb);
+  });
+
+  let h = '';
+  sortableGroups.forEach(({underlying, group}) => {
+    const coinKeys = Object.keys(group.coins);
+    const allCoinEntries = coinKeys.flatMap(c=>group.coins[c]);
+    const uid = 'sa_'+underlying.replace(/[^a-zA-Z0-9]/g,'_');
+    const catColor = CAT_COLORS[group.category]||'#5C6170';
+
+    const prices = allCoinEntries.map(e=>e.last);
+    const minP=Math.min(...prices), maxP=Math.max(...prices);
+    const priceStr = (minP===maxP)?spotFP(minP):spotFP(minP)+' – '+spotFP(maxP);
+    const totalVol = allCoinEntries.reduce((s,e)=>s+e.vol*e.last,0);
+    const avgChg = allCoinEntries.reduce((s,e)=>s+e.chg,0)/allCoinEntries.length;
+    const chgCls = avgChg>=0?'pos':'neg';
+    const chgSign = avgChg>=0?'+':'';
+
+    const issuers = [...new Set(coinKeys.map(c=>(ASSET_META[c]||{}).issuer||'—'))];
+    const issuerBadges = issuers.map(iss=>{
+      const is=ISSUER_STYLES[iss]||{bg:'rgba(136,144,160,0.1)',color:'var(--foreground-muted)',border:'rgba(136,144,160,0.2)'};
+      return '<span class="issuer-badge" style="background:'+is.bg+';color:'+is.color+';border-color:'+is.border+'">'+issuerShort(iss)+'</span>';
+    }).join('');
+
+    const venueSet = [...new Set(allCoinEntries.map(e=>e.venue))];
+    const spotDots = venueSet.map(v=>'<span class="venue-dot '+v+'"></span>').join('');
+
+    const allPerpVenues = new Set();
+    coinKeys.forEach(coin=>{ perpVenueKeys.forEach(pv=>{ if(SPOT_PERP[pv]&&SPOT_PERP[pv][coin]) allPerpVenues.add(pv); }); });
+    const perpCount = allPerpVenues.size;
+    const perpTipDots = [...allPerpVenues].map(pv=>'<span class="venue-dot '+pv+'"></span> '+(SPOT_PERP_VENUES[pv]||{}).name).join('&nbsp;&nbsp;');
+    const perpCountColor = perpCount>=3?'var(--positive)':perpCount>=2?'var(--accent)':perpCount===1?'var(--foreground-sec)':'var(--foreground-dim)';
+
+    const tickerStr = coinKeys.join(', ');
+
+    // Level 1: Underlying
+    h += '<tr class="spot-row-parent" onclick="spotToggleL1(\''+uid+'\')">';
+    h += '<td>▸</td>';
+    h += '<td style="font-weight:700;font-size:14px">'+underlying+'</td>';
+    h += '<td style="font-family:Inter,sans-serif;font-size:12px;color:var(--foreground-sec)">'+tickerStr+'</td>';
+    h += '<td><div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">'+issuerBadges+'</div></td>';
+    h += '<td><span class="cat-chip" style="background:'+catColor+'15;color:'+catColor+'"><span class="cat-dot-s" style="background:'+catColor+'"></span>'+CAT_LABELS[group.category]+'</span></td>';
+    h += '<td style="font-family:Inter,sans-serif"><span style="display:flex;align-items:center;gap:3px">'+spotDots+' <span style="font-size:11px;color:var(--foreground-dim)">'+venueSet.length+'</span></span></td>';
+    h += '<td style="font-family:Inter,sans-serif"><span class="perp-tooltip-s"><span class="perp-count-s" style="color:'+perpCountColor+'">'+perpCount+'</span>'+(perpCount>0?'<span class="perp-tip-s">'+perpTipDots+'</span>':'')+'</span></td>';
+    h += '<td style="font-size:12px">'+priceStr+'</td>';
+    h += '<td class="'+chgCls+'">'+chgSign+avgChg.toFixed(2)+'%</td>';
+    h += '<td style="font-size:12px">'+bpsRange(allCoinEntries)+'</td>';
+    h += '<td>$'+spotFV(totalVol)+'</td>';
+    h += '</tr>';
+
+    // Level 2: Token (issuer)
+    coinKeys.forEach(coin=>{
+      const meta = ASSET_META[coin]||{};
+      const is = ISSUER_STYLES[meta.issuer]||{bg:'rgba(136,144,160,0.1)',color:'var(--foreground-muted)',border:'rgba(136,144,160,0.2)'};
+      const coinEntries = group.coins[coin];
+      const midId = uid+'_'+coin;
+
+      const cPrices = coinEntries.map(e=>e.last);
+      const cMinP=Math.min(...cPrices), cMaxP=Math.max(...cPrices);
+      const cPriceStr = coinEntries.length===1?spotFP(cMinP):spotFP(cMinP)+' – '+spotFP(cMaxP);
+      const cVol = coinEntries.reduce((s,e)=>s+e.vol*e.last,0);
+      const cChg = coinEntries.reduce((s,e)=>s+e.chg,0)/coinEntries.length;
+      const cChgCls = cChg>=0?'pos':'neg';
+      const cChgSign = cChg>=0?'+':'';
+      const hasMultiVenue = coinEntries.length>1;
+      const cVenueSet = [...new Set(coinEntries.map(e=>e.venue))];
+
+      let exchCell;
+      if (cVenueSet.length===1) {
+        exchCell = '<span class="venue-dot '+cVenueSet[0]+'"></span> <span style="font-size:12px;color:var(--foreground-sec)">'+(SPOT_VENUE_NAMES[cVenueSet[0]]||cVenueSet[0])+'</span>';
+      } else {
+        const cSpotDots = cVenueSet.map(v=>'<span class="venue-dot '+v+'"></span>').join('');
+        exchCell = '<span class="mid-data">'+cSpotDots+' <span style="font-size:11px;color:var(--foreground-dim)">'+cVenueSet.length+'</span></span>';
+      }
+
+      h += '<tr class="spot-row-mid hidden-row" data-parent="'+uid+'" data-mid-id="'+midId+'"'+(hasMultiVenue?' onclick="spotToggleL2(\''+midId+'\')" style="cursor:pointer"':'')+'>';
+      h += '<td>'+(hasMultiVenue?'▸':'')+'</td>';
+      h += '<td style="font-weight:600;font-size:13px;padding-left:20px">'+coin+'</td>';
+      h += '<td></td>';
+      h += '<td><span class="issuer-badge" style="background:'+is.bg+';color:'+is.color+';border-color:'+is.border+'">'+issuerShort(meta.issuer)+'</span></td>';
+      h += '<td></td>';
+      h += '<td style="font-family:Inter,sans-serif">'+exchCell+'</td>';
+      h += '<td></td>';
+      h += '<td class="mid-data" style="font-size:12px">'+cPriceStr+'</td>';
+      h += '<td class="mid-data '+cChgCls+'">'+cChgSign+cChg.toFixed(2)+'%</td>';
+      h += '<td class="mid-data" style="font-size:12px">'+bpsRange(coinEntries)+'</td>';
+      h += '<td class="mid-data">$'+spotFV(cVol)+'</td>';
+      h += '</tr>';
+
+      // Level 3: Per-exchange
+      coinEntries.forEach(a=>{
+        const cc = a.chg>=0?'pos':'neg';
+        const cs = a.chg>=0?'+':'';
+        const spBps = ((a.ask-a.bid)/a.last*10000).toFixed(1);
+        h += '<tr class="spot-row-child hidden-row" data-parent="'+midId+'">';
+        h += '<td></td><td></td><td></td><td></td><td></td>';
+        h += '<td style="font-size:12px;font-family:Inter,sans-serif;padding-left:4px"><span class="venue-dot '+a.venue+'"></span> '+(SPOT_VENUE_NAMES[a.venue]||a.venue)+'</td>';
+        h += '<td></td>';
+        h += '<td style="font-size:12px">'+spotFP(a.last)+'</td>';
+        h += '<td class="'+cc+'">'+cs+a.chg.toFixed(2)+'%</td>';
+        h += '<td style="font-size:12px">'+spBps+' bps</td>';
+        h += '<td>$'+spotFV(a.vol*a.last)+'</td>';
+        h += '</tr>';
+      });
+    });
+  });
+
+  document.getElementById('spotAllAssetsBody').innerHTML = h;
+}
+
+function setSpotCatFilter(cat) { spotCatFilter=cat; renderSpotAllAssets(); }
+
+function spotToggleL1(uid) {
+  const midRows = document.querySelectorAll('.spot-row-mid[data-parent="'+uid+'"]');
+  if (!midRows.length) return;
+  const isHidden = midRows[0].classList.contains('hidden-row');
+  let parentRow = midRows[0].previousElementSibling;
+  while (parentRow && !parentRow.classList.contains('spot-row-parent')) parentRow = parentRow.previousElementSibling;
+  midRows.forEach(r=>r.classList.toggle('hidden-row'));
+  if (!isHidden) {
+    document.querySelectorAll('.spot-row-child').forEach(r=>{
+      if (r.dataset.parent && r.dataset.parent.startsWith(uid+'_')) r.classList.add('hidden-row');
+    });
+    midRows.forEach(r=>{
+      r.classList.remove('expanded');
+      const arrow = r.querySelector('td:first-child');
+      if (arrow && arrow.textContent==='▾') arrow.textContent='▸';
+    });
+  }
+  if (parentRow) parentRow.querySelector('td:first-child').textContent = isHidden?'▾':'▸';
+}
+
+function spotToggleL2(midId) {
+  const childRows = document.querySelectorAll('.spot-row-child[data-parent="'+midId+'"]');
+  if (!childRows.length) return;
+  const isHidden = childRows[0].classList.contains('hidden-row');
+  childRows.forEach(r=>r.classList.toggle('hidden-row'));
+  const midRow = document.querySelector('.spot-row-mid[data-mid-id="'+midId+'"]');
+  if (midRow) {
+    midRow.classList.toggle('expanded', isHidden);
+    midRow.querySelector('td:first-child').textContent = isHidden?'▾':'▸';
+  }
 }
 
 // ═══════════════════════════════════════════════
