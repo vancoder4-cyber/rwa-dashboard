@@ -1,7 +1,10 @@
 {
   "rewrites": [
     { "source": "/api/gate/:path*", "destination": "https://api.gateio.ws/api/v4/futures/usdt/:path*" },
+    { "source": "/api/gate-spot/:path*", "destination": "https://api.gateio.ws/api/v4/spot/:path*" },
     { "source": "/api/binance/:path*", "destination": "https://fapi.binance.com/fapi/v1/:path*" },
+    { "source": "/api/binance-spot/:path*", "destination": "https://api.binance.com/api/v3/:path*" },
+    { "source": "/api/kraken/:path*", "destination": "https://api.kraken.com/0/public/:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [
