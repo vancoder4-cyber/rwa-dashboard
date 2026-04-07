@@ -1339,6 +1339,8 @@ input[type="checkbox"] {
               <option value="binance">Binance Perp</option>
               <option value="bitget">Bitget Perp</option>
               <option value="tradexyz">trade.xyz Perp</option>
+              <option value="lighter">Lighter Perp</option>
+              <option value="vest">Vest Perp</option>
             </select>
           </div>
           <div class="spot-perp-sel">
@@ -1450,45 +1452,237 @@ const VENUES = {
 const CAT_COLORS = { index:'#3B82F6', equity:'#8B8FE8', commodity:'#D4A853', etf:'#3EC6D9', fx:'#D98CAF', other:'#5C6170' };
 const CAT_LABELS = { index:'Index', equity:'Equity', commodity:'Commodity', etf:'ETF', fx:'FX', other:'Other' };
 
-const KNOWN_CATEGORIES = {
-  'SP500':'index','XYZ100':'index','JP225':'index','KR200':'index','VIX':'index','NDX':'index','NQ100':'index','DJI':'index','NASDAQ':'index','DAX':'index','FTSE':'index',
-  'CL':'commodity','BRN':'commodity','BRENTOIL':'commodity','NATGAS':'commodity','OIL':'commodity',
-  'GOLD':'commodity','SILVER':'commodity','HG':'commodity','COPPER':'commodity','PLAT':'commodity','PLATINUM':'commodity','PALL':'commodity','PALLADIUM':'commodity','ALUMINIUM':'commodity','URANIUM':'commodity',
-  'CORN':'commodity','WHEAT':'commodity','SOYBEAN':'commodity','COFFEE':'commodity','SUGAR':'commodity','COTTON':'commodity',
-  'NVDA':'equity','TSLA':'equity','AAPL':'equity','MSFT':'equity','GOOGL':'equity','AMZN':'equity','META':'equity','NFLX':'equity','AMD':'equity','INTC':'equity','MU':'equity','ORCL':'equity','TSM':'equity','SNDK':'equity','AVGO':'equity','CRM':'equity','UBER':'equity','SHOP':'equity','SQ':'equity','PYPL':'equity','SNAP':'equity',
-  'COIN':'equity','HOOD':'equity','PLTR':'equity','MSTR':'equity','CRCL':'equity','SOFI':'equity','COST':'equity','RIVN':'equity','LCID':'equity','NIO':'equity','FUTU':'equity','RDDT':'equity',
-  'BABA':'equity','SOFTBANK':'equity','KIOXIA':'equity','SMSN':'equity','HYUNDAI':'equity','SKHX':'equity','PDD':'equity','JD':'equity',
-  'LLY':'equity','HIMS':'equity','PFE':'equity','MRNA':'equity','JNJ':'equity',
-  'GME':'equity','LITE':'equity','DKNG':'equity','CRWV':'equity','DFDV':'equity','MCD':'equity','WMT':'equity','DIS':'equity','NKE':'equity',
-  'IBM':'equity','ASML':'equity','ARM':'equity','GE':'equity','APP':'equity','MRVL':'equity','CSCO':'equity','PEP':'equity','ACN':'equity','MA':'equity','UNH':'equity',
-  'COP':'commodity','XOM':'commodity','OXY':'commodity','XLE':'commodity',
-  'V':'equity','BA':'equity','CAT':'equity','HD':'equity','JPM':'equity','GS':'equity','MS':'equity','BRK':'equity','ABBV':'equity','TMO':'equity','DHR':'equity','ABT':'equity','BMY':'equity','GILD':'equity',
-  'QCOM':'equity','TXN':'equity','AMAT':'equity','LRCX':'equity','KLAC':'equity','MCHP':'equity','ON':'equity','ADI':'equity',
-  'SNOW':'equity','NET':'equity','DDOG':'equity','ZS':'equity','PANW':'equity','CRWD':'equity','FTNT':'equity',
-  'EWY':'etf','EWJ':'etf','URNM':'etf','USAR':'etf','SPY':'etf','QQQ':'etf','GLD':'etf','SLV':'etf','USO':'etf','TLT':'etf',
-  'KWEB':'etf','EWT':'etf','TQQQ':'etf','SQQQ':'etf',
-  'JPY':'fx','EUR':'fx','DXY':'fx','GBP':'fx','CNY':'fx','AUD':'fx',
+// ═══════════════════════════════════════════════════
+// UNIFIED RWA ASSET SYSTEM (ported from rwa-cli)
+// ═══════════════════════════════════════════════════
+const RWA_ASSETS = {
+  XAU: { name: "Gold", category: "commodity" },
+  XAUT: { name: "Tether Gold", category: "commodity" },
+  PAXG: { name: "PAX Gold", category: "commodity" },
+  KAU: { name: "Kinesis Gold", category: "commodity" },
+  PGOLD: { name: "Pleasing Gold", category: "commodity" },
+  XAUM: { name: "Matrixdock Gold", category: "commodity" },
+  GGBR: { name: "Goldfish Gold", category: "commodity" },
+  XAG: { name: "Silver", category: "commodity" },
+  XCU: { name: "Copper", category: "commodity" },
+  XPT: { name: "Platinum", category: "commodity" },
+  XPD: { name: "Palladium", category: "commodity" },
+  NATGAS: { name: "Natural Gas", category: "commodity" },
+  WTI: { name: "WTI Crude Oil", category: "commodity" },
+  BRENTOIL: { name: "Brent Oil", category: "commodity" },
+  CORN: { name: "Corn", category: "commodity" },
+  WHEAT: { name: "Wheat", category: "commodity" },
+  URANIUM: { name: "Uranium", category: "commodity" },
+  ALUMINIUM: { name: "Aluminium", category: "commodity" },
+  TSLA: { name: "Tesla", category: "equity" },
+  AAPL: { name: "Apple", category: "equity" },
+  NVDA: { name: "NVIDIA", category: "equity" },
+  AMZN: { name: "Amazon", category: "equity" },
+  GOOGL: { name: "Alphabet Class A", category: "equity" },
+  META: { name: "Meta", category: "equity" },
+  MSFT: { name: "Microsoft", category: "equity" },
+  COIN: { name: "Coinbase", category: "equity" },
+  PLTR: { name: "Palantir", category: "equity" },
+  HOOD: { name: "Robinhood", category: "equity" },
+  INTC: { name: "Intel", category: "equity" },
+  ORCL: { name: "Oracle", category: "equity" },
+  AMD: { name: "Advanced Micro Devices", category: "equity" },
+  MU: { name: "Micron", category: "equity" },
+  MSTR: { name: "Strategy Inc.", category: "equity" },
+  CRCL: { name: "Circle Internet Group", category: "equity" },
+  NFLX: { name: "Netflix", category: "equity" },
+  COST: { name: "Costco", category: "equity" },
+  LLY: { name: "Eli Lilly", category: "equity" },
+  TSM: { name: "Taiwan Semiconductor", category: "equity" },
+  RIVN: { name: "Rivian", category: "equity" },
+  BABA: { name: "Alibaba", category: "equity" },
+  GME: { name: "GameStop", category: "equity" },
+  DKNG: { name: "DraftKings", category: "equity" },
+  HIMS: { name: "Hims & Hers", category: "equity" },
+  SNDK: { name: "Sandisk Corporation", category: "equity" },
+  BMNR: { name: "Bitmine Immersion Technologies", category: "equity" },
+  HYUNDAI: { name: "Hyundai Motor", category: "equity" },
+  SAMSUNG: { name: "Samsung Electronics", category: "equity" },
+  SMSN: { name: "Samsung Electronics", category: "equity" },
+  SKHYNIX: { name: "SK Hynix", category: "equity" },
+  SOFTBANK: { name: "SoftBank Group", category: "equity" },
+  KIOXIA: { name: "Kioxia", category: "equity" },
+  SKHX: { name: "Skechers", category: "equity" },
+  LITE: { name: "Lumentum", category: "equity" },
+  CRWV: { name: "CoreWeave", category: "equity" },
+  QQQ: { name: "Invesco QQQ Trust", category: "etf" },
+  SPY: { name: "SPDR S&P 500 ETF Trust", category: "etf" },
+  IWM: { name: "iShares Russell 2000 ETF", category: "etf" },
+  DIA: { name: "SPDR Dow Jones Industrial Average ETF", category: "etf" },
+  URA: { name: "Global X Uranium ETF", category: "etf" },
+  URNM: { name: "Sprott Uranium Miners ETF", category: "etf" },
+  EWY: { name: "iShares MSCI South Korea ETF", category: "etf" },
+  EWJ: { name: "iShares MSCI Japan ETF", category: "etf" },
+  XLE: { name: "Energy Select Sector SPDR Fund", category: "etf" },
+  BOTZ: { name: "Global X Robotics & AI ETF", category: "etf" },
+  MAGS: { name: "Roundhill Magnificent Seven ETF", category: "etf" },
+  USO: { name: "United States Oil Fund", category: "etf" },
+  SLV: { name: "iShares Silver Trust", category: "etf" },
+  IAU: { name: "iShares Gold Trust", category: "etf" },
+  ITOT: { name: "iShares Core S&P Total U.S. Stock Market ETF", category: "etf" },
+  IVV: { name: "iShares Core S&P 500 ETF", category: "etf" },
+  SPX: { name: "S&P 500 Index", category: "index" },
+  KRCOMP: { name: "Korea Composite Stock Price Index", category: "index" },
+  KR200: { name: "KOSPI 200 Index", category: "index" },
+  JP225: { name: "Nikkei 225 Index", category: "index" },
+  VIX: { name: "CBOE Volatility Index", category: "index" },
+  DXY: { name: "U.S. Dollar Index", category: "index" },
+  USAR: { name: "U.S. Aerospace & Defense", category: "equity" }
 };
 
-const KNOWN_NAMES = {
-  'SP500':'S&P 500 Index','XYZ100':'Nasdaq 100 (XYZ)','JP225':'Nikkei 225','KR200':'KOSPI 200','VIX':'VIX Volatility Index','NDX':'Nasdaq 100','NQ100':'Nasdaq 100','DJI':'Dow Jones','NASDAQ':'Nasdaq Composite','DAX':'DAX 40','FTSE':'FTSE 100',
-  'CL':'WTI Crude Oil','BRN':'Brent Crude Oil','BRENTOIL':'Brent Crude Oil','NATGAS':'Natural Gas','OIL':'Crude Oil',
-  'GOLD':'Gold (XAU)','SILVER':'Silver (XAG)','HG':'Copper','COPPER':'Copper','PLAT':'Platinum','PLATINUM':'Platinum','PALL':'Palladium','PALLADIUM':'Palladium','ALUMINIUM':'Aluminium','URANIUM':'Uranium',
-  'CORN':'Corn','WHEAT':'Wheat','SOYBEAN':'Soybean','COFFEE':'Coffee','SUGAR':'Sugar','COTTON':'Cotton',
-  'NVDA':'NVIDIA Corp','TSLA':'Tesla Inc','AAPL':'Apple Inc','MSFT':'Microsoft Corp','GOOGL':'Alphabet Inc','AMZN':'Amazon.com Inc','META':'Meta Platforms','NFLX':'Netflix Inc','AMD':'AMD Inc','INTC':'Intel Corp','MU':'Micron Technology','ORCL':'Oracle Corp','TSM':'Taiwan Semiconductor','SNDK':'SanDisk Corp','AVGO':'Broadcom Inc','CRM':'Salesforce Inc','UBER':'Uber Technologies','SHOP':'Shopify Inc','SQ':'Block Inc','PYPL':'PayPal Holdings','SNAP':'Snap Inc',
-  'COIN':'Coinbase Global','HOOD':'Robinhood Markets','PLTR':'Palantir Technologies','MSTR':'Strategy (MicroStrategy)','CRCL':'Circle Internet','SOFI':'SoFi Technologies','COST':'Costco Wholesale','RIVN':'Rivian Automotive','LCID':'Lucid Group','NIO':'NIO Inc','FUTU':'Futu Holdings','RDDT':'Reddit Inc','DFDV':'DeFi Development Corp',
-  'BABA':'Alibaba Group','SOFTBANK':'SoftBank Group','KIOXIA':'Kioxia Holdings','SMSN':'Samsung Electronics','HYUNDAI':'Hyundai Motor','SKHX':'SK Hynix','PDD':'PDD Holdings','JD':'JD.com Inc',
-  'LLY':'Eli Lilly & Co','HIMS':'Hims & Hers Health','PFE':'Pfizer Inc','MRNA':'Moderna Inc','JNJ':'Johnson & Johnson',
-  'GME':'GameStop Corp','LITE':'Lumentum Holdings','DKNG':'DraftKings Inc','CRWV':'CoreWeave Inc','MCD':'McDonalds Corp','WMT':'Walmart Inc','DIS':'Walt Disney Co','NKE':'Nike Inc',
-  'IBM':'IBM Corp','ASML':'ASML Holding','ARM':'Arm Holdings','GE':'GE Aerospace','APP':'AppLovin Corp','MRVL':'Marvell Technology','CSCO':'Cisco Systems','PEP':'PepsiCo Inc','ACN':'Accenture plc','MA':'Mastercard Inc','UNH':'UnitedHealth Group',
-  'COP':'ConocoPhillips','XOM':'Exxon Mobil','OXY':'Occidental Petroleum','XLE':'Energy Select SPDR',
-  'V':'Visa Inc','BA':'Boeing Co','CAT':'Caterpillar Inc','HD':'Home Depot','JPM':'JPMorgan Chase','GS':'Goldman Sachs','MS':'Morgan Stanley','BRK':'Berkshire Hathaway','ABBV':'AbbVie Inc','TMO':'Thermo Fisher','DHR':'Danaher Corp','ABT':'Abbott Laboratories','BMY':'Bristol-Myers Squibb','GILD':'Gilead Sciences',
-  'QCOM':'Qualcomm Inc','TXN':'Texas Instruments','AMAT':'Applied Materials','LRCX':'Lam Research','KLAC':'KLA Corp','MCHP':'Microchip Technology','ON':'ON Semiconductor','ADI':'Analog Devices',
-  'SNOW':'Snowflake Inc','NET':'Cloudflare Inc','DDOG':'Datadog Inc','ZS':'Zscaler Inc','PANW':'Palo Alto Networks','CRWD':'CrowdStrike Holdings','FTNT':'Fortinet Inc',
-  'EWY':'iShares South Korea','EWJ':'iShares Japan','URNM':'Sprott Uranium ETF','USAR':'US Real Assets','SPY':'SPDR S&P 500','QQQ':'Invesco QQQ','GLD':'SPDR Gold','SLV':'iShares Silver','USO':'United States Oil','TLT':'iShares 20+ Treasury',
-  'KWEB':'KraneShares China Internet','EWT':'iShares MSCI Taiwan','TQQQ':'ProShares UltraPro QQQ','SQQQ':'ProShares UltraPro Short QQQ',
-  'JPY':'USD/JPY','EUR':'EUR/USD','DXY':'US Dollar Index','GBP':'GBP/USD','CNY':'USD/CNY','AUD':'AUD/USD',
+const SYMBOL_ALIASES = {
+  GOLD: "XAU",
+  SILVER: "XAG",
+  COPPER: "XCU",
+  PLATINUM: "XPT",
+  PALLADIUM: "XPD",
+  CL: "WTI",
+  SP500: "SPX"
 };
+
+const EXCLUDED_SYMBOLS = new Set([
+  "XYZ100", "STABLE", "EUR", "JPY", "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "USDCAD", "AUDUSD", "NZDUSD", "USDKRW"
+]);
+
+function canonicalSymbol(symbol) {
+  const normalized = String(symbol || '').trim().toUpperCase();
+  return SYMBOL_ALIASES[normalized] ?? normalized;
+}
+
+function inferCategory(symbol, name = '') {
+  const canonical = canonicalSymbol(symbol);
+  const manual = RWA_ASSETS[canonical];
+  if (manual?.category) return manual.category;
+  const upperName = name.toUpperCase();
+  if (canonical.endsWith('USD') && canonical.length >= 6) return 'fx';
+  if (upperName.includes('ETF') || upperName.includes('TRUST') || upperName.includes('FUND')) return 'etf';
+  if (upperName.includes('INDEX')) return 'index';
+  return 'equity';
+}
+
+function isTradableRwaSymbol(symbol, name) {
+  const canonical = canonicalSymbol(symbol);
+  if (!canonical || EXCLUDED_SYMBOLS.has(canonical)) return false;
+  const category = inferCategory(canonical, name);
+  return category !== 'fx';
+}
+
+function resolveAssetName(symbol, name) {
+  const canonical = canonicalSymbol(symbol);
+  return name || RWA_ASSETS[canonical]?.name || canonical;
+}
+
+const KNOWN_CATEGORIES = {};
+const KNOWN_NAMES = {};
+for (const [sym, info] of Object.entries(RWA_ASSETS)) {
+  KNOWN_CATEGORIES[sym] = info.category;
+  KNOWN_NAMES[sym] = info.name;
+}
+// Also register aliases in reverse: GOLD→commodity, SILVER→commodity, etc.
+for (const [alias, canonical] of Object.entries(SYMBOL_ALIASES)) {
+  if (RWA_ASSETS[canonical]) {
+    KNOWN_CATEGORIES[alias] = RWA_ASSETS[canonical].category;
+    KNOWN_NAMES[alias] = RWA_ASSETS[canonical].name;
+  }
+}
+// Dashboard-specific extras (not in rwa-cli's RWA_ASSETS)
+KNOWN_CATEGORIES['ABBV'] = 'equity';
+KNOWN_CATEGORIES['ABT'] = 'equity';
+KNOWN_CATEGORIES['ACN'] = 'equity';
+KNOWN_CATEGORIES['ADI'] = 'equity';
+KNOWN_CATEGORIES['AMAT'] = 'equity';
+KNOWN_CATEGORIES['APP'] = 'equity';
+KNOWN_CATEGORIES['ARM'] = 'equity';
+KNOWN_CATEGORIES['ASML'] = 'equity';
+KNOWN_CATEGORIES['AUD'] = 'fx';
+KNOWN_CATEGORIES['AVGO'] = 'equity';
+KNOWN_CATEGORIES['BA'] = 'equity';
+KNOWN_CATEGORIES['BMY'] = 'equity';
+KNOWN_CATEGORIES['BRK'] = 'equity';
+KNOWN_CATEGORIES['BRN'] = 'commodity';
+KNOWN_CATEGORIES['CAT'] = 'equity';
+KNOWN_CATEGORIES['CNY'] = 'fx';
+KNOWN_CATEGORIES['COFFEE'] = 'commodity';
+KNOWN_CATEGORIES['COP'] = 'commodity';
+KNOWN_CATEGORIES['COTTON'] = 'commodity';
+KNOWN_CATEGORIES['CRM'] = 'equity';
+KNOWN_CATEGORIES['CRWD'] = 'equity';
+KNOWN_CATEGORIES['CSCO'] = 'equity';
+KNOWN_CATEGORIES['DAX'] = 'index';
+KNOWN_CATEGORIES['DDOG'] = 'equity';
+KNOWN_CATEGORIES['DFDV'] = 'equity';
+KNOWN_CATEGORIES['DHR'] = 'equity';
+KNOWN_CATEGORIES['DIS'] = 'equity';
+KNOWN_CATEGORIES['DJI'] = 'index';
+KNOWN_CATEGORIES['EUR'] = 'fx';
+KNOWN_CATEGORIES['EWT'] = 'etf';
+KNOWN_CATEGORIES['FTNT'] = 'equity';
+KNOWN_CATEGORIES['FTSE'] = 'index';
+KNOWN_CATEGORIES['FUTU'] = 'equity';
+KNOWN_CATEGORIES['GBP'] = 'fx';
+KNOWN_CATEGORIES['GE'] = 'equity';
+KNOWN_CATEGORIES['GILD'] = 'equity';
+KNOWN_CATEGORIES['GLD'] = 'etf';
+KNOWN_CATEGORIES['GS'] = 'equity';
+KNOWN_CATEGORIES['HD'] = 'equity';
+KNOWN_CATEGORIES['HG'] = 'commodity';
+KNOWN_CATEGORIES['IBM'] = 'equity';
+KNOWN_CATEGORIES['JD'] = 'equity';
+KNOWN_CATEGORIES['JNJ'] = 'equity';
+KNOWN_CATEGORIES['JPM'] = 'equity';
+KNOWN_CATEGORIES['JPY'] = 'fx';
+KNOWN_CATEGORIES['KLAC'] = 'equity';
+KNOWN_CATEGORIES['KWEB'] = 'etf';
+KNOWN_CATEGORIES['LCID'] = 'equity';
+KNOWN_CATEGORIES['LRCX'] = 'equity';
+KNOWN_CATEGORIES['MA'] = 'equity';
+KNOWN_CATEGORIES['MCD'] = 'equity';
+KNOWN_CATEGORIES['MCHP'] = 'equity';
+KNOWN_CATEGORIES['MRNA'] = 'equity';
+KNOWN_CATEGORIES['MRVL'] = 'equity';
+KNOWN_CATEGORIES['MS'] = 'equity';
+KNOWN_CATEGORIES['NASDAQ'] = 'index';
+KNOWN_CATEGORIES['NDX'] = 'index';
+KNOWN_CATEGORIES['NET'] = 'equity';
+KNOWN_CATEGORIES['NIO'] = 'equity';
+KNOWN_CATEGORIES['NKE'] = 'equity';
+KNOWN_CATEGORIES['NQ100'] = 'index';
+KNOWN_CATEGORIES['OIL'] = 'commodity';
+KNOWN_CATEGORIES['ON'] = 'equity';
+KNOWN_CATEGORIES['OXY'] = 'commodity';
+KNOWN_CATEGORIES['PALL'] = 'commodity';
+KNOWN_CATEGORIES['PANW'] = 'equity';
+KNOWN_CATEGORIES['PDD'] = 'equity';
+KNOWN_CATEGORIES['PEP'] = 'equity';
+KNOWN_CATEGORIES['PFE'] = 'equity';
+KNOWN_CATEGORIES['PLAT'] = 'commodity';
+KNOWN_CATEGORIES['PYPL'] = 'equity';
+KNOWN_CATEGORIES['QCOM'] = 'equity';
+KNOWN_CATEGORIES['RDDT'] = 'equity';
+KNOWN_CATEGORIES['SHOP'] = 'equity';
+KNOWN_CATEGORIES['SNAP'] = 'equity';
+KNOWN_CATEGORIES['SNOW'] = 'equity';
+KNOWN_CATEGORIES['SOFI'] = 'equity';
+KNOWN_CATEGORIES['SOYBEAN'] = 'commodity';
+KNOWN_CATEGORIES['SQ'] = 'equity';
+KNOWN_CATEGORIES['SQQQ'] = 'etf';
+KNOWN_CATEGORIES['SUGAR'] = 'commodity';
+KNOWN_CATEGORIES['TLT'] = 'etf';
+KNOWN_CATEGORIES['TMO'] = 'equity';
+KNOWN_CATEGORIES['TQQQ'] = 'etf';
+KNOWN_CATEGORIES['TXN'] = 'equity';
+KNOWN_CATEGORIES['UBER'] = 'equity';
+KNOWN_CATEGORIES['UNH'] = 'equity';
+KNOWN_CATEGORIES['V'] = 'equity';
+KNOWN_CATEGORIES['WMT'] = 'equity';
+KNOWN_CATEGORIES['XOM'] = 'commodity';
+KNOWN_CATEGORIES['XYZ100'] = 'index';
+KNOWN_CATEGORIES['ZS'] = 'equity';
 
 // ═══════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════
@@ -3778,23 +3972,13 @@ let spotArbErrors = [];
 let spotArbLastUpdate = null;
 
 // ── RWA Auto-Discovery: detect tokenized-asset spot tickers ──
-const _KNOWN_RWA_TOKENS = new Set(['PAXG','XAUT','BUIDL','USDY','OUSG','USYC','STBT']);
-
 function _isRwaBase(base) {
   if (!base || base.length < 2) return false;
-  // 1. Known RWA commodity/treasury tokens
-  if (_KNOWN_RWA_TOKENS.has(base)) return true;
-  // 2. Skip known crypto tokens
-  if (_CRYPTO_TICKER_KEEP.has(base)) return false;
-  // 3. Direct match in KNOWN_CATEGORIES (catches GOLD, SILVER, TSLA, NVDA, etc.)
-  const directCat = KNOWN_CATEGORIES[base];
-  if (directCat && directCat !== 'fx') return true;
-  // 4. Try underlying extraction via suffix strip (catches TSLAON→TSLA, NVDAX→NVDA, etc.)
+  // Use unified system
+  if (isTradableRwaSymbol(base)) return true;
+  // Also try underlying extraction (suffix strip for tokenized stocks)
   const underlying = _arbUnderlyingKey(base);
-  if (underlying !== base) {
-    const cat = KNOWN_CATEGORIES[underlying];
-    if (cat && cat !== 'fx') return true;
-  }
+  if (underlying !== base && isTradableRwaSymbol(underlying)) return true;
   return false;
 }
 
@@ -4022,7 +4206,11 @@ function _buildSpotPerpFromAllData() {
   for (const d of allData) {
     if (!d.venue || !d.coin) continue;
     if (!result[d.venue]) result[d.venue] = {};
-    result[d.venue][d.coin] = { mark: d.markPx || 0, f: d.funding || 0 };
+    const entry = { mark: d.markPx || 0, f: d.funding || 0 };
+    result[d.venue][d.coin] = entry;
+    // Also store under canonical symbol for robust matching (GOLD→XAU, etc.)
+    const canonical = canonicalSymbol(d.coin);
+    if (canonical !== d.coin) result[d.venue][canonical] = entry;
   }
   return result;
 }
@@ -4263,7 +4451,8 @@ function renderSpotVenueTable(venue) {
 }
 
 document.getElementById('spotPerpSel').addEventListener('change', () => {
-  if (spotSubView !== 'overview' && spotSubView !== 'allAssets') renderSpotVenueTable(spotSubView);
+  if (spotSubView === 'overview') renderSpotArbRank();
+  else if (spotSubView !== 'allAssets') renderSpotVenueTable(spotSubView);
 });
 function _syncHoldPills(hold) {
   document.querySelectorAll('#spotHoldPills .hold-pill, #arbHoldPills .hold-pill').forEach(b => {
@@ -4332,18 +4521,21 @@ const _CRYPTO_TICKER_KEEP = new Set([
 ]);
 function _arbUnderlyingKey(t) {
   if (!t) return '';
-  // 1) ASSET_META explicit mapping (handles PAXG→XAU, XAUT→XAU, SPYx→SPY etc.)
-  const meta = (typeof ASSET_META !== 'undefined') && (ASSET_META[t] || ASSET_META[String(t).toUpperCase()]);
+  const up = String(t).toUpperCase();
+  // 1) Use canonicalSymbol for known aliases (GOLD→XAU, SILVER→XAG, CL→WTI, etc.)
+  const canonical = canonicalSymbol(up);
+  if (canonical !== up && RWA_ASSETS[canonical]) return canonical;
+  // 2) ASSET_META explicit mapping
+  const meta = (typeof ASSET_META !== 'undefined') && (ASSET_META[t] || ASSET_META[up]);
   if (meta && meta.underlying) {
     const m = meta.underlying.match(/\(([A-Z0-9]+)\)/);
     if (m) return m[1];
   }
-  const up = String(t).toUpperCase();
-  // 2) Known crypto tickers — never transform
+  // 3) Known crypto tickers — never transform
   if (_CRYPTO_TICKER_KEEP.has(up)) return up;
-  // 3) Heuristic suffix strip for tokenized stocks
-  if (up.length >= 5 && up.endsWith('ON')) return up.slice(0, -2);  // AAPLON → AAPL
-  if (up.length >= 5 && up.endsWith('X'))  return up.slice(0, -1);  // AAPLX  → AAPL (length≥5 protects AVAX)
+  // 4) Heuristic suffix strip for tokenized stocks
+  if (up.length >= 5 && up.endsWith('ON')) return up.slice(0, -2);
+  if (up.length >= 5 && up.endsWith('X'))  return up.slice(0, -1);
   return up;
 }
 // back-compat alias (old name still referenced elsewhere)
