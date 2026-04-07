@@ -4077,6 +4077,18 @@ async function refreshSpotArbData() {
 
   renderSpotVenueGrid();
   renderSpotArbRank();
+
+  // Update spot sub-tab count badges dynamically
+  document.querySelectorAll('#spotSubNav .spot-sub-tab').forEach(tab => {
+    const onclick = tab.getAttribute('onclick') || '';
+    const m = onclick.match(/switchSpotSub\('(\w+)'/);
+    if (!m) return;
+    const v = m[1];
+    if (v === 'overview' || v === 'allAssets') return;
+    const cnt = (SPOT_DATA[v] || []).length;
+    const badge = tab.querySelector('.spot-cnt');
+    if (badge) badge.textContent = cnt;
+  });
 }
 
 const SPOT_VENUE_NAMES = { gate:'Gate.io', binance:'Binance', bitget:'Bitget', kraken:'Kraken', bybit:'Bybit' };
@@ -4186,7 +4198,10 @@ function renderSpotVenueTable(venue) {
   // Pre-compute sort values
   const perpSettles = (SPOT_PERP_VENUES[pv]||{}).settlesPerDay || 3;
   const rows = assets.map(a => {
-    const p = pd[a.coin];
+    // Normalize coin for perp matching (TSLAX→TSLA, AAPLON→AAPL, etc.)
+    const coinKey = _arbTickerKey(a.coin);
+    let p = pd[a.coin] || pd[coinKey];
+    if (!p) { for (const k of Object.keys(pd)) { if (_arbTickerKey(k) === coinKey) { p = pd[k]; break; } } }
     const basis = p ? (p.mark - a.last)/a.last : -999;
     const fAnn = p ? p.f*perpSettles*365 : 0;
     const spreadRate = (a.ask-a.bid)/a.last;
@@ -4339,7 +4354,7 @@ const _CAT_COLORS = {equity:'#8B8FE8',commodity:'var(--gold)',index:'#3B82F6',et
 function renderSpotVenueGrid() {
   const grid = document.getElementById('spotVenueGrid');
   if (!grid) return;
-  const venueOrder = ['gate','kraken','bitget','binance'];
+  const venueOrder = ['gate','kraken','bitget','binance','bybit'];
   let html = '';
   for (const v of venueOrder) {
     const assets = SPOT_DATA[v];
