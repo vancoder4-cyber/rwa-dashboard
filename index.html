@@ -1275,6 +1275,8 @@ input[type="checkbox"] {
             <th style="text-align:left" data-sort="route">Route (Spot → Perp)</th>
             <th data-sort="spot" onclick="setArbRankSort('spot')">Spot Last <span class="arrow"></span></th>
             <th data-sort="mark" onclick="setArbRankSort('mark')">Perp Mark <span class="arrow"></span></th>
+            <th data-sort="ref" onclick="setArbRankSort('ref')">Ref Price <span class="arrow"></span></th>
+            <th data-sort="dev" onclick="setArbRankSort('dev')">Spot Dev <span class="arrow"></span></th>
             <th data-sort="funding" onclick="setArbRankSort('funding')">Funding Ann. <span class="arrow"></span></th>
             <th class="op-col">−</th>
             <th data-sort="cost" onclick="setArbRankSort('cost')">Cost Ann. <span class="arrow"></span></th>
@@ -1357,7 +1359,7 @@ input[type="checkbox"] {
       </div>
       <div class="table-wrap">
         <table><thead><tr>
-          <th style="text-align:left" data-sort="name" onclick="setSpotVenueSort('name')">Asset <span class="arrow"></span></th><th data-sort="price" onclick="setSpotVenueSort('price')">Last Price <span class="arrow"></span></th><th data-sort="mark" onclick="setSpotVenueSort('mark')">Perp Mark <span class="arrow"></span></th><th data-sort="basis" onclick="setSpotVenueSort('basis')"><span class="th-info">Basis <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip"><span class="tip-title">基差 — 永续与现货的价差</span>衡量建仓成本：基差越小，做 cash-and-carry 的入场成本越低。负基差意味着 funding 可能转负，不适合做空永续。<span class="tip-formula">(Perp Mark − Spot Last) / Spot Last</span><span class="tip-note">✦ Ideal ±0.1%&ensp;·&ensp;● Good 0.1–0.3%&ensp;·&ensp;△ Wide &gt;0.3%&ensp;·&ensp;⚠ Avoid &lt;−0.1%</span></span></span></th><th data-sort="chg" onclick="setSpotVenueSort('chg')">24h Chg <span class="arrow"></span></th><th data-sort="vol" onclick="setSpotVenueSort('vol')">24h Vol <span class="arrow">▼</span></th><th>24h H / L</th><th data-sort="spread" onclick="setSpotVenueSort('spread')">Bid-Ask <span class="arrow"></span></th><th data-sort="funding" onclick="setSpotVenueSort('funding')"><span class="th-info">Funding Ann. <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip"><span class="tip-title">年化资金费率 — 做空永续可获得的收益</span>永续合约定期结算资金费，正费率时多头付给空头。将最近一期费率按每日结算次数 × 365 天折算为年化收益率。结算频率因交易所而异（如 8h = 3次/天，1h = 24次/天）。<span class="tip-formula">Funding Rate × settlesPerDay × 365</span><span class="tip-note">数据来源：右上角所选永续交易所的最新一期费率。正值 = 空头收息，负值 = 空头付息。</span></span></span></th><th data-sort="arb" onclick="setSpotVenueSort('arb')"><span class="th-info">Arb APR <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip"><span class="tip-title">套利年化 — 扣除成本后的净收益</span>买入现货 + 做空永续的 cash-and-carry 策略净年化收益。用 funding 年化收入减去交易摩擦成本（开平仓手续费 + 滑点），再按持仓周期折算成全年。<span class="tip-formula">Cost = (SpotFee×2 + PerpFee×2 + Spread) × 365/Hold<br>APR = |Funding Ann.| − Cost</span><span class="tip-note">通过右上角 Hold 调整持仓周期。No Fees = 不扣成本，显示毛年化 funding。绿 ≥15%&ensp;·&ensp;黄 ≥5%&ensp;·&ensp;红 &lt;5%</span></span></span></th>
+          <th style="text-align:left" data-sort="name" onclick="setSpotVenueSort('name')">Asset <span class="arrow"></span></th><th data-sort="price" onclick="setSpotVenueSort('price')">Last Price <span class="arrow"></span></th><th data-sort="ref" onclick="setSpotVenueSort('ref')">Ref Price <span class="arrow"></span></th><th data-sort="dev" onclick="setSpotVenueSort('dev')"><span class="th-info">Dev % <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip"><span class="tip-title">价格偏离 — 与 Yahoo Finance 基准价的偏差</span>比较交易所现货价与 Yahoo Finance 实时报价的偏离程度。正值表示交易所价格高于基准，负值表示低于。偏离越大，可能存在套利或定价异常。<span class="tip-formula">(Spot Last − Ref Price) / Ref Price</span><span class="tip-note">✦ ≤0.1% 正常&ensp;·&ensp;● 0.1–0.5% 关注&ensp;·&ensp;⚠ >0.5% 警惕</span></span></span></th><th data-sort="mark" onclick="setSpotVenueSort('mark')">Perp Mark <span class="arrow"></span></th><th data-sort="basis" onclick="setSpotVenueSort('basis')"><span class="th-info">Basis <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip"><span class="tip-title">基差 — 永续与现货的价差</span>衡量建仓成本：基差越小，做 cash-and-carry 的入场成本越低。负基差意味着 funding 可能转负，不适合做空永续。<span class="tip-formula">(Perp Mark − Spot Last) / Spot Last</span><span class="tip-note">✦ Ideal ±0.1%&ensp;·&ensp;● Good 0.1–0.3%&ensp;·&ensp;△ Wide &gt;0.3%&ensp;·&ensp;⚠ Avoid &lt;−0.1%</span></span></span></th><th data-sort="chg" onclick="setSpotVenueSort('chg')">24h Chg <span class="arrow"></span></th><th data-sort="vol" onclick="setSpotVenueSort('vol')">24h Vol <span class="arrow">▼</span></th><th>24h H / L</th><th data-sort="spread" onclick="setSpotVenueSort('spread')">Bid-Ask <span class="arrow"></span></th><th data-sort="depth" onclick="setSpotVenueSort('depth')"><span class="th-info">±2% Depth <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip"><span class="tip-title">流动性深度 — ±2% 范围内的订单簿厚度</span>衡量在当前中间价 ±2% 范围内有多少美元的买卖单可以被成交。深度越大，大额套利执行的滑点越小。<span class="tip-formula">Σ (price × size) for all bids ≥ mid×0.98 + Σ (price × size) for all asks ≤ mid×1.02</span><span class="tip-note">● >$100K 深度好&ensp;·&ensp;△ $10K–$100K 一般&ensp;·&ensp;⚠ <$10K 浅</span></span></span></th><th data-sort="funding" onclick="setSpotVenueSort('funding')"><span class="th-info">Funding Ann. <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip"><span class="tip-title">年化资金费率 — 做空永续可获得的收益</span>永续合约定期结算资金费，正费率时多头付给空头。将最近一期费率按每日结算次数 × 365 天折算为年化收益率。结算频率因交易所而异（如 8h = 3次/天，1h = 24次/天）。<span class="tip-formula">Funding Rate × settlesPerDay × 365</span><span class="tip-note">数据来源：右上角所选永续交易所的最新一期费率。正值 = 空头收息，负值 = 空头付息。</span></span></span></th><th data-sort="arb" onclick="setSpotVenueSort('arb')"><span class="th-info">Arb APR <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip"><span class="tip-title">套利年化 — 扣除成本后的净收益</span>买入现货 + 做空永续的 cash-and-carry 策略净年化收益。用 funding 年化收入减去交易摩擦成本（开平仓手续费 + 滑点），再按持仓周期折算成全年。<span class="tip-formula">Cost = (SpotFee×2 + PerpFee×2 + Spread) × 365/Hold<br>APR = |Funding Ann.| − Cost</span><span class="tip-note">通过右上角 Hold 调整持仓周期。No Fees = 不扣成本，显示毛年化 funding。绿 ≥15%&ensp;·&ensp;黄 ≥5%&ensp;·&ensp;红 &lt;5%</span></span></span></th>
         </tr></thead><tbody id="spotVenueBody"></tbody></table>
       </div>
     </div>
@@ -3971,6 +3973,107 @@ let spotArbLoading = false;
 let spotArbErrors = [];
 let spotArbLastUpdate = null;
 
+// ═══════════════════════════════════════════════
+// REFERENCE PRICING (Yahoo Finance)
+// ═══════════════════════════════════════════════
+const YAHOO_SYMBOL_MAP = {
+  WTI: 'CL=F', BRENTOIL: 'BZ=F', NATGAS: 'NG=F',
+  XAU: 'GC=F', XAG: 'SI=F', XCU: 'HG=F', XPT: 'PL=F', XPD: 'PA=F',
+  CORN: 'ZC=F', WHEAT: 'ZW=F', URANIUM: 'UX=F',
+  SPX: '^GSPC', VIX: '^VIX', JP225: '^N225', KR200: '^KS200', KRCOMP: '^KS11', DXY: 'DX-Y.NYB',
+  SAMSUNG: '005930.KS', SMSN: '005930.KS', SKHYNIX: '000660.KS', HYUNDAI: '005380.KS', SOFTBANK: '9984.T',
+  SPY: 'SPY', QQQ: 'QQQ', IWM: 'IWM', DIA: 'DIA', GLD: 'GLD', SLV: 'SLV', USO: 'USO', TLT: 'TLT',
+  URA: 'URA', URNM: 'URNM', EWY: 'EWY', EWJ: 'EWJ', XLE: 'XLE', BOTZ: 'BOTZ', MAGS: 'MAGS',
+  IAU: 'IAU', IVV: 'IVV', ITOT: 'ITOT'
+};
+const REFERENCE_SYMBOL_ALIASES = {
+  XAUT: 'XAU', PAXG: 'XAU', XAUM: 'XAU', KAU: 'XAU', PGOLD: 'XAU', GGBR: 'XAU'
+};
+
+function assetToYahoo(symbol) {
+  const canonical = canonicalSymbol(symbol);
+  const ref = REFERENCE_SYMBOL_ALIASES[canonical] ?? canonical;
+  return YAHOO_SYMBOL_MAP[ref] ?? ref;
+}
+
+let REF_PRICES = {}; // canonical → price
+let refPriceLoading = false;
+
+async function fetchReferencePrices(symbols) {
+  if (refPriceLoading) return;
+  refPriceLoading = true;
+  // Deduplicate by canonical symbol
+  const unique = [...new Set(symbols.map(s => canonicalSymbol(s)))];
+  const YAHOO_HOSTS = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com'];
+
+  // Use Vercel proxy in prod, direct in dev
+  const useProxy = !_isDev;
+
+  const tasks = unique.map(sym => async () => {
+    const yahooSym = assetToYahoo(sym);
+    for (const host of YAHOO_HOSTS) {
+      try {
+        const url = useProxy
+          ? `/api/yahoo/chart/${encodeURIComponent(yahooSym)}?interval=1d&range=1d&includePrePost=false`
+          : `https://${host}/v8/finance/chart/${encodeURIComponent(yahooSym)}?interval=1d&range=1d&includePrePost=false`;
+        const res = await fetch(url, useProxy ? {} : { headers: { referer: 'https://finance.yahoo.com/' } });
+        if (!res.ok) continue;
+        const json = await res.json();
+        const result = json?.chart?.result?.[0];
+        const price = parseFloat(result?.meta?.regularMarketPrice);
+        if (price > 0) { REF_PRICES[sym] = price; return; }
+        // Fallback to close array
+        const closes = result?.indicators?.quote?.[0]?.close ?? [];
+        for (let i = closes.length - 1; i >= 0; i--) {
+          const c = parseFloat(closes[i]);
+          if (c > 0) { REF_PRICES[sym] = c; return; }
+        }
+      } catch { /* try next host */ }
+    }
+  });
+
+  // Execute in batches of 8 to avoid hammering
+  for (let i = 0; i < tasks.length; i += 8) {
+    await Promise.allSettled(tasks.slice(i, i + 8).map(fn => fn()));
+  }
+  refPriceLoading = false;
+  console.log(`[Ref] Fetched ${Object.keys(REF_PRICES).length}/${unique.length} reference prices`);
+}
+
+function getRefPrice(coin) {
+  const canonical = canonicalSymbol(coin);
+  const ref = REFERENCE_SYMBOL_ALIASES[canonical] ?? canonical;
+  return REF_PRICES[ref] ?? REF_PRICES[canonical] ?? null;
+}
+
+function priceDeviation(venuePrice, refPrice) {
+  if (!refPrice || refPrice <= 0 || !venuePrice) return null;
+  return (venuePrice - refPrice) / refPrice;
+}
+
+// ═══════════════════════════════════════════════
+// ORDERBOOK LIQUIDITY DEPTH
+// ═══════════════════════════════════════════════
+function liquidityWithinPct(book, pct = 0.02) {
+  if (!book?.bids?.length || !book?.asks?.length) return null;
+  const bestBid = Number(book.bids[0][0] ?? book.bids[0].price);
+  const bestAsk = Number(book.asks[0][0] ?? book.asks[0].price);
+  if (!isFinite(bestBid) || !isFinite(bestAsk) || bestBid <= 0 || bestAsk <= 0) return null;
+  const mid = (bestBid + bestAsk) / 2;
+  const minBid = mid * (1 - pct);
+  const maxAsk = mid * (1 + pct);
+  let total = 0;
+  for (const level of book.bids) {
+    const p = Number(level[0] ?? level.price), s = Number(level[1] ?? level.size);
+    if (p >= minBid) total += p * s;
+  }
+  for (const level of book.asks) {
+    const p = Number(level[0] ?? level.price), s = Number(level[1] ?? level.size);
+    if (p <= maxAsk) total += p * s;
+  }
+  return total;
+}
+
 // ── RWA Auto-Discovery: detect tokenized-asset spot tickers ──
 function _isRwaBase(base) {
   if (!base || base.length < 2) return false;
@@ -4013,6 +4116,18 @@ async function fetchSpotRwaGate() {
       bid: parseFloat(t.highest_bid) || 0,
       ask: parseFloat(t.lowest_ask) || 0,
     });
+  }
+  // Fetch orderbook depth for each asset (parallel, max 5 concurrent)
+  const depthTasks = assets.map(a => async () => {
+    try {
+      const res = await fetch(`${GATE_SPOT_BASE}/order_book?currency_pair=${encodeURIComponent(a.pair)}&limit=20`);
+      if (!res.ok) return;
+      const book = await res.json();
+      a.depth2 = liquidityWithinPct({ bids: (book.bids||[]), asks: (book.asks||[]) });
+    } catch {}
+  });
+  for (let i = 0; i < depthTasks.length; i += 5) {
+    await Promise.allSettled(depthTasks.slice(i, i + 5).map(fn => fn()));
   }
   console.log(`[Spot] Gate.io: ${assets.length} RWA spot assets discovered`);
   return assets;
@@ -4077,6 +4192,20 @@ async function fetchSpotRwaKraken() {
       }
     } catch (e) { console.warn('[Spot] Kraken ticker batch error:', e); }
   }
+  // Fetch orderbook depth for top assets
+  const depthTasks = assets.map(a => async () => {
+    try {
+      const res = await fetch(`${KRAKEN_SPOT_BASE}/Depth?pair=${encodeURIComponent(a.pair)}&count=20`);
+      if (!res.ok) return;
+      const json = await res.json();
+      if (json.error?.length) return;
+      const bookData = Object.values(json.result || {})[0];
+      if (bookData) a.depth2 = liquidityWithinPct({ bids: (bookData.bids||[]), asks: (bookData.asks||[]) });
+    } catch {}
+  });
+  for (let i = 0; i < depthTasks.length; i += 5) {
+    await Promise.allSettled(depthTasks.slice(i, i + 5).map(fn => fn()));
+  }
   console.log(`[Spot] Kraken: ${assets.length} RWA spot assets discovered`);
   return assets;
 }
@@ -4107,6 +4236,20 @@ async function fetchSpotRwaBitget() {
       ask: parseFloat(t.askPr) || 0,
     });
   }
+  // Fetch orderbook depth
+  const depthTasks = assets.map(a => async () => {
+    try {
+      const res = await fetch(`${BITGET_SPOT_BASE}/api/v2/spot/market/orderbook?symbol=${a.pair}&type=step0&limit=20`);
+      if (!res.ok) return;
+      const json = await res.json();
+      if (json.code !== '00000') return;
+      const book = json.data || {};
+      a.depth2 = liquidityWithinPct({ bids: (book.bids||[]), asks: (book.asks||[]) });
+    } catch {}
+  });
+  for (let i = 0; i < depthTasks.length; i += 5) {
+    await Promise.allSettled(depthTasks.slice(i, i + 5).map(fn => fn()));
+  }
   console.log(`[Spot] Bitget: ${assets.length} RWA spot assets discovered`);
   return assets;
 }
@@ -4134,6 +4277,18 @@ async function fetchSpotRwaBinance() {
       bid: parseFloat(t.bidPrice) || 0,
       ask: parseFloat(t.askPrice) || 0,
     });
+  }
+  // Fetch orderbook depth
+  const depthTasks = assets.map(a => async () => {
+    try {
+      const res = await fetch(`${BINANCE_SPOT_BASE}/depth?symbol=${a.pair}&limit=20`);
+      if (!res.ok) return;
+      const book = await res.json();
+      a.depth2 = liquidityWithinPct({ bids: (book.bids||[]), asks: (book.asks||[]) });
+    } catch {}
+  });
+  for (let i = 0; i < depthTasks.length; i += 5) {
+    await Promise.allSettled(depthTasks.slice(i, i + 5).map(fn => fn()));
   }
   console.log(`[Spot] Binance: ${assets.length} RWA spot assets discovered`);
   return assets;
@@ -4196,6 +4351,19 @@ async function fetchSpotRwaBybit() {
       ask: parseFloat(t.ask1Price) || 0,
     });
   }
+  // Fetch orderbook depth
+  const depthTasks = assets.map(a => async () => {
+    try {
+      const res = await fetch(`${BYBIT_SPOT_BASE}/orderbook?category=spot&symbol=${a.pair}&limit=20`);
+      if (!res.ok) return;
+      const json = await res.json();
+      const book = json?.result || {};
+      a.depth2 = liquidityWithinPct({ bids: (book.b||[]).map(l=>({price:l[0],size:l[1]})), asks: (book.a||[]).map(l=>({price:l[0],size:l[1]})) });
+    } catch {}
+  });
+  for (let i = 0; i < depthTasks.length; i += 5) {
+    await Promise.allSettled(depthTasks.slice(i, i + 5).map(fn => fn()));
+  }
   console.log(`[Spot] Bybit: ${assets.length} RWA spot assets discovered`);
   return assets;
 }
@@ -4247,6 +4415,10 @@ async function refreshSpotArbData() {
 
   // Bridge perp data from the perps dashboard's allData
   SPOT_PERP = _buildSpotPerpFromAllData();
+
+  // Fetch Yahoo Finance reference prices for all discovered spot assets
+  const allSpotCoins = Object.values(SPOT_DATA).flatMap(arr => arr.map(a => a.coin));
+  await fetchReferencePrices(allSpotCoins).catch(e => console.warn('[Ref] price fetch error:', e));
 
   const totalSpot = Object.values(SPOT_DATA).reduce((s, a) => s + a.length, 0);
   const totalPerp = Object.values(SPOT_PERP).reduce((s, o) => s + Object.keys(o).length, 0);
@@ -4394,11 +4566,13 @@ function renderSpotVenueTable(venue) {
     const fAnn = p ? p.f*perpSettles*365 : 0;
     const spreadRate = (a.ask-a.bid)/a.last;
     const netArb = p ? spotCalcArbAPR(fAnn, venue, pv, spreadRate)*100 : -999;
-    return { a, p, _name: a.coin, _price: a.last, _mark: p?p.mark:0, _basis: basis, _chg: a.chg, _vol: a.vol*a.last, _spread: spreadRate*10000, _funding: fAnn, _arb: netArb };
+    const ref = getRefPrice(a.coin);
+    const dev = ref ? priceDeviation(a.last, ref) : null;
+    return { a, p, _name: a.coin, _price: a.last, _ref: ref || 0, _dev: dev !== null ? dev : -999, _mark: p?p.mark:0, _basis: basis, _chg: a.chg, _vol: a.vol*a.last, _spread: spreadRate*10000, _depth: a.depth2 || 0, _funding: fAnn, _arb: netArb };
   });
 
   const sk = spotVenueSort.key, sd = spotVenueSort.dir;
-  const keyMap = { name:'_name', price:'_price', mark:'_mark', basis:'_basis', chg:'_chg', vol:'_vol', spread:'_spread', funding:'_funding', arb:'_arb' };
+  const keyMap = { name:'_name', price:'_price', ref:'_ref', dev:'_dev', mark:'_mark', basis:'_basis', chg:'_chg', vol:'_vol', spread:'_spread', depth:'_depth', funding:'_funding', arb:'_arb' };
   const prop = keyMap[sk] || '_vol';
   rows.sort((a,b) => {
     let va = a[prop], vb = b[prop];
@@ -4413,6 +4587,13 @@ function renderSpotVenueTable(venue) {
     const spBps = ((a.ask - a.bid)/a.last*10000).toFixed(1);
 
     let markH='<span class="dim">—</span>', basisH='<span class="dim">—</span>', fundH='<span class="dim">—</span>', arbH='<span class="spot-arb l">N/A</span>';
+
+    const ref = getRefPrice(a.coin);
+    const dev = ref ? priceDeviation(a.last, ref) : null;
+    const refH = ref ? spotFP(ref) : '<span class="dim">—</span>';
+    const devH = dev !== null
+      ? '<span class="'+(Math.abs(dev)>0.005?'neg':'dim')+'" style="font-weight:600">'+(dev>=0?'+':'')+(dev*100).toFixed(2)+'%</span>'
+      : '<span class="dim">—</span>';
 
     if (p) {
       markH = spotFP(p.mark);
@@ -4442,10 +4623,13 @@ function renderSpotVenueTable(venue) {
       arbH = netArb>0?'<span class="spot-arb '+arbCls+'">'+netArb.toFixed(1)+'%</span>':'<span class="spot-arb l">'+netArb.toFixed(1)+'%</span>';
     }
 
-    h += '<tr><td style="text-align:left;font-family:Inter,sans-serif;font-weight:600">'+a.coin+'</td><td>'+spotFP(a.last)+'</td><td>'+markH+'</td><td>'+basisH+'</td>';
+    const depthH = a.depth2 != null ? '$'+spotFV(a.depth2) : '<span class="dim">—</span>';
+    const depthCls = a.depth2 > 100000 ? 'pos' : a.depth2 > 10000 ? '' : 'neg';
+
+    h += '<tr><td style="text-align:left;font-family:Inter,sans-serif;font-weight:600">'+a.coin+'</td><td>'+spotFP(a.last)+'</td><td>'+refH+'</td><td>'+devH+'</td><td>'+markH+'</td><td>'+basisH+'</td>';
     h += '<td class="'+cc+'">'+cs+a.chg.toFixed(2)+'%</td><td>$'+spotFV(a.vol*a.last)+'</td>';
     h += '<td style="font-size:11px;color:var(--foreground-sec)">'+spotFP(a.hi)+' / '+spotFP(a.lo)+'</td>';
-    h += '<td>'+spBps+' bps</td><td>'+fundH+'</td><td>'+arbH+'</td></tr>';
+    h += '<td>'+spBps+' bps</td><td class="'+depthCls+'">'+depthH+'</td><td>'+fundH+'</td><td>'+arbH+'</td></tr>';
   });
   document.getElementById('spotVenueBody').innerHTML = h;
 }
@@ -4630,9 +4814,10 @@ function renderSpotArbRank() {
         if (hold <= 0) costAnn = 0;
         else costAnn = oneTimeCost * (365/hold);
         const netFund = grossFundAPR - costAnn;
+        const ref = getRefPrice(a.coin);
         rows.push({
           coin: a.coin, sVenue, pVenue,
-          spot: a.last, mark: p.mark, basis, fAnn, costAnn, netFund, dir
+          spot: a.last, mark: p.mark, basis, fAnn, costAnn, netFund, dir, ref
         });
       });
     });
@@ -4648,6 +4833,7 @@ function renderSpotArbRank() {
     let va, vb;
     if (sk === 'route') { va = x.sVenue+'_'+x.pVenue; vb = y.sVenue+'_'+y.pVenue; }
     else if (sk === 'basis') { va = (x.dir==='long'?x.basis:-x.basis); vb = (y.dir==='long'?y.basis:-y.basis); }
+    else if (sk === 'dev') { va = x.ref ? (x.spot - x.ref) / x.ref : -999; vb = y.ref ? (y.spot - y.ref) / y.ref : -999; }
     else { va = x[sk]; vb = y[sk]; }
     if (strKeys.has(sk) || typeof va === 'string') return sd * String(va).localeCompare(String(vb));
     return sd * (va - vb);
@@ -4674,12 +4860,18 @@ function renderSpotArbRank() {
     const netFundCls = r.netFund>=0 ? 'spot-arb '+clsAPR(r.netFund) : 'spot-arb l';
     // basis is shown raw (direction-signed) as entry-edge signal, NOT annualized — avoids double-counting vs funding
     const basisDirRaw = r.dir==='long' ? r.basis : -r.basis;
+    const ref = r.ref;
+    const dev = ref ? (r.spot - ref) / ref : null;
+    const refH = ref ? spotFP(ref) : '<span class="dim">—</span>';
+    const devH = dev !== null ? '<span class="'+(Math.abs(dev)>0.005?'neg':'dim')+'">'+(dev>=0?'+':'')+(dev*100).toFixed(2)+'%</span>' : '<span class="dim">—</span>';
     h += '<tr>'
        + '<td style="text-align:left;color:var(--foreground-dim);font-size:11px">'+(i+1)+'</td>'
        + '<td style="text-align:left;font-family:Inter,sans-serif;font-weight:600">'+r.coin+'</td>'
        + '<td style="text-align:left">'+routeH+'</td>'
        + '<td>'+spotFP(r.spot)+'</td>'
        + '<td>'+spotFP(r.mark)+'</td>'
+       + '<td>'+refH+'</td>'
+       + '<td>'+devH+'</td>'
        + '<td class="'+clsPct(r.fAnn)+'" style="font-weight:600">'+fmtPct(r.fAnn,1)+'</td>'
        + '<td class="op-col">−</td>'
        + '<td style="color:var(--foreground-dim)">'+(r.costAnn>0?(r.costAnn*100).toFixed(1)+'%':'—')+'</td>'
@@ -4689,7 +4881,7 @@ function renderSpotArbRank() {
        + '<td style="text-align:left">'+dirBadge+'</td>'
        + '</tr>';
   });
-  document.getElementById('spotArbRankBody').innerHTML = h || '<tr><td colspan="12" style="text-align:center;color:var(--foreground-dim);padding:24px">No combos match the current filters.</td></tr>';
+  document.getElementById('spotArbRankBody').innerHTML = h || '<tr><td colspan="14" style="text-align:center;color:var(--foreground-dim);padding:24px">No combos match the current filters.</td></tr>';
   const shownCount = shown.length;
   const remaining = totalCount - shownCount;
   const vm = document.getElementById('arbViewMoreWrap');
@@ -4706,7 +4898,7 @@ function renderSpotArbRank() {
     }
   }
   document.getElementById('arbRowCount').textContent = totalCount;
-  const labels = {coin:'Asset',route:'Route',spot:'Spot Last',mark:'Perp Mark',basis:'Basis',funding:'Funding Ann.',cost:'Cost Ann.',netFund:'Net APR (Funding)'};
+  const labels = {coin:'Asset',route:'Route',spot:'Spot Last',mark:'Perp Mark',ref:'Ref Price',dev:'Spot Dev',basis:'Basis',funding:'Funding Ann.',cost:'Cost Ann.',netFund:'Net APR (Funding)'};
   document.getElementById('arbSortLabel').textContent = (labels[arbRankSort.key]||'Net APR') + (arbRankSort.dir>0?' ↑':' ↓');
 }
 document.getElementById('arbSameVenueChk').addEventListener('change', renderSpotArbRank);

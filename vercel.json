@@ -1,5 +1,6 @@
 {
   "rewrites": [
+    { "source": "/api/yahoo/:path*", "destination": "https://query1.finance.yahoo.com/v8/finance/:path*" },
     { "source": "/api/gate/:path*", "destination": "https://api.gateio.ws/api/v4/futures/usdt/:path*" },
     { "source": "/api/gate-spot/:path*", "destination": "https://api.gateio.ws/api/v4/spot/:path*" },
     { "source": "/api/binance/:path*", "destination": "https://fapi.binance.com/fapi/v1/:path*" },
