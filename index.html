@@ -2043,7 +2043,7 @@ async function fetchLighter() {
 // API: Vest Exchange (Stock Perpetuals)
 // ═══════════════════════════════════════════════
 
-const VEST_API_BASE = _isDev ? 'https://server-prod.hz.vestmarkets.com/v2' : '/api/vest';
+const VEST_API_BASE = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? 'https://server-prod.hz.vestmarkets.com/v2' : '/api/vest';
 
 async function fetchVest() {
   logLoad('Fetching Vest data...');
