@@ -64,6 +64,12 @@
   --binance-dim:  rgba(240,185,11,0.10);
   --kraken:       #7D4CDB;
   --kraken-dim:   rgba(125,76,219,0.10);
+  --bybit:        #F7A600;
+  --bybit-dim:    rgba(247,166,0,0.10);
+  --lighter:      #6EE7B7;
+  --lighter-dim:  rgba(110,231,183,0.10);
+  --vest:         #F472B6;
+  --vest-dim:     rgba(244,114,182,0.10);
 
   /* ── Radius ── */
   --radius-sm: 6px;
@@ -186,6 +192,9 @@ body {
 .venue-dot.gate { background: var(--gate); }
 .venue-dot.binance { background: var(--binance); }
 .venue-dot.kraken { background: var(--kraken); }
+.venue-dot.bybit { background: var(--bybit); }
+.venue-dot.lighter { background: var(--lighter); }
+.venue-dot.vest { background: var(--vest); }
 
 /* ═══════════════════════════════════════════════════
    FILTER BAR
@@ -937,6 +946,8 @@ input[type="checkbox"] {
     <div class="sub-tab" onclick="switchSubTab('bitget', this)"><span class="venue-dot bitget"></span>Bitget</div>
     <div class="sub-tab" onclick="switchSubTab('gate', this)"><span class="venue-dot gate"></span>Gate.io</div>
     <div class="sub-tab" onclick="switchSubTab('binance', this)"><span class="venue-dot binance"></span>Binance</div>
+    <div class="sub-tab" onclick="switchSubTab('lighter', this)"><span class="venue-dot lighter"></span>Lighter</div>
+    <div class="sub-tab" onclick="switchSubTab('vest', this)"><span class="venue-dot vest"></span>Vest</div>
   </div>
 
   <!-- Aggregator -->
@@ -1076,6 +1087,70 @@ input[type="checkbox"] {
       </tr></thead><tbody id="bnTableBody"></tbody></table>
     </div>
   </div>
+
+  <!-- Lighter table -->
+  <div class="sub-view" id="sub-lighter">
+    <div class="filter-bar">
+      <div class="chip active" onclick="setVenueFilter('lighter','all',this)">All RWA <span class="count" id="ltCountAll"></span></div>
+      <div class="chip" onclick="setVenueFilter('lighter','equity',this)">Equities <span class="count" id="ltCountEquity"></span></div>
+      <div class="chip" onclick="setVenueFilter('lighter','commodity',this)">Commodities <span class="count" id="ltCountCommodity"></span></div>
+      <div class="chip" onclick="setVenueFilter('lighter','index',this)">Indices <span class="count" id="ltCountIndex"></span></div>
+      <div class="chip" onclick="setVenueFilter('lighter','etf',this)">ETFs <span class="count" id="ltCountEtf"></span></div>
+      <div class="chip" onclick="setVenueFilter('lighter','fx',this)">FX <span class="count" id="ltCountFx"></span></div>
+      <label style="display:flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;color:var(--foreground-sec);cursor:pointer;user-select:none">
+        <input type="checkbox" id="ltHideInactive" checked onchange="renderVenueTable('lighter')"> Hide inactive
+      </label>
+      <input class="search-box" placeholder="Search asset..." oninput="venueTableSearch.lighter=this.value.toLowerCase();renderVenueTable('lighter')">
+    </div>
+    <div class="info-bar"><span>Lighter (zkLighter Perps) · Funding settles every 8h · Off-chain order matching</span><span>Auto-refresh: 30s</span></div>
+    <div class="table-wrap">
+      <table><thead><tr>
+        <th style="text-align:left" data-sort="name" onclick="setVenueSort('lighter','name')">Asset <span class="arrow"></span></th>
+        <th data-sort="markPx" onclick="setVenueSort('lighter','markPx')">Mark Price <span class="arrow"></span></th>
+        <th data-sort="indexPx" onclick="setVenueSort('lighter','indexPx')">Index Price <span class="arrow"></span></th>
+        <th data-sort="change" onclick="setVenueSort('lighter','change')">24h Change <span class="arrow"></span></th>
+        <th data-sort="volume" onclick="setVenueSort('lighter','volume')">24h Volume <span class="arrow">▼</span></th>
+        <th data-sort="oi" onclick="setVenueSort('lighter','oi')">Open Interest <span class="arrow"></span></th>
+        <th data-sort="funding" onclick="setVenueSort('lighter','funding')">Funding Rate <span class="arrow"></span></th>
+        <th data-sort="posRate" onclick="setVenueSort('lighter','posRate')"><span class="th-info">% 有效费率 <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip">排除年化 &lt; 1.5% 的无效周期，取正/负费率中占比更大的方向。绿色 = 多数时间正费率，红色 = 多数时间负费率。比例越高，费率方向越稳定，越适合持仓套利。</span></span></th>
+        <th style="cursor:default"><div style="display:flex;align-items:center;gap:6px;justify-content:flex-end"><span>Funding</span>
+          <div class="spark-range-btns"><button class="sr-btn active" onclick="setSparkRange('lighter',24,this)">24h</button><button class="sr-btn" onclick="setSparkRange('lighter',72,this)">3d</button><button class="sr-btn" onclick="setSparkRange('lighter',168,this)">7d</button></div>
+        </div></th>
+      </tr></thead><tbody id="ltTableBody"></tbody></table>
+    </div>
+  </div>
+
+  <!-- Vest table -->
+  <div class="sub-view" id="sub-vest">
+    <div class="filter-bar">
+      <div class="chip active" onclick="setVenueFilter('vest','all',this)">All RWA <span class="count" id="vstCountAll"></span></div>
+      <div class="chip" onclick="setVenueFilter('vest','equity',this)">Equities <span class="count" id="vstCountEquity"></span></div>
+      <div class="chip" onclick="setVenueFilter('vest','commodity',this)">Commodities <span class="count" id="vstCountCommodity"></span></div>
+      <div class="chip" onclick="setVenueFilter('vest','index',this)">Indices <span class="count" id="vstCountIndex"></span></div>
+      <div class="chip" onclick="setVenueFilter('vest','etf',this)">ETFs <span class="count" id="vstCountEtf"></span></div>
+      <div class="chip" onclick="setVenueFilter('vest','fx',this)">FX <span class="count" id="vstCountFx"></span></div>
+      <label style="display:flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;color:var(--foreground-sec);cursor:pointer;user-select:none">
+        <input type="checkbox" id="vstHideInactive" checked onchange="renderVenueTable('vest')"> Hide inactive
+      </label>
+      <input class="search-box" placeholder="Search asset..." oninput="venueTableSearch.vest=this.value.toLowerCase();renderVenueTable('vest')">
+    </div>
+    <div class="info-bar"><span>Vest Exchange (Stock Perps) · Funding settles every 1h · Maker 0.02% / Taker 0.06%</span><span>Auto-refresh: 30s</span></div>
+    <div class="table-wrap">
+      <table><thead><tr>
+        <th style="text-align:left" data-sort="name" onclick="setVenueSort('vest','name')">Asset <span class="arrow"></span></th>
+        <th data-sort="markPx" onclick="setVenueSort('vest','markPx')">Mark Price <span class="arrow"></span></th>
+        <th data-sort="indexPx" onclick="setVenueSort('vest','indexPx')">Index Price <span class="arrow"></span></th>
+        <th data-sort="change" onclick="setVenueSort('vest','change')">24h Change <span class="arrow"></span></th>
+        <th data-sort="volume" onclick="setVenueSort('vest','volume')">24h Volume <span class="arrow">▼</span></th>
+        <th data-sort="oi" onclick="setVenueSort('vest','oi')">Open Interest <span class="arrow"></span></th>
+        <th data-sort="funding" onclick="setVenueSort('vest','funding')">Funding Rate <span class="arrow"></span></th>
+        <th data-sort="posRate" onclick="setVenueSort('vest','posRate')"><span class="th-info">% 有效费率 <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip">排除年化 &lt; 1.5% 的无效周期，取正/负费率中占比更大的方向。绿色 = 多数时间正费率，红色 = 多数时间负费率。比例越高，费率方向越稳定，越适合持仓套利。</span></span></th>
+        <th style="cursor:default"><div style="display:flex;align-items:center;gap:6px;justify-content:flex-end"><span>Funding</span>
+          <div class="spark-range-btns"><button class="sr-btn active" onclick="setSparkRange('vest',24,this)">24h</button><button class="sr-btn" onclick="setSparkRange('vest',72,this)">3d</button><button class="sr-btn" onclick="setSparkRange('vest',168,this)">7d</button></div>
+        </div></th>
+      </tr></thead><tbody id="vstTableBody"></tbody></table>
+    </div>
+  </div>
 </div>
 
 <!-- ══ BY ASSET ══ -->
@@ -1143,6 +1218,7 @@ input[type="checkbox"] {
     <div class="spot-sub-tab" onclick="switchSpotSub('binance',this)"><span class="venue-dot binance"></span> Binance <span class="spot-cnt">2</span></div>
     <div class="spot-sub-tab" onclick="switchSpotSub('bitget',this)"><span class="venue-dot bitget"></span> Bitget <span class="spot-cnt">5</span></div>
     <div class="spot-sub-tab" onclick="switchSpotSub('kraken',this)"><span class="venue-dot kraken"></span> Kraken <span class="spot-cnt">5</span></div>
+    <div class="spot-sub-tab" onclick="switchSpotSub('bybit',this)"><span class="venue-dot bybit"></span> Bybit <span class="spot-cnt">0</span></div>
   </div>
 
   <!-- SPOT OVERVIEW -->
@@ -1367,6 +1443,8 @@ const VENUES = {
   bitget:   { name: 'Bitget',    color: '#00D180', fundingInterval: 8, makerFee: 0.0002, takerFee: 0.0006 },
   gate:     { name: 'Gate.io',   color: '#2B6AFF', fundingInterval: 8, makerFee: 0.00015, takerFee: 0.0005 },
   binance:  { name: 'Binance',   color: '#F0B90B', fundingInterval: 8, makerFee: 0.0002, takerFee: 0.0005 },
+  lighter:  { name: 'Lighter',   color: '#6EE7B7', fundingInterval: 8, makerFee: 0.0002, takerFee: 0.0005 },
+  vest:     { name: 'Vest',      color: '#F472B6', fundingInterval: 1, makerFee: 0.0002, takerFee: 0.0006 },
 };
 
 const CAT_COLORS = { index:'#3B82F6', equity:'#8B8FE8', commodity:'#D4A853', etf:'#3EC6D9', fx:'#D98CAF', other:'#5C6170' };
@@ -1420,7 +1498,7 @@ const KNOWN_NAMES = {
 // allData: array of { coin, fullName, category, venue, markPx, indexPx, change, volume, oi, funding }
 let allData = [];
 // Volume growth: venue → { coin: { prevVol, currVol, growth% } }
-let volumeGrowthData = { tradexyz: {}, bitget: {}, gate: {}, binance: {} };
+let volumeGrowthData = { tradexyz: {}, bitget: {}, gate: {}, binance: {}, lighter: {}, vest: {} };
 let lastGrowthFetch = 0;
 const GROWTH_FETCH_INTERVAL = 300000; // re-fetch every 5 min
 const REFRESH_INTERVAL = 30000; // auto-refresh every 30s
@@ -1432,13 +1510,13 @@ let expandedAsset = null;
 let refreshTimer = null;
 
 // Per-venue table state
-let venueTableCatFilter = { tradexyz: 'all', bitget: 'all', gate: 'all', binance: 'all' };
-let venueTableSearch = { tradexyz: '', bitget: '', gate: '', binance: '' };
-let venueTableSort = { tradexyz: { key: 'volume', dir: -1 }, bitget: { key: 'volume', dir: -1 }, gate: { key: 'volume', dir: -1 }, binance: { key: 'volume', dir: -1 } };
+let venueTableCatFilter = { tradexyz: 'all', bitget: 'all', gate: 'all', binance: 'all', lighter: 'all', vest: 'all' };
+let venueTableSearch = { tradexyz: '', bitget: '', gate: '', binance: '', lighter: '', vest: '' };
+let venueTableSort = { tradexyz: { key: 'volume', dir: -1 }, bitget: { key: 'volume', dir: -1 }, gate: { key: 'volume', dir: -1 }, binance: { key: 'volume', dir: -1 }, lighter: { key: 'volume', dir: -1 }, vest: { key: 'volume', dir: -1 } };
 let assetSort = { key: 'volume', dir: -1 };
 
 // Sparkline state
-let sparkHours = { tradexyz: 24, bitget: 24, gate: 24, binance: 24 };
+let sparkHours = { tradexyz: 24, bitget: 24, gate: 24, binance: 24, lighter: 24, vest: 24 };
 let divHoldDays = 0; // 0 = no fee deduction
 let fundingCache = {}; // key: "venue:coin" → { hours, data }
 
@@ -1878,6 +1956,183 @@ async function fetchFundingHistoryBinance(symbol, hours) {
       fundingTime: d.fundingTime || 0
     }));
   } catch(e) { return []; }
+}
+
+// ═══════════════════════════════════════════════
+// API: Lighter (zkLighter Perpetuals)
+// ═══════════════════════════════════════════════
+
+const LIGHTER_API_BASE = 'https://mainnet.zklighter.elliot.ai/api/v1';
+
+async function fetchLighter() {
+  logLoad('Fetching Lighter data...');
+
+  // Fetch order book details (includes mark, OI, volume) + funding rates + token list in parallel
+  const [detailsRes, fundingRes, tokenlistRes] = await Promise.all([
+    fetch(`${LIGHTER_API_BASE}/orderBookDetails`),
+    fetch(`${LIGHTER_API_BASE}/funding-rates`),
+    fetch(`${LIGHTER_API_BASE}/tokenlist`)
+  ]);
+
+  if (!detailsRes.ok) throw new Error(`Lighter HTTP ${detailsRes.status}`);
+  const detailsJson = await detailsRes.json();
+  const perps = detailsJson?.order_book_details ?? [];
+
+  // Build RWA token set from tokenlist
+  const rwaTokens = new Set();
+  if (tokenlistRes.ok) {
+    try {
+      const tokenlistJson = await tokenlistRes.json();
+      (tokenlistJson?.tokens ?? []).forEach(t => {
+        if (t.asset_type === 'RWA') rwaTokens.add(t.symbol?.toUpperCase());
+      });
+    } catch(e) { /* ok */ }
+  }
+
+  // Build funding map from funding-rates endpoint
+  const fundingMap = {};
+  if (fundingRes.ok) {
+    try {
+      const fundingJson = await fundingRes.json();
+      (fundingJson?.funding_rates ?? []).forEach(entry => {
+        if (entry.exchange === 'lighter') {
+          const sym = (entry.symbol || '').toUpperCase();
+          fundingMap[sym] = parseFloat(entry.rate) || 0;
+        }
+      });
+    } catch(e) { /* ok */ }
+  }
+
+  const knownKeys = Object.keys(KNOWN_CATEGORIES);
+  const assets = [];
+
+  for (const entry of perps) {
+    const rawSymbol = (entry.symbol || '').toUpperCase();
+    // Check if it's in the RWA tokenlist or in our known categories
+    const isRwa = rwaTokens.has(rawSymbol) || knownKeys.includes(rawSymbol);
+    if (!isRwa) continue;
+
+    const coin = rawSymbol;
+    const lastPrice = parseFloat(entry.last_trade_price) || 0;
+    if (lastPrice <= 0) continue;
+
+    const oiBase = parseFloat(entry.open_interest) || 0;
+    const volume = parseFloat(entry.daily_quote_token_volume) || 0;
+
+    // Funding from the funding-rates endpoint
+    const rawFunding = fundingMap[coin];
+    const funding = rawFunding !== undefined ? rawFunding / 100 : null; // rates come as percentage, normalize to decimal
+
+    const cat = KNOWN_CATEGORIES[coin] || 'other';
+    const fullName = KNOWN_NAMES[coin] || coin;
+    const isActive = volume > 0 || oiBase > 0 || (funding !== null && funding !== 0);
+
+    assets.push({
+      coin, fullName, category: cat, venue: 'lighter',
+      markPx: lastPrice, indexPx: lastPrice, change: 0, volume,
+      oi: oiBase * lastPrice, funding, predictedFunding: null, isActive,
+      makerFee: VENUES.lighter.makerFee, takerFee: VENUES.lighter.takerFee
+    });
+  }
+
+  logLoad(`Lighter: ${assets.length} RWA assets processed`);
+  return assets;
+}
+
+// ═══════════════════════════════════════════════
+// API: Vest Exchange (Stock Perpetuals)
+// ═══════════════════════════════════════════════
+
+const VEST_API_BASE = 'https://server-prod.hz.vestmarkets.com/v2';
+
+async function fetchVest() {
+  logLoad('Fetching Vest data...');
+
+  // Fetch exchange info (asset discovery) + latest tickers in parallel
+  const [infoRes, tickerRes] = await Promise.all([
+    fetch(`${VEST_API_BASE}/exchangeInfo`),
+    fetch(`${VEST_API_BASE}/ticker/latest`)
+  ]);
+
+  if (!infoRes.ok) throw new Error(`Vest HTTP ${infoRes.status}`);
+  const infoJson = await infoRes.json();
+  const symbols = infoJson?.symbols ?? [];
+
+  // Filter to RWA stock perps
+  const rwaSymbols = symbols.filter(s => s.asset === 'stock' && s.tradingStatus === 'TRADING');
+  if (rwaSymbols.length === 0) return [];
+
+  const venueTickers = rwaSymbols.map(s => s.symbol);
+
+  // Build ticker map
+  const tickerMap = {};
+  if (tickerRes.ok) {
+    try {
+      const tickerJson = await tickerRes.json();
+      (tickerJson?.tickers ?? []).forEach(t => { tickerMap[t.symbol] = t; });
+    } catch(e) { /* ok */ }
+  }
+
+  // Fetch 24h stats and OI in parallel
+  const [stats24Res, oiRes] = await Promise.all([
+    fetch(`${VEST_API_BASE}/ticker/24hr?symbols=${encodeURIComponent(venueTickers.join(','))}`).catch(() => null),
+    fetch(`${VEST_API_BASE}/oi?symbols=${encodeURIComponent(venueTickers.join(','))}`).catch(() => null)
+  ]);
+
+  const statsMap = {};
+  if (stats24Res && stats24Res.ok) {
+    try {
+      const statsJson = await stats24Res.json();
+      (statsJson?.tickers ?? []).forEach(t => { statsMap[t.symbol] = t; });
+    } catch(e) { /* ok */ }
+  }
+
+  const oiMap = {};
+  if (oiRes && oiRes.ok) {
+    try {
+      const oiJson = await oiRes.json();
+      (oiJson?.ois ?? []).forEach(o => { oiMap[o.symbol] = o; });
+    } catch(e) { /* ok */ }
+  }
+
+  const assets = [];
+  for (const entry of rwaSymbols) {
+    // Vest symbol format: TSLA-USD-PERP → strip -USD-PERP
+    const coin = (entry.symbol || '').replace(/-USD-PERP$/i, '').toUpperCase();
+    if (!coin) continue;
+
+    const cat = KNOWN_CATEGORIES[coin] || 'other';
+    const fullName = KNOWN_NAMES[coin] || (entry.displayName || coin);
+
+    const latest = tickerMap[entry.symbol] || {};
+    const stats = statsMap[entry.symbol] || {};
+    const oi = oiMap[entry.symbol] || {};
+
+    const markPx = parseFloat(latest.markPrice) || 0;
+    const indexPx = parseFloat(latest.indexPrice) || markPx;
+    if (markPx <= 0) continue;
+
+    // Vest funding is hourly: oneHrFundingRate
+    const rawFunding = parseFloat(latest.oneHrFundingRate);
+    const funding = isNaN(rawFunding) ? null : rawFunding;
+
+    const volume = parseFloat(stats.quoteVolume) || 0;
+    const longOi = parseFloat(oi.longOi) || 0;
+    const shortOi = parseFloat(oi.shortOi) || 0;
+    const oiUsd = (longOi + shortOi) * indexPx;
+
+    const change = parseFloat(stats.priceChangePercent) || 0;
+    const isActive = volume > 0 || oiUsd > 0 || (funding !== null && funding !== 0);
+
+    assets.push({
+      coin, fullName, category: cat, venue: 'vest',
+      markPx, indexPx, change, volume, oi: oiUsd, funding, predictedFunding: null, isActive,
+      makerFee: VENUES.vest.makerFee, takerFee: VENUES.vest.takerFee
+    });
+  }
+
+  logLoad(`Vest: ${assets.length} RWA assets processed`);
+  return assets;
 }
 
 // ═══════════════════════════════════════════════
@@ -2480,14 +2735,16 @@ function renderModalChart(points) {
 
 async function refresh(isFirst) {
   try {
-    const [xyzAssets, bitgetAssets, gateAssets, binanceAssets] = await Promise.all([
+    const [xyzAssets, bitgetAssets, gateAssets, binanceAssets, lighterAssets, vestAssets] = await Promise.all([
       fetchTradeXyz().catch(e => { console.error('trade.xyz error:', e); return []; }),
       fetchBitget().catch(e => { console.error('Bitget error:', e); return []; }),
       fetchGate().catch(e => { console.error('Gate.io error:', e); return []; }),
-      fetchBinance().catch(e => { console.error('Binance error:', e); return []; })
+      fetchBinance().catch(e => { console.error('Binance error:', e); return []; }),
+      fetchLighter().catch(e => { console.error('Lighter error:', e); return []; }),
+      fetchVest().catch(e => { console.error('Vest error:', e); return []; })
     ]);
 
-    allData = [...xyzAssets, ...bitgetAssets, ...gateAssets, ...binanceAssets];
+    allData = [...xyzAssets, ...bitgetAssets, ...gateAssets, ...binanceAssets, ...lighterAssets, ...vestAssets];
 
     // Fetch volume growth (cached, re-fetches every 5 min)
     await fetchVolumeGrowthAll().catch(e => console.error('Volume growth error:', e));
@@ -2519,6 +2776,8 @@ function renderCurrentView() {
     else if (currentSubTab === 'bitget') renderVenueTable('bitget');
     else if (currentSubTab === 'gate') renderVenueTable('gate');
     else if (currentSubTab === 'binance') renderVenueTable('binance');
+    else if (currentSubTab === 'lighter') renderVenueTable('lighter');
+    else if (currentSubTab === 'vest') renderVenueTable('vest');
   }
   else if (currentView === 'asset') renderAssetView();
   else if (currentView === 'heatmap') renderHeatmap();
@@ -3200,7 +3459,9 @@ function renderVenueTable(venue) {
     tradexyz: { tbodyId: 'xyzTableBody', prefix: 'xyz', hideId: 'xyzHideInactive' },
     bitget:   { tbodyId: 'bgTableBody',  prefix: 'bg',  hideId: 'bgHideInactive' },
     gate:     { tbodyId: 'gateTableBody', prefix: 'gate', hideId: 'gateHideInactive' },
-    binance:  { tbodyId: 'bnTableBody',  prefix: 'bn',  hideId: 'bnHideInactive' }
+    binance:  { tbodyId: 'bnTableBody',  prefix: 'bn',  hideId: 'bnHideInactive' },
+    lighter:  { tbodyId: 'ltTableBody',  prefix: 'lt',  hideId: 'ltHideInactive' },
+    vest:     { tbodyId: 'vstTableBody', prefix: 'vst', hideId: 'vstHideInactive' }
   };
   const vm = venueMap[venue] || venueMap.bitget;
   const tbodyId = vm.tbodyId;
@@ -3691,6 +3952,67 @@ async function fetchSpotRwaBinance() {
   return assets;
 }
 
+// ── Bybit Spot Fetch ──
+const BYBIT_SPOT_BASE = _isDev ? 'https://api.bybit.com/v5/market' : '/api/bybit-spot';
+
+async function fetchSpotRwaBybit() {
+  // Step 1: Discover instruments (paginated)
+  let allInstruments = [];
+  let cursor = null;
+  const seenCursors = new Set();
+  do {
+    let url = `${BYBIT_SPOT_BASE}/instruments-info?category=spot&limit=1000`;
+    if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    const result = json?.result ?? {};
+    allInstruments.push(...(result.list ?? []));
+    const nextCursor = result.nextPageCursor || null;
+    if (!nextCursor || seenCursors.has(nextCursor)) { cursor = null; }
+    else { seenCursors.add(nextCursor); cursor = nextCursor; }
+  } while (cursor);
+
+  // Filter to RWA USDT pairs
+  const rwaPairs = allInstruments.filter(entry => {
+    if (entry.quoteCoin !== 'USDT' || entry.status !== 'Trading') return false;
+    const base = (entry.baseCoin || '').toUpperCase();
+    // Strip ON/X suffixes for RWA detection (Bybit lists TSLAON, NVDAX etc)
+    return _isRwaBase(base);
+  });
+  if (rwaPairs.length === 0) return [];
+
+  // Step 2: Fetch tickers
+  const tickerRes = await fetch(`${BYBIT_SPOT_BASE}/tickers?category=spot`);
+  if (!tickerRes.ok) throw new Error(`Ticker HTTP ${tickerRes.status}`);
+  const tickerJson = await tickerRes.json();
+  const tickerMap = {};
+  (tickerJson?.result?.list ?? []).forEach(t => { tickerMap[t.symbol] = t; });
+
+  const assets = [];
+  for (const entry of rwaPairs) {
+    const symbol = entry.symbol;
+    const t = tickerMap[symbol];
+    if (!t) continue;
+    const base = (entry.baseCoin || '').toUpperCase();
+    const last = parseFloat(t.lastPrice) || 0;
+    if (last <= 0) continue;
+    const prevPrice = parseFloat(t.prevPrice24h) || last;
+    assets.push({
+      coin: base, pair: symbol,
+      last,
+      chg: prevPrice > 0 ? ((last - prevPrice) / prevPrice * 100) : 0,
+      vol: parseFloat(t.turnover24h) || 0,
+      hi: parseFloat(t.highPrice24h) || 0,
+      lo: parseFloat(t.lowPrice24h) || 0,
+      bid: parseFloat(t.bid1Price) || 0,
+      ask: parseFloat(t.ask1Price) || 0,
+    });
+  }
+  console.log(`[Spot] Bybit: ${assets.length} RWA spot assets discovered`);
+  return assets;
+}
+
 // ── Build SPOT_PERP from perps dashboard allData ──
 function _buildSpotPerpFromAllData() {
   const result = {};
@@ -3717,8 +4039,9 @@ async function refreshSpotArbData() {
     fetchSpotRwaKraken(),
     fetchSpotRwaBitget(),
     fetchSpotRwaBinance(),
+    fetchSpotRwaBybit(),
   ]);
-  const venueKeys = ['gate', 'kraken', 'bitget', 'binance'];
+  const venueKeys = ['gate', 'kraken', 'bitget', 'binance', 'bybit'];
   SPOT_DATA = {};
   results.forEach((r, i) => {
     const venue = venueKeys[i];
@@ -3753,8 +4076,8 @@ async function refreshSpotArbData() {
   renderSpotArbRank();
 }
 
-const SPOT_VENUE_NAMES = { gate:'Gate.io', binance:'Binance', bitget:'Bitget', kraken:'Kraken' };
-const SPOT_PERP_VENUES = { gate:{name:'Gate.io',settlesPerDay:3}, binance:{name:'Binance',settlesPerDay:3}, bitget:{name:'Bitget',settlesPerDay:3}, tradexyz:{name:'trade.xyz',settlesPerDay:24} };
+const SPOT_VENUE_NAMES = { gate:'Gate.io', binance:'Binance', bitget:'Bitget', kraken:'Kraken', bybit:'Bybit' };
+const SPOT_PERP_VENUES = { gate:{name:'Gate.io',settlesPerDay:3}, binance:{name:'Binance',settlesPerDay:3}, bitget:{name:'Bitget',settlesPerDay:3}, tradexyz:{name:'trade.xyz',settlesPerDay:24}, lighter:{name:'Lighter',settlesPerDay:3}, vest:{name:'Vest',settlesPerDay:24} };
 
 const ASSET_META = {
   PAXG:   { underlying:'Gold (XAU)',     issuer:'Paxos',          category:'commodity' },
@@ -3782,8 +4105,8 @@ const ISSUER_SHORT = { 'Paxos':'Paxos','Tether':'Tether','Backed Finance':'Backe
 function issuerShort(n) { return ISSUER_SHORT[n] || n; }
 
 const SPOT_FEES = {
-  spot:  { gate:{maker:0.001,taker:0.001}, binance:{maker:0.001,taker:0.001}, bitget:{maker:0.001,taker:0.001}, kraken:{maker:0.0016,taker:0.0026} },
-  perp:  { gate:{maker:0.0002,taker:0.0005}, binance:{maker:0.0002,taker:0.0005}, bitget:{maker:0.0002,taker:0.0006}, tradexyz:{maker:0.0003,taker:0.0009} },
+  spot:  { gate:{maker:0.001,taker:0.001}, binance:{maker:0.001,taker:0.001}, bitget:{maker:0.001,taker:0.001}, kraken:{maker:0.0016,taker:0.0026}, bybit:{maker:0.001,taker:0.001} },
+  perp:  { gate:{maker:0.0002,taker:0.0005}, binance:{maker:0.0002,taker:0.0005}, bitget:{maker:0.0002,taker:0.0006}, tradexyz:{maker:0.0003,taker:0.0009}, lighter:{maker:0.0002,taker:0.0005}, vest:{maker:0.0002,taker:0.0006} },
 };
 let SPOT_HOLD_DAYS = 0; // 0 = "No Fees" mode (show gross funding APR)
 
