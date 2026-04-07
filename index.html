@@ -1621,6 +1621,11 @@ function inferCategory(symbol, name = '') {
 function isTradableRwaSymbol(symbol, name) {
   const canonical = canonicalSymbol(symbol);
   if (!canonical || EXCLUDED_SYMBOLS.has(canonical)) return false;
+  // Must be explicitly registered in RWA_ASSETS or KNOWN_CATEGORIES
+  // (prevents pure crypto tokens like BTC/ETH/SOL from leaking through)
+  const inManual = !!RWA_ASSETS[canonical];
+  const inKnown = !!KNOWN_CATEGORIES[canonical];
+  if (!inManual && !inKnown) return false;
   const category = inferCategory(canonical, name);
   return category !== 'fx';
 }
