@@ -1224,10 +1224,10 @@ input[type="checkbox"] {
   <!-- SPOT OVERVIEW -->
   <div class="summary-page" id="spot-overview">
     <div class="spot-kpi-row">
-      <div class="spot-kpi"><div class="spot-kpi-label">Spot Pairs Tracked</div><div class="spot-kpi-val" style="color:var(--accent)">20</div><div class="spot-kpi-sub">4 exchanges</div></div>
-      <div class="spot-kpi"><div class="spot-kpi-label">Total 24h Volume</div><div class="spot-kpi-val">$1.4B</div><div class="spot-kpi-sub">All RWA spot</div></div>
-      <div class="spot-kpi"><div class="spot-kpi-label">Avg Bid-Ask Spread</div><div class="spot-kpi-val" style="color:var(--positive)">0.021%</div><div class="spot-kpi-sub">Liquidity indicator</div></div>
-      <div class="spot-kpi"><div class="spot-kpi-label">Best Funding Arb</div><div class="spot-kpi-val" style="color:var(--positive)">131.4%</div><div class="spot-kpi-sub">MSTRx · Gate spot → Gate perp</div></div>
+      <div class="spot-kpi"><div class="spot-kpi-label">Spot Pairs Tracked</div><div class="spot-kpi-val" style="color:var(--accent)" id="spotKpiPairs">—</div><div class="spot-kpi-sub" id="spotKpiExchanges">loading…</div></div>
+      <div class="spot-kpi"><div class="spot-kpi-label">Total 24h Volume</div><div class="spot-kpi-val" id="spotKpiVol">—</div><div class="spot-kpi-sub">All RWA spot</div></div>
+      <div class="spot-kpi"><div class="spot-kpi-label">Avg Bid-Ask Spread</div><div class="spot-kpi-val" style="color:var(--positive)" id="spotKpiSpread">—</div><div class="spot-kpi-sub">Liquidity indicator</div></div>
+      <div class="spot-kpi"><div class="spot-kpi-label">Best Funding Arb</div><div class="spot-kpi-val" style="color:var(--positive)" id="spotKpiBestArb">—</div><div class="spot-kpi-sub" id="spotKpiBestArbSub">—</div></div>
     </div>
 
     <div class="section-card">
@@ -4437,6 +4437,7 @@ async function refreshSpotArbData() {
 
   renderSpotVenueGrid();
   renderSpotArbRank();
+  updateSpotKpis();
 
   // Update spot sub-tab count badges dynamically
   document.querySelectorAll('#spotSubNav .spot-sub-tab').forEach(tab => {
@@ -4724,6 +4725,53 @@ function _arbUnderlyingKey(t) {
 }
 // back-compat alias (old name still referenced elsewhere)
 function _arbTickerKey(t) { return _arbUnderlyingKey(t); }
+
+// ── Spot Overview KPI Cards (dynamic) ──
+function updateSpotKpis() {
+  const allAssets = Object.values(SPOT_DATA).flat();
+  const exchanges = Object.keys(SPOT_DATA).filter(v => (SPOT_DATA[v]||[]).length > 0).length;
+  const totalPairs = allAssets.length;
+  const totalVol = allAssets.reduce((s,a) => s + (a.vol||0), 0);
+  // Avg spread (bps) — only from assets with valid bid/ask
+  const spreads = allAssets.filter(a => a.bid>0 && a.ask>0 && a.last>0).map(a => (a.ask-a.bid)/a.last*10000);
+  const avgSpread = spreads.length > 0 ? spreads.reduce((a,b)=>a+b,0)/spreads.length : 0;
+  // Best arb: find the highest net APR from arb rank data
+  let bestArb = null;
+  const perpVenues = Object.keys(SPOT_PERP);
+  Object.entries(SPOT_DATA).forEach(([sVenue, arr]) => {
+    const sFee = SPOT_FEES.spot[sVenue] || {taker:0.001};
+    arr.forEach(a => {
+      const coinKey = _arbTickerKey(a.coin);
+      const spreadRate = (a.ask-a.bid)/a.last;
+      perpVenues.forEach(pVenue => {
+        const pMap = SPOT_PERP[pVenue] || {};
+        let p = null;
+        for (const k of Object.keys(pMap)) { if (_arbTickerKey(k) === coinKey) { p = pMap[k]; break; } }
+        if (!p) return;
+        const settles = (SPOT_PERP_VENUES[pVenue]||{}).settlesPerDay || 3;
+        const fAnn = Math.abs(p.f * settles * 365);
+        const pFee = SPOT_FEES.perp[pVenue] || {taker:0.0005};
+        const costAnn = SPOT_HOLD_DAYS > 0 ? (sFee.taker*2 + pFee.taker*2 + spreadRate) * (365/SPOT_HOLD_DAYS) : 0;
+        const net = (fAnn - costAnn) * 100;
+        if (!bestArb || net > bestArb.net) {
+          bestArb = { net, coin: a.coin, sVenue, pVenue };
+        }
+      });
+    });
+  });
+  // Update DOM
+  const el = (id) => document.getElementById(id);
+  if (el('spotKpiPairs')) el('spotKpiPairs').textContent = totalPairs;
+  if (el('spotKpiExchanges')) el('spotKpiExchanges').textContent = exchanges + ' exchanges';
+  if (el('spotKpiVol')) el('spotKpiVol').textContent = '$' + spotFV(totalVol);
+  if (el('spotKpiSpread')) el('spotKpiSpread').textContent = avgSpread.toFixed(1) + ' bps';
+  if (el('spotKpiBestArb')) el('spotKpiBestArb').textContent = bestArb ? bestArb.net.toFixed(1)+'%' : '—';
+  if (el('spotKpiBestArbSub') && bestArb) {
+    const sn = SPOT_VENUE_NAMES[bestArb.sVenue] || bestArb.sVenue;
+    const pn = (SPOT_PERP_VENUES[bestArb.pVenue]||{}).name || bestArb.pVenue;
+    el('spotKpiBestArbSub').textContent = bestArb.coin + ' · ' + sn + ' spot → ' + pn + ' perp';
+  }
+}
 
 // ── Dynamic Exchange Summary Cards ──
 const _CAT_COLORS = {equity:'#8B8FE8',commodity:'var(--gold)',index:'#3B82F6',etf:'#10B981',other:'var(--foreground-dim)'};
