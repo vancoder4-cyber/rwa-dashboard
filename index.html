@@ -3786,7 +3786,10 @@ function _isRwaBase(base) {
   if (_KNOWN_RWA_TOKENS.has(base)) return true;
   // 2. Skip known crypto tokens
   if (_CRYPTO_TICKER_KEEP.has(base)) return false;
-  // 3. Try underlying extraction via suffix strip
+  // 3. Direct match in KNOWN_CATEGORIES (catches GOLD, SILVER, TSLA, NVDA, etc.)
+  const directCat = KNOWN_CATEGORIES[base];
+  if (directCat && directCat !== 'fx') return true;
+  // 4. Try underlying extraction via suffix strip (catches TSLAON→TSLA, NVDAX→NVDA, etc.)
   const underlying = _arbUnderlyingKey(base);
   if (underlying !== base) {
     const cat = KNOWN_CATEGORIES[underlying];
