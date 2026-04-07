@@ -6,6 +6,7 @@
     { "source": "/api/binance-spot/:path*", "destination": "https://api.binance.com/api/v3/:path*" },
     { "source": "/api/kraken/:path*", "destination": "https://api.kraken.com/0/public/:path*" },
     { "source": "/api/bybit-spot/:path*", "destination": "https://api.bybit.com/v5/market/:path*" },
+    { "source": "/api/vest/:path*", "destination": "https://server-prod.hz.vestmarkets.com/v2/:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [
