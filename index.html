@@ -4696,11 +4696,8 @@ async function fetchSpotRwaBinance() {
 
 // ── Bybit Spot Fetch ──
 const BYBIT_SPOT_BASE = _isDev ? 'https://api.bybit.com/v5/market' : '/api/bybit-spot';
-const BIT_TRADE_BASE   = _isDev ? 'https://mapi.matrixport.com/trader/v2/api' : '/api/bit-trade';
-
-// ── Bit.com API key/secret from URL params ──
-const _BIT_KEY    = new URLSearchParams(location.search).get('bit_key') || '';
-const _BIT_SECRET = new URLSearchParams(location.search).get('bit_secret') || '';
+// Bit.com: serverless function handles auth server-side (keys in Vercel env vars)
+const BIT_API_BASE = '/api/bit';
 
 async function fetchSpotRwaBybit() {
   // Step 1: Discover instruments (paginated)
@@ -4774,25 +4771,18 @@ async function fetchSpotRwaBybit() {
 }
 
 // ── Bit.com (Matrixport) Spot RFQ Fetch ──
-// HMAC-SHA256 signature helper using Web Crypto API
-async function _bitSign(params, secret) {
-  // Sort params alphabetically, concatenate as key=value&key=value
-  const sorted = Object.keys(params).sort().map(k => `${k}=${params[k]}`).join('&');
-  const enc = new TextEncoder();
-  const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(sorted));
-  return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('');
-}
+// Auth handled server-side via Vercel Serverless Functions (api/bit/*.js)
+// API key/secret stored as Vercel Environment Variables — never exposed to client
 
 async function fetchSpotRwaBit() {
-  if (!_BIT_KEY) { console.log('[Spot] Bit.com: skipped (no bit_key)'); return []; }
-
-  const hdrs = { 'Content-Type': 'application/json', 'X-Bit-Access-Key': _BIT_KEY };
-
-  // Step 1: Discover all trading pairs
-  const infoRes = await fetch(`${BIT_TRADE_BASE}/symbols-info`, { headers: hdrs });
-  if (!infoRes.ok) throw new Error(`HTTP ${infoRes.status}`);
+  // Step 1: Discover all trading pairs via serverless proxy
+  const infoRes = await fetch(`${BIT_API_BASE}/symbols-info`);
+  if (!infoRes.ok) {
+    if (infoRes.status === 500) { console.log('[Spot] Bit.com: skipped (API key not configured)'); return []; }
+    throw new Error(`HTTP ${infoRes.status}`);
+  }
   const infoJson = await infoRes.json();
+  if (infoJson.error) { console.log('[Spot] Bit.com: ' + infoJson.error); return []; }
   if (infoJson.code !== 0) throw new Error(`API ${infoJson.code}: ${infoJson.message}`);
   const allPairs = infoJson.data || [];
 
@@ -4805,21 +4795,13 @@ async function fetchSpotRwaBit() {
   });
   if (rwaPairs.length === 0) { console.log('[Spot] Bit.com: 0 RWA pairs found'); return []; }
 
-  // Step 2: Fetch RFQ prices for each pair (parallel, max 5 concurrent)
+  // Step 2: Fetch RFQ prices via serverless proxy (handles signing server-side)
   const assets = [];
   const priceTasks = rwaPairs.map(p => async () => {
     try {
       const base = (p.base_currency || '').toUpperCase();
       const pair = p.pair;
-      const timestamp = Date.now();
-      const params = { symbol: pair, cash: '100', side: '0', timestamp: String(timestamp) };
-
-      if (_BIT_SECRET) {
-        params.signature = await _bitSign(params, _BIT_SECRET);
-      }
-
-      const qs = Object.entries(params).map(([k,v]) => `${k}=${encodeURIComponent(v)}`).join('&');
-      const res = await fetch(`${BIT_TRADE_BASE}/rfq-price?${qs}`, { headers: hdrs });
+      const res = await fetch(`${BIT_API_BASE}/rfq-price?symbol=${encodeURIComponent(pair)}&cash=100&side=0`);
       if (!res.ok) return;
       const json = await res.json();
       if (json.code !== 0 || !json.data) return;
