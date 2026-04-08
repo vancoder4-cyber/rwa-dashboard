@@ -4235,6 +4235,36 @@ function _isRwaBase(base) {
   return false;
 }
 
+// ── Stricter RWA filter for SPOT exchanges ──
+// On spot exchanges, plain equity tickers (SOLV, PEP, AI, GME, CAT…) are
+// almost always crypto meme/utility tokens that happen to share a symbol
+// with a real stock.  Genuine tokenised RWA stocks carry issuer suffixes
+// (COINX = Backed, TSLAon = Ondo) or are registered in ASSET_META.
+// Commodities (PAXG, XAUT, XAU…) are the exception — they trade under
+// their own unique tickers and are safe to allow.
+function _isRwaSpotBase(base) {
+  if (!base || base.length < 2) return false;
+  const up = base.toUpperCase();
+
+  // 1. Explicitly registered tokenised token → always allow
+  if (typeof ASSET_META !== 'undefined' && ASSET_META[up]) return true;
+
+  // 2. Tokenised suffix detected (COINX, GOOGLon, SPYon…) → allow if underlying is RWA
+  const underlying = _arbUnderlyingKey(up);
+  if (underlying !== up && isTradableRwaSymbol(underlying)) return true;
+
+  // 3. Commodity / FX tokens → allow (PAXG, XAUT, XAU, XAG, NATGAS…)
+  //    These have unique tickers that don't collide with crypto.
+  const cat = RWA_ASSETS[up]?.category || KNOWN_CATEGORIES[up];
+  if (cat === 'commodity' || cat === 'fx') return true;
+
+  // 4. Everything else (plain equity/ETF/index tickers) → REJECT for spot.
+  //    On spot exchanges, "PEP" is PepeCoin, not PepsiCo;
+  //    "SOLV" is Solv Protocol, not Solventum.  Real tokenised stocks
+  //    always carry issuer suffixes on spot markets.
+  return false;
+}
+
 // ── Proxy base URLs (Vercel proxy in prod, direct in dev) ──
 const _isDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 const GATE_SPOT_BASE   = _isDev ? 'https://api.gateio.ws/api/v4/spot'   : '/api/gate-spot';
@@ -4253,7 +4283,7 @@ async function fetchSpotRwaGate() {
     const pair = t.currency_pair || '';
     if (!pair.endsWith('_USDT') && !pair.endsWith('_USD')) continue;
     const base = pair.replace(/_(USDT|USD)$/, '').toUpperCase();
-    if (!_isRwaBase(base)) continue;
+    if (!_isRwaSpotBase(base)) continue;
     const last = parseFloat(t.last) || 0;
     if (last <= 0) continue;
     assets.push({
@@ -4300,7 +4330,7 @@ async function fetchSpotRwaKraken() {
     // Extract base: use info.base, strip X/Z prefix Kraken adds
     let base = (info.base || '').replace(/^[XZ]/, '').toUpperCase();
     if (!base) base = pairName.replace(/(USD|USDT|ZUSD)$/i, '').replace(/^[XZ]/, '').toUpperCase();
-    if (!_isRwaBase(base)) continue;
+    if (!_isRwaSpotBase(base)) continue;
     rwaPairNames.push(pairName);
     pairToBase[pairName] = base;
   }
@@ -4372,7 +4402,7 @@ async function fetchSpotRwaBitget() {
     const symbol = (t.symbol || '').toUpperCase();
     if (!symbol.endsWith('USDT') && !symbol.endsWith('USD')) continue;
     const base = symbol.replace(/(USDT|USD)$/, '');
-    if (!_isRwaBase(base)) continue;
+    if (!_isRwaSpotBase(base)) continue;
     const last = parseFloat(t.lastPr) || 0;
     if (last <= 0) continue;
     assets.push({
@@ -4414,7 +4444,7 @@ async function fetchSpotRwaBinance() {
     const symbol = (t.symbol || '').toUpperCase();
     if (!symbol.endsWith('USDT') && !symbol.endsWith('USD')) continue;
     const base = symbol.replace(/(USDT|USD)$/, '');
-    if (!_isRwaBase(base)) continue;
+    if (!_isRwaSpotBase(base)) continue;
     const last = parseFloat(t.lastPrice) || 0;
     if (last <= 0) continue;
     assets.push({
@@ -4470,7 +4500,7 @@ async function fetchSpotRwaBybit() {
     if (entry.quoteCoin !== 'USDT' || entry.status !== 'Trading') return false;
     const base = (entry.baseCoin || '').toUpperCase();
     // Strip ON/X suffixes for RWA detection (Bybit lists TSLAON, NVDAX etc)
-    return _isRwaBase(base);
+    return _isRwaSpotBase(base);
   });
   if (rwaPairs.length === 0) return [];
 
@@ -5155,6 +5185,30 @@ function renderSpotAllAssets() {
     if (!underlyingMap[uKey].coins[e.coin]) underlyingMap[uKey].coins[e.coin] = [];
     underlyingMap[uKey].coins[e.coin].push(e);
   });
+
+  // ── Safety-net: remove crypto-collision false positives via price validation ──
+  // If an asset's average spot price diverges >10× from its Yahoo ref price
+  // AND it is NOT an explicitly registered tokenised token (ASSET_META),
+  // it is almost certainly a crypto token with a colliding ticker — remove it.
+  for (const [uKey, group] of Object.entries(underlyingMap)) {
+    // Skip commodities — price structures differ (per-gram vs per-oz)
+    if (group.category === 'commodity') continue;
+    const entries = Object.values(group.coins).flat();
+    const avgPrice = entries.reduce((s,e) => s + e.last, 0) / entries.length;
+    if (avgPrice <= 0) continue;
+    // Check if ANY coin in this group is in ASSET_META → trusted
+    const hasMeta = Object.keys(group.coins).some(c => ASSET_META[c]);
+    if (hasMeta) continue;
+    // Try ref price lookup
+    const cleanKey = uKey.replace(/\s*\(.*\)$/, ''); // strip "(COINX)" suffix
+    const ref = getRefPrice(cleanKey);
+    if (ref && ref > 0) {
+      const ratio = avgPrice / ref;
+      if (ratio > 10 || ratio < 0.1) {
+        delete underlyingMap[uKey]; // crypto collision — remove
+      }
+    }
+  }
 
   // Category chips
   const catCounts = {};
