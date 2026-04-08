@@ -71,6 +71,8 @@
   --lighter-dim:  rgba(0,183,79,0.10);
   --vest:         #E0246A;
   --vest-dim:     rgba(224,36,106,0.10);
+  --bit:          #00A3FF;
+  --bit-dim:      rgba(0,163,255,0.10);
 
   /* ── Radius ── generous, pill-like */
   --radius-sm: 8px;
@@ -220,6 +222,7 @@ body {
 .venue-dot.bybit { background: var(--bybit); }
 .venue-dot.lighter { background: var(--lighter); }
 .venue-dot.vest { background: var(--vest); }
+.venue-dot.bit { background: var(--bit); }
 
 /* ═══════════════════════════════════════════════════
    FILTER BAR
@@ -1297,6 +1300,7 @@ input[type="checkbox"] {
     <div class="spot-sub-tab" onclick="switchSpotSub('bitget',this)"><span class="venue-dot bitget"></span> Bitget <span class="spot-cnt">5</span></div>
     <div class="spot-sub-tab" onclick="switchSpotSub('kraken',this)"><span class="venue-dot kraken"></span> Kraken <span class="spot-cnt">5</span></div>
     <div class="spot-sub-tab" onclick="switchSpotSub('bybit',this)"><span class="venue-dot bybit"></span> Bybit <span class="spot-cnt">0</span></div>
+    <div class="spot-sub-tab" onclick="switchSpotSub('bit',this)"><span class="venue-dot bit"></span> Bit.com <span class="spot-cnt">0</span></div>
   </div>
 
   <!-- SPOT OVERVIEW -->
@@ -4692,6 +4696,11 @@ async function fetchSpotRwaBinance() {
 
 // ── Bybit Spot Fetch ──
 const BYBIT_SPOT_BASE = _isDev ? 'https://api.bybit.com/v5/market' : '/api/bybit-spot';
+const BIT_TRADE_BASE   = _isDev ? 'https://mapi.matrixport.com/trader/v2/api' : '/api/bit-trade';
+
+// ── Bit.com API key/secret from URL params ──
+const _BIT_KEY    = new URLSearchParams(location.search).get('bit_key') || '';
+const _BIT_SECRET = new URLSearchParams(location.search).get('bit_secret') || '';
 
 async function fetchSpotRwaBybit() {
   // Step 1: Discover instruments (paginated)
@@ -4764,6 +4773,78 @@ async function fetchSpotRwaBybit() {
   return assets;
 }
 
+// ── Bit.com (Matrixport) Spot RFQ Fetch ──
+// HMAC-SHA256 signature helper using Web Crypto API
+async function _bitSign(params, secret) {
+  // Sort params alphabetically, concatenate as key=value&key=value
+  const sorted = Object.keys(params).sort().map(k => `${k}=${params[k]}`).join('&');
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(sorted));
+  return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function fetchSpotRwaBit() {
+  if (!_BIT_KEY) { console.log('[Spot] Bit.com: skipped (no bit_key)'); return []; }
+
+  const hdrs = { 'Content-Type': 'application/json', 'X-Bit-Access-Key': _BIT_KEY };
+
+  // Step 1: Discover all trading pairs
+  const infoRes = await fetch(`${BIT_TRADE_BASE}/symbols-info`, { headers: hdrs });
+  if (!infoRes.ok) throw new Error(`HTTP ${infoRes.status}`);
+  const infoJson = await infoRes.json();
+  if (infoJson.code !== 0) throw new Error(`API ${infoJson.code}: ${infoJson.message}`);
+  const allPairs = infoJson.data || [];
+
+  // Filter to RWA USDT pairs
+  const rwaPairs = allPairs.filter(p => {
+    const quote = (p.quote_currency || '').toUpperCase();
+    if (quote !== 'USDT' && quote !== 'USD') return false;
+    const base = (p.base_currency || '').toUpperCase();
+    return _isRwaSpotBase(base);
+  });
+  if (rwaPairs.length === 0) { console.log('[Spot] Bit.com: 0 RWA pairs found'); return []; }
+
+  // Step 2: Fetch RFQ prices for each pair (parallel, max 5 concurrent)
+  const assets = [];
+  const priceTasks = rwaPairs.map(p => async () => {
+    try {
+      const base = (p.base_currency || '').toUpperCase();
+      const pair = p.pair;
+      const timestamp = Date.now();
+      const params = { symbol: pair, cash: '100', side: '0', timestamp: String(timestamp) };
+
+      if (_BIT_SECRET) {
+        params.signature = await _bitSign(params, _BIT_SECRET);
+      }
+
+      const qs = Object.entries(params).map(([k,v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+      const res = await fetch(`${BIT_TRADE_BASE}/rfq-price?${qs}`, { headers: hdrs });
+      if (!res.ok) return;
+      const json = await res.json();
+      if (json.code !== 0 || !json.data) return;
+
+      const price = parseFloat(json.data.price) || 0;
+      if (price <= 0) return;
+
+      assets.push({
+        coin: base, pair,
+        last: price,
+        chg: 0,    // RFQ API doesn't provide 24h change
+        vol: 0,    // RFQ API doesn't provide volume
+        hi: 0, lo: 0,
+        bid: price, ask: price,  // RFQ: single price, no spread
+        rfq: true,  // Flag as RFQ-based pricing
+      });
+    } catch (e) { console.warn(`[Spot] Bit.com rfq error for ${p.pair}:`, e.message); }
+  });
+  for (let i = 0; i < priceTasks.length; i += 5) {
+    await Promise.allSettled(priceTasks.slice(i, i + 5).map(fn => fn()));
+  }
+  console.log(`[Spot] Bit.com: ${assets.length} RWA spot assets (RFQ) discovered`);
+  return assets;
+}
+
 // ── Build SPOT_PERP from perps dashboard allData ──
 function _buildSpotPerpFromAllData() {
   const result = {};
@@ -4795,8 +4876,9 @@ async function refreshSpotArbData() {
     fetchSpotRwaBitget(),
     fetchSpotRwaBinance(),
     fetchSpotRwaBybit(),
+    fetchSpotRwaBit(),
   ]);
-  const venueKeys = ['gate', 'kraken', 'bitget', 'binance', 'bybit'];
+  const venueKeys = ['gate', 'kraken', 'bitget', 'binance', 'bybit', 'bit'];
   SPOT_DATA = {};
   results.forEach((r, i) => {
     const venue = venueKeys[i];
@@ -4854,7 +4936,7 @@ async function refreshSpotArbData() {
   });
 }
 
-const SPOT_VENUE_NAMES = { gate:'Gate.io', binance:'Binance', bitget:'Bitget', kraken:'Kraken', bybit:'Bybit' };
+const SPOT_VENUE_NAMES = { gate:'Gate.io', binance:'Binance', bitget:'Bitget', kraken:'Kraken', bybit:'Bybit', bit:'Bit.com' };
 const SPOT_PERP_VENUES = { gate:{name:'Gate.io',settlesPerDay:3}, binance:{name:'Binance',settlesPerDay:3}, bitget:{name:'Bitget',settlesPerDay:3}, tradexyz:{name:'trade.xyz',settlesPerDay:24}, lighter:{name:'Lighter',settlesPerDay:3}, vest:{name:'Vest',settlesPerDay:24} };
 
 const ASSET_META = {

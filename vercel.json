@@ -12,6 +12,7 @@
     { "source": "/api/bitget-spot/:path*", "destination": "https://api.bitget.com/api/v2/spot/market/:path*" },
     { "source": "/api/bitget-futures/:path*", "destination": "https://api.bitget.com/api/v2/mix/market/:path*" },
     { "source": "/api/dydx/:path*", "destination": "https://indexer.dydx.trade/v4/:path*" },
+    { "source": "/api/bit-trade/:path*", "destination": "https://mapi.matrixport.com/trader/v2/api/:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [
