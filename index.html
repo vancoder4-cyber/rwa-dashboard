@@ -1632,10 +1632,20 @@ function inferCategory(symbol, name = '') {
   const canonical = canonicalSymbol(symbol);
   const manual = RWA_ASSETS[canonical];
   if (manual?.category) return manual.category;
+  // Check KNOWN_CATEGORIES (includes dashboard extras)
+  if (KNOWN_CATEGORIES[canonical]) return KNOWN_CATEGORIES[canonical];
   const upperName = name.toUpperCase();
+  const upperSym = canonical.toUpperCase();
+  // FX pairs
   if (canonical.endsWith('USD') && canonical.length >= 6) return 'fx';
-  if (upperName.includes('ETF') || upperName.includes('TRUST') || upperName.includes('FUND')) return 'etf';
-  if (upperName.includes('INDEX')) return 'index';
+  // Commodities by name
+  const commodityWords = ['GOLD','SILVER','OIL','CRUDE','GAS','COPPER','PLATINUM','PALLADIUM','CORN','WHEAT','URANIUM','ALUMINIUM','COTTON','COFFEE','SUGAR','SOYBEAN'];
+  if (commodityWords.some(w => upperName.includes(w) || upperSym.includes(w))) return 'commodity';
+  // ETFs by name
+  if (upperName.includes('ETF') || upperName.includes('TRUST') || upperName.includes('FUND') || upperName.includes('SPDR')) return 'etf';
+  // Indices by name
+  if (upperName.includes('INDEX') || upperName.includes('S&P') || upperName.includes('NASDAQ') || upperName.includes('NIKKEI') || upperName.includes('KOSPI')) return 'index';
+  // Default: equity (most RWA perps are stocks)
   return 'equity';
 }
 
@@ -1908,8 +1918,8 @@ async function fetchTradeXyz() {
     const change = prevDayPx ? ((markPx - prevDayPx) / prevDayPx) * 100 : 0;
     const isActive = volume > 0 || oi > 0 || (funding !== null && funding !== 0);
 
-    const cat = KNOWN_CATEGORIES[coin] || 'other';
-    if (cat === 'other') console.warn(`[RWA] Uncategorized trade.xyz asset: ${coin}`);
+    const cat = KNOWN_CATEGORIES[coin] || inferCategory(coin, u.fullName || '');
+    if (!KNOWN_CATEGORIES[coin]) { KNOWN_CATEGORIES[coin] = cat; console.info(`[RWA] Auto-categorized trade.xyz: ${coin} → ${cat}`); }
     const fullName = KNOWN_NAMES[coin] || (u.fullName || coin);
 
     assets.push({
@@ -1995,8 +2005,8 @@ async function fetchBitget() {
       if (isNaN(funding)) funding = null;
     }
 
-    const cat = KNOWN_CATEGORIES[base] || 'other';
-    if (cat === 'other') console.warn(`[RWA] Uncategorized Bitget asset: ${base} (${symbol})`);
+    const cat = KNOWN_CATEGORIES[base] || inferCategory(base, contract.symbolName || '');
+    if (!KNOWN_CATEGORIES[base]) { KNOWN_CATEGORIES[base] = cat; console.info(`[RWA] Auto-categorized Bitget: ${base} → ${cat}`); }
     const fullName = KNOWN_NAMES[base] || (contract.symbolName || base);
 
     const cMaker = parseFloat(contract.makerFeeRate);
@@ -2105,8 +2115,8 @@ async function fetchGate() {
     const rawIndicative = parseFloat(t.funding_rate_indicative);
     const predictedFunding = isNaN(rawIndicative) ? null : rawIndicative;
 
-    const cat = KNOWN_CATEGORIES[base] || 'other';
-    if (cat === 'other') console.warn(`[RWA] Uncategorized Gate asset: ${base}`);
+    const cat = KNOWN_CATEGORIES[base] || inferCategory(base, contract.name || '');
+    if (!KNOWN_CATEGORIES[base]) { KNOWN_CATEGORIES[base] = cat; }
     const fullName = KNOWN_NAMES[base] || base;
     const isActive = volume > 0 || oiUsd > 0 || (funding !== null && funding !== 0);
 
@@ -2190,7 +2200,8 @@ async function fetchBinance() {
     // OI needs separate call per symbol — skip for now, use ticker data
     const oi = volume > 0 ? volume * 0.3 : 0; // rough estimate; we'll refine later
 
-    const cat = KNOWN_CATEGORIES[base] || 'other';
+    const cat = KNOWN_CATEGORIES[base] || inferCategory(base);
+    if (!KNOWN_CATEGORIES[base]) { KNOWN_CATEGORIES[base] = cat; }
     const fullName = KNOWN_NAMES[base] || base;
     const isActive = volume > 0 || (funding !== null && funding !== 0);
 
@@ -2300,7 +2311,8 @@ async function fetchLighter() {
     const rawFunding = fundingMap[coin];
     const funding = rawFunding !== undefined ? rawFunding / 100 : null; // rates come as percentage, normalize to decimal
 
-    const cat = KNOWN_CATEGORIES[coin] || 'other';
+    const cat = KNOWN_CATEGORIES[coin] || inferCategory(coin);
+    if (!KNOWN_CATEGORIES[coin]) { KNOWN_CATEGORIES[coin] = cat; }
     const fullName = KNOWN_NAMES[coin] || coin;
     const isActive = volume > 0 || oiBase > 0 || (funding !== null && funding !== 0);
 
@@ -2378,7 +2390,8 @@ async function fetchVest() {
     const coin = (entry.symbol || '').replace(/-USD-PERP$/i, '').toUpperCase();
     if (!coin) continue;
 
-    const cat = KNOWN_CATEGORIES[coin] || 'other';
+    const cat = KNOWN_CATEGORIES[coin] || inferCategory(coin, entry.displayName || '');
+    if (!KNOWN_CATEGORIES[coin]) { KNOWN_CATEGORIES[coin] = cat; }
     const fullName = KNOWN_NAMES[coin] || (entry.displayName || coin);
 
     const latest = tickerMap[entry.symbol] || {};
@@ -4068,17 +4081,44 @@ let spotArbLastUpdate = null;
 // REFERENCE PRICING (Yahoo Finance)
 // ═══════════════════════════════════════════════
 const YAHOO_SYMBOL_MAP = {
-  WTI: 'CL=F', BRENTOIL: 'BZ=F', NATGAS: 'NG=F',
+  // Commodities
+  WTI: 'CL=F', BRENTOIL: 'BZ=F', NATGAS: 'NG=F', COFFEE: 'KC=F', COTTON: 'CT=F',
+  CORN: 'ZC=F', WHEAT: 'ZW=F', URANIUM: 'URA', SOYBEAN: 'ZS=F', SUGAR: 'SB=F',
+  ALUMINIUM: 'ALI=F', COPPER: 'HG=F', OIL: 'CL=F', BRN: 'BZ=F', COP: 'HG=F', HG: 'HG=F',
   XAU: 'GC=F', XAG: 'SI=F', XCU: 'HG=F', XPT: 'PL=F', XPD: 'PA=F',
-  CORN: 'ZC=F', WHEAT: 'ZW=F', URANIUM: 'UX=F',
-  SPX: '^GSPC', VIX: '^VIX', JP225: '^N225', KR200: '^KS200', KRCOMP: '^KS11', DXY: 'DX-Y.NYB',
-  SAMSUNG: '005930.KS', SMSN: '005930.KS', SKHYNIX: '000660.KS', HYUNDAI: '005380.KS', SOFTBANK: '9984.T',
+  PALL: 'PA=F', PLAT: 'PL=F', TTF: 'TTF=F',
+  // Indices
+  SPX: '^GSPC', VIX: '^VIX', JP225: '^N225', KR200: '^KS200', KRCOMP: '^KS11',
+  DXY: 'DX-Y.NYB', DAX: '^GDAXI', FTSE: '^FTSE', DJI: '^DJI',
+  NDX: '^NDX', NQ100: '^NDX', NASDAQ: '^IXIC',
+  // Korea / Japan
+  SAMSUNG: '005930.KS', SMSN: '005930.KS', SKHYNIX: '000660.KS', HYUNDAI: '005380.KS',
+  SOFTBANK: '9984.T', KIOXIA: '285A.T', SKHX: 'SKX',
+  // ETFs
   SPY: 'SPY', QQQ: 'QQQ', IWM: 'IWM', DIA: 'DIA', GLD: 'GLD', SLV: 'SLV', USO: 'USO', TLT: 'TLT',
   URA: 'URA', URNM: 'URNM', EWY: 'EWY', EWJ: 'EWJ', XLE: 'XLE', BOTZ: 'BOTZ', MAGS: 'MAGS',
-  IAU: 'IAU', IVV: 'IVV', ITOT: 'ITOT'
+  IAU: 'IAU', IVV: 'IVV', ITOT: 'ITOT', KWEB: 'KWEB', EWT: 'EWT',
+  TQQQ: 'TQQQ', SQQQ: 'SQQQ',
+  // Equities (explicit Yahoo tickers for clarity)
+  TSLA: 'TSLA', AAPL: 'AAPL', NVDA: 'NVDA', AMZN: 'AMZN', GOOGL: 'GOOGL',
+  META: 'META', MSFT: 'MSFT', COIN: 'COIN', MSTR: 'MSTR', AMD: 'AMD',
+  PLTR: 'PLTR', HOOD: 'HOOD', INTC: 'INTC', ORCL: 'ORCL', NFLX: 'NFLX',
+  BABA: 'BABA', GME: 'GME', RIVN: 'RIVN', CRWV: 'CRWV', USAR: 'ITA',
+  AVGO: 'AVGO', CRM: 'CRM', QCOM: 'QCOM', ASML: 'ASML', ARM: 'ARM',
+  UBER: 'UBER', PYPL: 'PYPL', SNAP: 'SNAP', SHOP: 'SHOP', SQ: 'SQ',
+  NIO: 'NIO', LCID: 'LCID', FUTU: 'FUTU', PDD: 'PDD', JD: 'JD',
 };
 const REFERENCE_SYMBOL_ALIASES = {
-  XAUT: 'XAU', PAXG: 'XAU', XAUM: 'XAU', KAU: 'XAU', PGOLD: 'XAU', GGBR: 'XAU'
+  // Gold tokenized → XAU
+  XAUT: 'XAU', PAXG: 'XAU', XAUM: 'XAU', KAU: 'XAU', PGOLD: 'XAU', GGBR: 'XAU',
+  // Backed Finance (X suffix) → underlying
+  AAPLX: 'AAPL', TSLAX: 'TSLA', NVDAX: 'NVDA', GOOGLX: 'GOOGL', AMZNX: 'AMZN',
+  METAX: 'META', MSFTX: 'MSFT', MSTRX: 'MSTR', MSTRx: 'MSTR', COINX: 'COIN', SPYx: 'SPY',
+  // Ondo Finance (on suffix) → underlying
+  TSLAon: 'TSLA', NVDAon: 'NVDA', AAPLon: 'AAPL', AMZNon: 'AMZN',
+  GOOGLon: 'GOOGL', MSTRon: 'MSTR', COINon: 'COIN', MSFTon: 'MSFT', SPYon: 'SPY',
+  // Commodity aliases
+  OXY: 'OXY', XOM: 'XOM',
 };
 
 function assetToYahoo(symbol) {
@@ -4093,8 +4133,14 @@ let refPriceLoading = false;
 async function fetchReferencePrices(symbols) {
   if (refPriceLoading) return;
   refPriceLoading = true;
-  // Deduplicate by canonical symbol
-  const unique = [...new Set(symbols.map(s => canonicalSymbol(s)))];
+  // Deduplicate by resolved reference symbol (underlying for tokenized assets)
+  const resolvedSet = new Set();
+  symbols.forEach(s => {
+    const canonical = canonicalSymbol(s);
+    const ref = REFERENCE_SYMBOL_ALIASES[canonical] ?? canonical;
+    resolvedSet.add(ref);
+  });
+  const unique = [...resolvedSet];
   const YAHOO_HOSTS = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com'];
 
   // Use Vercel proxy in prod, direct in dev
@@ -4134,11 +4180,22 @@ async function fetchReferencePrices(symbols) {
 function getRefPrice(coin) {
   const canonical = canonicalSymbol(coin);
   const ref = REFERENCE_SYMBOL_ALIASES[canonical] ?? canonical;
-  return REF_PRICES[ref] ?? REF_PRICES[canonical] ?? null;
+  if (REF_PRICES[ref]) return REF_PRICES[ref];
+  if (REF_PRICES[canonical]) return REF_PRICES[canonical];
+  // Try underlying key extraction (strips issuer suffix: AAPLX→AAPL, TSLAon→TSLA)
+  const underlying = _arbUnderlyingKey(canonical);
+  if (underlying !== canonical) {
+    const uRef = REFERENCE_SYMBOL_ALIASES[underlying] ?? underlying;
+    return REF_PRICES[uRef] ?? REF_PRICES[underlying] ?? null;
+  }
+  return null;
 }
 
 function priceDeviation(venuePrice, refPrice) {
   if (!refPrice || refPrice <= 0 || !venuePrice) return null;
+  // Detect scale mismatch (e.g. KRW-denominated Yahoo price vs USD venue price)
+  const ratio = venuePrice / refPrice;
+  if (ratio > 10 || ratio < 0.1) return null; // >10x difference means different currency/unit
   return (venuePrice - refPrice) / refPrice;
 }
 
@@ -4170,6 +4227,8 @@ function _isRwaBase(base) {
   if (!base || base.length < 2) return false;
   // Use unified system
   if (isTradableRwaSymbol(base)) return true;
+  // Directly in ASSET_META (covers tokenized spot like AAPLX, TSLAon, PAXG)
+  if (typeof ASSET_META !== 'undefined' && ASSET_META[base]) return true;
   // Also try underlying extraction (suffix strip for tokenized stocks)
   const underlying = _arbUnderlyingKey(base);
   if (underlying !== base && isTradableRwaSymbol(underlying)) return true;
@@ -4547,19 +4606,35 @@ const SPOT_VENUE_NAMES = { gate:'Gate.io', binance:'Binance', bitget:'Bitget', k
 const SPOT_PERP_VENUES = { gate:{name:'Gate.io',settlesPerDay:3}, binance:{name:'Binance',settlesPerDay:3}, bitget:{name:'Bitget',settlesPerDay:3}, tradexyz:{name:'trade.xyz',settlesPerDay:24}, lighter:{name:'Lighter',settlesPerDay:3}, vest:{name:'Vest',settlesPerDay:24} };
 
 const ASSET_META = {
+  // ── Tokenized Gold ──
   PAXG:   { underlying:'Gold (XAU)',     issuer:'Paxos',          category:'commodity' },
   XAUT:   { underlying:'Gold (XAU)',     issuer:'Tether',         category:'commodity' },
+  XAUM:   { underlying:'Gold (XAU)',     issuer:'Matrixdock',     category:'commodity' },
+  KAU:    { underlying:'Gold (XAU)',     issuer:'Kinesis',        category:'commodity' },
+  PGOLD:  { underlying:'Gold (XAU)',     issuer:'Pleasing',       category:'commodity' },
+  GGBR:   { underlying:'Gold (XAU)',     issuer:'Goldfish',       category:'commodity' },
+  // ── Backed Finance (X suffix) ──
   AAPLX:  { underlying:'Apple (AAPL)',   issuer:'Backed Finance', category:'equity' },
   TSLAX:  { underlying:'Tesla (TSLA)',   issuer:'Backed Finance', category:'equity' },
   NVDAX:  { underlying:'Nvidia (NVDA)',  issuer:'Backed Finance', category:'equity' },
   GOOGLX: { underlying:'Google (GOOGL)', issuer:'Backed Finance', category:'equity' },
-  SPYx:   { underlying:'S&P 500 (SPY)', issuer:'Backed Finance', category:'index' },
-  MSTRx:  { underlying:'MicroStrategy (MSTR)', issuer:'Backed Finance', category:'equity' },
-  MSTRX:  { underlying:'MicroStrategy (MSTR)', issuer:'Backed Finance', category:'equity' },
-  COINX:  { underlying:'Coinbase (COIN)',      issuer:'Backed Finance', category:'equity' },
+  AMZNX:  { underlying:'Amazon (AMZN)',  issuer:'Backed Finance', category:'equity' },
+  METAX:  { underlying:'Meta (META)',    issuer:'Backed Finance', category:'equity' },
+  MSFTX:  { underlying:'Microsoft (MSFT)', issuer:'Backed Finance', category:'equity' },
+  SPYx:   { underlying:'S&P 500 (SPY)', issuer:'Backed Finance', category:'etf' },
+  MSTRx:  { underlying:'Strategy (MSTR)', issuer:'Backed Finance', category:'equity' },
+  MSTRX:  { underlying:'Strategy (MSTR)', issuer:'Backed Finance', category:'equity' },
+  COINX:  { underlying:'Coinbase (COIN)',issuer:'Backed Finance', category:'equity' },
+  // ── Ondo Finance (on suffix) ──
   TSLAon: { underlying:'Tesla (TSLA)',   issuer:'Ondo Finance',   category:'equity' },
   NVDAon: { underlying:'Nvidia (NVDA)',  issuer:'Ondo Finance',   category:'equity' },
   AAPLon: { underlying:'Apple (AAPL)',   issuer:'Ondo Finance',   category:'equity' },
+  AMZNon: { underlying:'Amazon (AMZN)',  issuer:'Ondo Finance',   category:'equity' },
+  GOOGLon:{ underlying:'Google (GOOGL)', issuer:'Ondo Finance',   category:'equity' },
+  MSTRon: { underlying:'Strategy (MSTR)',issuer:'Ondo Finance',   category:'equity' },
+  COINon: { underlying:'Coinbase (COIN)',issuer:'Ondo Finance',   category:'equity' },
+  MSFTon: { underlying:'Microsoft (MSFT)', issuer:'Ondo Finance', category:'equity' },
+  SPYon:  { underlying:'S&P 500 (SPY)', issuer:'Ondo Finance',   category:'etf' },
 };
 
 const ISSUER_STYLES = {
@@ -4885,7 +4960,7 @@ function renderSpotVenueGrid() {
     const cats = {};
     assets.forEach(a => {
       const underlying = _arbUnderlyingKey(a.coin);
-      const cat = KNOWN_CATEGORIES[underlying] || 'other';
+      const cat = KNOWN_CATEGORIES[underlying] || KNOWN_CATEGORIES[a.coin] || inferCategory(underlying);
       cats[cat] = (cats[cat]||0) + 1;
     });
     const feeSrc = v === 'bitget' ? 'api' : 'default';
@@ -5073,7 +5148,8 @@ function renderSpotAllAssets() {
 
   const underlyingMap = {};
   allEntries.forEach(e => {
-    const meta = ASSET_META[e.coin] || {underlying:e.coin, issuer:'—', category:'other'};
+    const underlying = _arbUnderlyingKey(e.coin);
+    const meta = ASSET_META[e.coin] || {underlying: underlying !== e.coin ? underlying + ' (' + e.coin + ')' : e.coin, issuer:'—', category: KNOWN_CATEGORIES[underlying] || KNOWN_CATEGORIES[e.coin] || inferCategory(underlying)};
     const uKey = meta.underlying;
     if (!underlyingMap[uKey]) underlyingMap[uKey] = {category:meta.category, coins:{}};
     if (!underlyingMap[uKey].coins[e.coin]) underlyingMap[uKey].coins[e.coin] = [];
