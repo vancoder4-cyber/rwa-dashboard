@@ -1960,6 +1960,7 @@ async function fetchTradeXyz() {
     let coin = rawName.includes(':') ? rawName.split(':')[1] : rawName;
 
     if (source === 'all_perps' && !KNOWN_CATEGORIES[coin]) continue;
+    if (EXCLUDED_SYMBOLS.has(coin)) continue;
 
     const markPx = parseFloat(c.markPx) || 0;
     const oraclePx = parseFloat(c.oraclePx) || 0;
@@ -2041,6 +2042,7 @@ async function fetchBitget() {
   for (const contract of rwaContracts) {
     const symbol = contract.symbol;
     const base = (contract.baseCoin || symbol.replace(/USDT$/i, '')).toUpperCase();
+    if (EXCLUDED_SYMBOLS.has(base)) continue;
     const t = tickerMap[symbol];
     if (!t) continue;
 
@@ -2167,6 +2169,7 @@ async function fetchGate() {
     const base = contract.replace(/_USDT$/i, '').toUpperCase();
 
     if (!knownKeys.includes(base)) continue;
+    if (EXCLUDED_SYMBOLS.has(base)) continue;
 
     const markPx = parseFloat(t.mark_price) || 0;
     const indexPx = parseFloat(t.index_price) || 0;
@@ -2287,6 +2290,7 @@ async function fetchBinance() {
     const symbol = p.symbol || '';
     const base = symbol.replace(/USDT$/i, '').toUpperCase();
     if (!knownKeys.includes(base)) continue;
+    if (EXCLUDED_SYMBOLS.has(base)) continue;
 
     const markPx = parseFloat(p.markPrice) || 0;
     const indexPx = parseFloat(p.indexPrice) || 0;
@@ -2412,6 +2416,7 @@ async function fetchLighter() {
     // Check if it's in the RWA tokenlist or in our known categories
     const isRwa = rwaTokens.has(rawSymbol) || knownKeys.includes(rawSymbol);
     if (!isRwa) continue;
+    if (EXCLUDED_SYMBOLS.has(rawSymbol)) continue;
 
     const coin = rawSymbol;
     const lastPrice = parseFloat(entry.last_trade_price) || 0;
@@ -2501,7 +2506,7 @@ async function fetchVest() {
   for (const entry of rwaSymbols) {
     // Vest symbol format: TSLA-USD-PERP → strip -USD-PERP
     const coin = (entry.symbol || '').replace(/-USD-PERP$/i, '').toUpperCase();
-    if (!coin) continue;
+    if (!coin || EXCLUDED_SYMBOLS.has(coin)) continue;
 
     const cat = KNOWN_CATEGORIES[coin] || inferCategory(coin, entry.displayName || '');
     if (!KNOWN_CATEGORIES[coin]) { KNOWN_CATEGORIES[coin] = cat; }
@@ -2593,58 +2598,61 @@ async function fetchCoinbaseIntx() {
   const data = await res.json();
   const products = data.products || [];
 
-  // Filter to RWA-relevant products only (stocks, ETFs, commodities)
-  const assets = [];
+  // Pre-filter candidates: must be in RWA_ASSETS or KNOWN_CATEGORIES
+  const candidates = [];
   for (const p of products) {
     const rawSym = (p.product_id || '').replace(/-PERP-INTX$/, '');
     if (!rawSym) continue;
-
-    // Map to canonical symbol
     const coin = CBINTX_SYMBOL_MAP[rawSym] || canonicalSymbol(rawSym);
     if (EXCLUDED_SYMBOLS.has(coin)) continue;
-
-    // Only include if it's a known RWA asset
     const cat = KNOWN_CATEGORIES[coin] || (RWA_ASSETS[coin] ? RWA_ASSETS[coin].category : null);
-    if (!cat) continue; // skip pure crypto
-
-    if (!KNOWN_CATEGORIES[coin]) { KNOWN_CATEGORIES[coin] = cat; }
-    const fullName = KNOWN_NAMES[coin] || (RWA_ASSETS[coin] ? RWA_ASSETS[coin].name : coin);
-
+    if (!cat) continue;
     const markPx = parseFloat(p.price) || 0;
     if (markPx <= 0) continue;
-
-    const volume = parseFloat(p.volume_24h) * markPx || 0; // volume_24h is in base units, convert to USD
-    const change = parseFloat(p.price_percentage_change_24h) || 0;
-
-    assets.push({
-      coin, fullName, category: cat, venue: 'cbintx',
-      symbol: p.product_id,
-      markPx, indexPx: markPx, change, volume, oi: 0, funding: null, predictedFunding: null,
-      isActive: volume > 0,
-      makerFee: VENUES.cbintx.makerFee, takerFee: VENUES.cbintx.takerFee
-    });
+    candidates.push({ product: p, coin, cat, rawSym, markPx });
   }
 
-  // Fetch individual product details for ticker data (best bid/ask) in parallel
-  const tickerTasks = assets.map(a => async () => {
+  // Fetch product details for each candidate (gives funding, OI, underlying_type)
+  const assets = [];
+  const detailTasks = candidates.map(c => async () => {
     try {
-      const r = await fetch(`${CBINTX_API_BASE}/market/products/${encodeURIComponent(a.symbol)}/ticker`);
+      const r = await fetch(`${CBINTX_API_BASE}/market/products/${encodeURIComponent(c.product.product_id)}`);
       if (!r.ok) return;
-      const t = await r.json();
-      const bestBid = parseFloat(t.best_bid) || 0;
-      const bestAsk = parseFloat(t.best_ask) || 0;
-      if (bestBid > 0 && bestAsk > 0) {
-        // depth2 must be a single number (total USD within ±2%), not an object
-        const bidDepth = parseFloat(t.best_bid_quantity || 0) * bestBid;
-        const askDepth = parseFloat(t.best_ask_quantity || 0) * bestAsk;
-        a.depth2 = bidDepth + askDepth; // BBO-only depth (single level)
-      }
+      const d = await r.json();
+      const det = d.future_product_details || {};
+      const perp = det.perpetual_details || {};
+
+      // Filter: only keep EQUITY, COMMOD, ETF — exclude SPOT (crypto tokens like SPX6900)
+      const uType = (perp.underlying_type || '').toUpperCase();
+      if (uType === 'SPOT' || uType === '') return;
+
+      const coin = c.coin;
+      if (!KNOWN_CATEGORIES[coin]) { KNOWN_CATEGORIES[coin] = c.cat; }
+      const fullName = KNOWN_NAMES[coin] || (RWA_ASSETS[coin] ? RWA_ASSETS[coin].name : coin);
+
+      const volume = parseFloat(c.product.volume_24h) * c.markPx || 0;
+      const change = parseFloat(c.product.price_percentage_change_24h) || 0;
+
+      // Funding rate (hourly)
+      const rawFunding = parseFloat(det.funding_rate);
+      const funding = isNaN(rawFunding) ? null : rawFunding;
+
+      // Open interest (in contracts → multiply by price for USD)
+      const oiContracts = parseFloat(det.open_interest) || 0;
+      const oiUsd = oiContracts * c.markPx;
+
+      const isActive = volume > 0 || oiUsd > 0 || (funding !== null && funding !== 0);
+
+      assets.push({
+        coin, fullName, category: c.cat, venue: 'cbintx',
+        symbol: c.product.product_id,
+        markPx: c.markPx, indexPx: c.markPx, change, volume, oi: oiUsd,
+        funding, predictedFunding: null, isActive,
+        makerFee: VENUES.cbintx.makerFee, takerFee: VENUES.cbintx.takerFee
+      });
     } catch {}
   });
-  // Run ticker fetches in parallel batches of 5
-  for (let i = 0; i < tickerTasks.length; i += 5) {
-    await Promise.allSettled(tickerTasks.slice(i, i + 5).map(fn => fn()));
-  }
+  await batchFetch(detailTasks, 8);
 
   logLoad(`Coinbase INTX: ${assets.length} RWA assets processed`);
   return assets;
