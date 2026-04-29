@@ -2156,17 +2156,39 @@ async function fetchGate() {
     });
   }
 
-  // Fetch orderbook depth for ±2% liquidity assessment
-  const depthTasks = assets.map(a => async () => {
+  // Fetch orderbook depth via bulk endpoint (1 request instead of ~55)
+  if (assets.length > 0) {
     try {
-      const res = await fetch(`${GATE_API_BASE}/order_book?contract=${encodeURIComponent(a.symbol)}&limit=50`);
-      if (!res.ok) return;
-      const book = await res.json();
-      a.depth2 = liquidityWithinPct({ bids: (book.bids||[]), asks: (book.asks||[]) });
-    } catch {}
-  });
-  for (let i = 0; i < depthTasks.length; i += 5) {
-    await Promise.allSettled(depthTasks.slice(i, i + 5).map(fn => fn()));
+      const syms = assets.map(a => a.symbol).join(',');
+      const bulkUrl = _isDev
+        ? null  // fallback to individual calls in dev
+        : `/api/gate-bulk?type=depth&symbols=${encodeURIComponent(syms)}&limit=50`;
+      if (bulkUrl) {
+        const res = await fetch(bulkUrl);
+        if (res.ok) {
+          const bulk = await res.json();
+          assets.forEach(a => {
+            const book = bulk[a.symbol];
+            if (book && (book.bids || book.asks)) {
+              a.depth2 = liquidityWithinPct({ bids: (book.bids||[]), asks: (book.asks||[]) });
+            }
+          });
+        }
+      } else {
+        // Dev fallback: individual calls
+        const depthTasks = assets.map(a => async () => {
+          try {
+            const res = await fetch(`${GATE_API_BASE}/order_book?contract=${encodeURIComponent(a.symbol)}&limit=50`);
+            if (!res.ok) return;
+            const book = await res.json();
+            a.depth2 = liquidityWithinPct({ bids: (book.bids||[]), asks: (book.asks||[]) });
+          } catch {}
+        });
+        for (let i = 0; i < depthTasks.length; i += 5) {
+          await Promise.allSettled(depthTasks.slice(i, i + 5).map(fn => fn()));
+        }
+      }
+    } catch (e) { console.warn('Gate bulk depth error:', e); }
   }
 
   logLoad(`Gate.io: ${assets.length} RWA assets processed`);
@@ -2474,18 +2496,41 @@ async function fetchVest() {
     });
   }
 
-  // Fetch orderbook depth for ±2% liquidity
-  const depthTasksVest = assets.map(a => async () => {
+  // Fetch orderbook depth via bulk endpoint (1 request instead of ~20)
+  if (assets.length > 0) {
     try {
-      const vestSym = a.coin + '-USD-PERP';
-      const res = await fetch(`${VEST_API_BASE}/depth?symbol=${encodeURIComponent(vestSym)}&limit=50`);
-      if (!res.ok) return;
-      const book = await res.json();
-      a.depth2 = liquidityWithinPct({ bids: (book.bids||[]), asks: (book.asks||[]) });
-    } catch {}
-  });
-  for (let i = 0; i < depthTasksVest.length; i += 5) {
-    await Promise.allSettled(depthTasksVest.slice(i, i + 5).map(fn => fn()));
+      const syms = assets.map(a => a.coin + '-USD-PERP').join(',');
+      const bulkUrl = _isDev
+        ? null
+        : `/api/vest-bulk?type=depth&symbols=${encodeURIComponent(syms)}&limit=50`;
+      if (bulkUrl) {
+        const res = await fetch(bulkUrl);
+        if (res.ok) {
+          const bulk = await res.json();
+          assets.forEach(a => {
+            const vestSym = a.coin + '-USD-PERP';
+            const book = bulk[vestSym];
+            if (book && (book.bids || book.asks)) {
+              a.depth2 = liquidityWithinPct({ bids: (book.bids||[]), asks: (book.asks||[]) });
+            }
+          });
+        }
+      } else {
+        // Dev fallback: individual calls
+        const depthTasksVest = assets.map(a => async () => {
+          try {
+            const vestSym = a.coin + '-USD-PERP';
+            const res = await fetch(`${VEST_API_BASE}/depth?symbol=${encodeURIComponent(vestSym)}&limit=50`);
+            if (!res.ok) return;
+            const book = await res.json();
+            a.depth2 = liquidityWithinPct({ bids: (book.bids||[]), asks: (book.asks||[]) });
+          } catch {}
+        });
+        for (let i = 0; i < depthTasksVest.length; i += 5) {
+          await Promise.allSettled(depthTasksVest.slice(i, i + 5).map(fn => fn()));
+        }
+      }
+    } catch (e) { console.warn('Vest bulk depth error:', e); }
   }
 
   logLoad(`Vest: ${assets.length} RWA assets processed`);
@@ -3878,19 +3923,42 @@ async function fetchReal30DayVolume() {
     } catch {}
   });
 
-  // ── Gate.io: /candlesticks?interval=1d ──
-  const gateKlineTasks = allData.filter(d => d.venue === 'gate').map(asset => async () => {
-    try {
-      const contract = asset.symbol || (asset.coin + '_USDT');
-      const res = await fetch(`${GATE_API_BASE}/candlesticks?contract=${contract}&from=${thirtyDaysAgoSec}&to=${nowSec}&interval=1d`);
-      if (!res.ok) return;
-      const candles = await res.json();
-      if (!Array.isArray(candles)) return;
-      let totalVol = 0;
-      candles.forEach(c => { totalVol += parseFloat(c.sum || 0); }); // sum = USDT volume
-      if (totalVol > 0) addVol(asset.coin, 'gate', totalVol, 'real');
-    } catch {}
-  });
+  // ── Gate.io: bulk klines via serverless function (1 call instead of ~55) ──
+  const gateAssets = allData.filter(d => d.venue === 'gate');
+  const gateKlineTasks = [async () => {
+    if (gateAssets.length === 0) return;
+    const syms = gateAssets.map(a => a.symbol || (a.coin + '_USDT'));
+    const bulkUrl = _isDev ? null : `/api/gate-bulk?type=klines&symbols=${encodeURIComponent(syms.join(','))}&from=${thirtyDaysAgoSec}&to=${nowSec}&interval=1d`;
+    if (bulkUrl) {
+      try {
+        const res = await fetch(bulkUrl);
+        if (!res.ok) return;
+        const bulk = await res.json();
+        gateAssets.forEach(a => {
+          const contract = a.symbol || (a.coin + '_USDT');
+          const candles = bulk[contract];
+          if (!Array.isArray(candles)) return;
+          let totalVol = 0;
+          candles.forEach(c => { totalVol += parseFloat(c.sum || 0); });
+          if (totalVol > 0) addVol(a.coin, 'gate', totalVol, 'real');
+        });
+      } catch {}
+    } else {
+      // Dev fallback: individual calls
+      for (const asset of gateAssets) {
+        try {
+          const contract = asset.symbol || (asset.coin + '_USDT');
+          const res = await fetch(`${GATE_API_BASE}/candlesticks?contract=${contract}&from=${thirtyDaysAgoSec}&to=${nowSec}&interval=1d`);
+          if (!res.ok) continue;
+          const candles = await res.json();
+          if (!Array.isArray(candles)) continue;
+          let totalVol = 0;
+          candles.forEach(c => { totalVol += parseFloat(c.sum || 0); });
+          if (totalVol > 0) addVol(asset.coin, 'gate', totalVol, 'real');
+        } catch {}
+      }
+    }
+  }];
 
   // ── trade.xyz (Hyperliquid): candleSnapshot with xyz: prefix + 1h interval ──
   // Note: trade.xyz RWA perps require xyz: prefix and only support 1h interval (not 1d)

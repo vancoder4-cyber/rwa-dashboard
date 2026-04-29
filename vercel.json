@@ -3,15 +3,7 @@
     { "source": "/api/yahoo/:path*", "destination": "https://query1.finance.yahoo.com/v8/finance/:path*" },
     { "source": "/api/gate/:path*", "destination": "https://api.gateio.ws/api/v4/futures/usdt/:path*" },
     { "source": "/api/gate-spot/:path*", "destination": "https://api.gateio.ws/api/v4/spot/:path*" },
-    { "source": "/api/binance/:path*", "destination": "https://fapi.binance.com/fapi/v1/:path*" },
-    { "source": "/api/binance-spot/:path*", "destination": "https://api.binance.com/api/v3/:path*" },
-    { "source": "/api/kraken/:path*", "destination": "https://api.kraken.com/0/public/:path*" },
-    { "source": "/api/bybit-spot/:path*", "destination": "https://api.bybit.com/v5/market/:path*" },
     { "source": "/api/vest/:path*", "destination": "https://server-prod.hz.vestmarkets.com/v2/:path*" },
-    { "source": "/api/gate-futures/:path*", "destination": "https://api.gateio.ws/api/v4/futures/usdt/:path*" },
-    { "source": "/api/bitget-spot/:path*", "destination": "https://api.bitget.com/api/v2/spot/market/:path*" },
-    { "source": "/api/bitget-futures/:path*", "destination": "https://api.bitget.com/api/v2/mix/market/:path*" },
-    { "source": "/api/dydx/:path*", "destination": "https://indexer.dydx.trade/v4/:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [
@@ -20,6 +12,30 @@
       "headers": [
         { "key": "X-Frame-Options", "value": "DENY" },
         { "key": "X-Content-Type-Options", "value": "nosniff" }
+      ]
+    },
+    {
+      "source": "/api/gate/:path*",
+      "headers": [
+        { "key": "Vercel-CDN-Cache-Control", "value": "max-age=30, stale-while-revalidate=60" }
+      ]
+    },
+    {
+      "source": "/api/gate-spot/:path*",
+      "headers": [
+        { "key": "Vercel-CDN-Cache-Control", "value": "max-age=30, stale-while-revalidate=60" }
+      ]
+    },
+    {
+      "source": "/api/vest/:path*",
+      "headers": [
+        { "key": "Vercel-CDN-Cache-Control", "value": "max-age=30, stale-while-revalidate=60" }
+      ]
+    },
+    {
+      "source": "/api/yahoo/:path*",
+      "headers": [
+        { "key": "Vercel-CDN-Cache-Control", "value": "max-age=120, stale-while-revalidate=300" }
       ]
     }
   ]
