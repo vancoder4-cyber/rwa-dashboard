@@ -930,6 +930,7 @@ td:first-child { text-align: left; }
   animation: loader-grow 1.5s ease-in-out forwards;
 }
 @keyframes loader-grow { 0%{width:0%} 50%{width:60%} 100%{width:100%} }
+@keyframes spin { to { transform: rotate(360deg) } }
 .load-text { margin-top: 16px; color: var(--foreground-sec); font-size: 13px; font-weight: 500; }
 .load-log { margin-top: 6px; color: var(--foreground-dim); font-size: 11px; }
 
@@ -1033,6 +1034,7 @@ input[type="checkbox"] {
       <div class="section-card" id="coverageSection"></div>
       <div class="section-card" id="divSection"></div>
       <div class="section-card" id="revenueSection"></div>
+      <div class="section-card" id="top30VolSection" style="margin-top:16px"></div>
     </div>
   </div>
 
@@ -1628,11 +1630,14 @@ const SYMBOL_ALIASES = {
   PLATINUM: "XPT",
   PALLADIUM: "XPD",
   CL: "WTI",
+  BZ: "BRENTOIL",
   SP500: "SPX"
 };
 
 const EXCLUDED_SYMBOLS = new Set([
-  "XYZ100", "STABLE", "EUR", "JPY", "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "USDCAD", "AUDUSD", "NZDUSD", "USDKRW"
+  "XYZ100", "STABLE", "SOLV", "EUR", "JPY", "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "USDCAD", "AUDUSD", "NZDUSD", "USDKRW",
+  // Crypto tokens that share tickers with stocks — price <$1 confirms they are NOT the stock
+  "BR", "MET", "AI", "ON", "IR", "T", "A", "ALL"
 ]);
 
 function canonicalSymbol(symbol) {
@@ -3163,7 +3168,7 @@ function switchSubTab(sub, tabEl) {
 // VIEW 1: ALL VENUES OVERVIEW
 // ═══════════════════════════════════════════════
 
-function renderOverview() { renderKPIs(); renderVenueCards(); renderCoverage(); renderDivergence(); renderRevenue(); }
+function renderOverview() { renderKPIs(); renderVenueCards(); renderCoverage(); renderDivergence(); renderRevenue(); renderTop30Volume(); }
 
 function renderKPIs() {
   const strip = document.getElementById('kpiStrip');
@@ -3797,6 +3802,316 @@ function fmtRevenue(val) {
   if (val >= 1e6) return (val / 1e6).toFixed(2) + 'M';
   if (val >= 1e3) return (val / 1e3).toFixed(1) + 'K';
   return val.toFixed(0);
+}
+
+// ═══════════════════════════════════════════════════
+// TOP 30 RWA PERPS BY 30-DAY REAL VOLUME
+// ═══════════════════════════════════════════════════
+
+let _top30Cache = null;       // { ts, data }
+let _top30Loading = false;
+const TOP30_CACHE_TTL = 5 * 60 * 1000; // 5 min cache
+
+async function fetchReal30DayVolume() {
+  if (_top30Cache && Date.now() - _top30Cache.ts < TOP30_CACHE_TTL) return _top30Cache.data;
+  if (_top30Loading) return _top30Cache ? _top30Cache.data : {};
+  _top30Loading = true;
+
+  const now = Date.now();
+  const thirtyDaysAgo = now - 30 * 24 * 3600 * 1000;
+  const thirtyDaysAgoSec = Math.floor(thirtyDaysAgo / 1000);
+  const nowSec = Math.floor(now / 1000);
+
+  // ── Volume Merge Groups ──
+  // Merge tokenized gold (XAUT, PAXG) into XAU for combined gold volume.
+  // Only affects Top-30 volume table; does NOT touch arbitrage / reference pricing.
+  const VOLUME_MERGE_GROUPS = {
+    XAUT: 'XAU', PAXG: 'XAU', XAUM: 'XAU', KAU: 'XAU', PGOLD: 'XAU', GGBR: 'XAU',
+  };
+
+  // result: { COIN: { venues: { venueName: { vol30d, method } }, totalVol30d, components: Set } }
+  const merged = {};
+
+  function addVol(coin, venue, vol, method = 'real') {
+    const key = canonicalSymbol(coin);
+    if (!key || EXCLUDED_SYMBOLS.has(key)) return;
+    const mergeKey = VOLUME_MERGE_GROUPS[key] || key;
+    if (!merged[mergeKey]) merged[mergeKey] = { venues: {}, totalVol30d: 0, components: new Set() };
+    merged[mergeKey].components.add(key);
+    // Use venue:symbol compound key when merging different symbols to preserve breakdown
+    const vKey = (key !== mergeKey) ? `${venue}:${key}` : venue;
+    if (!merged[mergeKey].venues[vKey]) merged[mergeKey].venues[vKey] = { vol30d: 0, method, origVenue: venue, origSymbol: key };
+    merged[mergeKey].venues[vKey].vol30d += vol;
+    merged[mergeKey].venues[vKey].method = method;
+    if (!merged[mergeKey].venues[vKey].origVenue) merged[mergeKey].venues[vKey].origVenue = venue;
+    if (!merged[mergeKey].venues[vKey].origSymbol) merged[mergeKey].venues[vKey].origSymbol = key;
+  }
+
+  // ── Binance: /klines?interval=1d&limit=30 ──
+  const bnKlineTasks = allData.filter(d => d.venue === 'binance').map(asset => async () => {
+    try {
+      const sym = asset.symbol || (asset.coin + 'USDT');
+      const res = await fetch(`${BINANCE_API_BASE}/klines?symbol=${sym}&interval=1d&limit=30`);
+      if (!res.ok) return;
+      const klines = await res.json();
+      if (!Array.isArray(klines)) return;
+      let totalVol = 0;
+      klines.forEach(k => { totalVol += parseFloat(k[7] || 0); }); // index 7 = quoteAssetVolume
+      if (totalVol > 0) addVol(asset.coin, 'binance', totalVol, 'real');
+    } catch {}
+  });
+
+  // ── Bitget: /candles?granularity=1Dutc&limit=30 ──
+  const bgKlineTasks = allData.filter(d => d.venue === 'bitget').map(asset => async () => {
+    try {
+      const sym = asset.symbol || (asset.coin + 'USDT');
+      const res = await fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=1Dutc&limit=30`);
+      if (!res.ok) return;
+      const json = await res.json();
+      if (json.code !== '00000' || !Array.isArray(json.data)) return;
+      let totalVol = 0;
+      json.data.forEach(c => {
+        // c = [ts, open, high, low, close, vol_base, vol_quote, ...]
+        const volQuote = parseFloat(c[6] || c[5] || 0);
+        totalVol += volQuote;
+      });
+      if (totalVol > 0) addVol(asset.coin, 'bitget', totalVol, 'real');
+    } catch {}
+  });
+
+  // ── Gate.io: /candlesticks?interval=1d ──
+  const gateKlineTasks = allData.filter(d => d.venue === 'gate').map(asset => async () => {
+    try {
+      const contract = asset.symbol || (asset.coin + '_USDT');
+      const res = await fetch(`${GATE_API_BASE}/candlesticks?contract=${contract}&from=${thirtyDaysAgoSec}&to=${nowSec}&interval=1d`);
+      if (!res.ok) return;
+      const candles = await res.json();
+      if (!Array.isArray(candles)) return;
+      let totalVol = 0;
+      candles.forEach(c => { totalVol += parseFloat(c.sum || 0); }); // sum = USDT volume
+      if (totalVol > 0) addVol(asset.coin, 'gate', totalVol, 'real');
+    } catch {}
+  });
+
+  // ── trade.xyz (Hyperliquid): candleSnapshot with xyz: prefix + 1h interval ──
+  // Note: trade.xyz RWA perps require xyz: prefix and only support 1h interval (not 1d)
+  const xyzKlineTasks = allData.filter(d => d.venue === 'tradexyz').map(asset => async () => {
+    try {
+      const res = await fetch('https://api.hyperliquid.xyz/info', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'candleSnapshot',
+          req: { coin: `xyz:${asset.coin}`, interval: '1h', startTime: thirtyDaysAgo, endTime: now }
+        })
+      });
+      if (!res.ok) return;
+      const candles = await res.json();
+      if (!Array.isArray(candles) || candles.length < 10) return;
+      let totalVol = 0;
+      candles.forEach(c => {
+        const vol = parseFloat(c.v || 0);
+        const px = parseFloat(c.c || asset.markPx || 0);
+        totalVol += vol * px;
+      });
+      if (totalVol > 0) addVol(asset.coin, 'tradexyz', totalVol, 'real');
+    } catch {}
+  });
+
+  // ── Run all kline fetches in parallel batches ──
+  await Promise.all([
+    batchFetch(bnKlineTasks, 5),
+    batchFetch(bgKlineTasks, 5),
+    batchFetch(gateKlineTasks, 5),
+    batchFetch(xyzKlineTasks, 5),
+  ]);
+
+  // ── Lighter & Vest: no kline API, fall back to 24h × 30 (tagged as estimate) ──
+  allData.filter(d => d.venue === 'lighter' || d.venue === 'vest').forEach(d => {
+    if (d.volume > 0) addVol(d.coin, d.venue, d.volume * 30, 'est');
+  });
+
+  // ── Also add estimate fallback for any venue where kline fetch failed ──
+  allData.forEach(d => {
+    const key = canonicalSymbol(d.coin);
+    if (!key || EXCLUDED_SYMBOLS.has(key)) return;
+    if (merged[key] && merged[key].venues[d.venue]) return; // already have real data
+    if (d.volume > 0) addVol(d.coin, d.venue, d.volume * 30, 'est');
+  });
+
+  // ── Compute totals ──
+  for (const key of Object.keys(merged)) {
+    let total = 0;
+    let hasReal = false;
+    for (const v of Object.values(merged[key].venues)) {
+      total += v.vol30d;
+      if (v.method === 'real') hasReal = true;
+    }
+    merged[key].totalVol30d = total;
+    merged[key].hasReal = hasReal;
+  }
+
+  _top30Cache = { ts: Date.now(), data: merged };
+  _top30Loading = false;
+  return merged;
+}
+
+function renderTop30Volume() {
+  const section = document.getElementById('top30VolSection');
+  if (!section) return;
+
+  // Initial render with loading state
+  if (!_top30Cache) {
+    section.innerHTML = `
+      <div class="section-title">Top 30 RWA Perps by 30-Day Volume</div>
+      <div class="section-subtitle">Fetching real kline data from all venues…</div>
+      <div style="text-align:center;padding:40px;color:var(--foreground-dim)">
+        <div class="spin" style="display:inline-block;width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite"></div>
+        <div style="margin-top:12px;font-size:12px">Loading 30-day kline data from Binance, Bitget, Gate.io, trade.xyz…</div>
+      </div>`;
+    // Kick off the fetch, then re-render
+    fetchReal30DayVolume().then(() => renderTop30Volume()).catch(e => {
+      console.error('Top30 volume fetch error:', e);
+      section.innerHTML += `<div style="color:var(--negative);font-size:12px;padding:8px">Error: ${e.message}</div>`;
+    });
+    return;
+  }
+
+  const merged = _top30Cache.data;
+
+  // Re-read VOLUME_MERGE_GROUPS for OI/funding aggregation
+  const VMG = {
+    XAUT: 'XAU', PAXG: 'XAU', XAUM: 'XAU', KAU: 'XAU', PGOLD: 'XAU', GGBR: 'XAU',
+  };
+
+  // Build name lookup from allData (also aggregate by merge group)
+  const nameMap = {};
+  const catMap = {};
+  const oiMap = {};
+  const fundingMap = {};
+  allData.forEach(d => {
+    const key = canonicalSymbol(d.coin);
+    const mergeKey = VMG[key] || key;
+    if (!nameMap[mergeKey]) nameMap[mergeKey] = d.fullName || d.coin;
+    catMap[mergeKey] = d.category || inferCategory(mergeKey, d.fullName);
+    // Sum OI across venues (merged)
+    if (d.oi > 0) oiMap[mergeKey] = (oiMap[mergeKey] || 0) + d.oi;
+    // Collect funding (use first non-null, prefer main symbol)
+    if (d.funding !== null && fundingMap[mergeKey] === undefined) {
+      fundingMap[mergeKey] = annualize(d.funding, d.venue);
+    }
+  });
+
+  // Sort by total 30d volume descending, take top 30
+  const ranked = Object.entries(merged)
+    .map(([coin, data]) => ({ coin, ...data }))
+    .sort((a, b) => b.totalVol30d - a.totalVol30d)
+    .slice(0, 30);
+
+  const maxVol = ranked.length > 0 ? ranked[0].totalVol30d : 1;
+
+  // Count how many have real data vs all estimated
+  const realCount = ranked.filter(r => r.hasReal).length;
+  const estCount = ranked.length - realCount;
+
+  let rows = '';
+  ranked.forEach((r, i) => {
+    const name = nameMap[r.coin] || r.coin;
+    const cat = catMap[r.coin] || 'equity';
+    const oi = oiMap[r.coin] || 0;
+    const funding = fundingMap[r.coin];
+    const barW = maxVol > 0 ? (r.totalVol30d / maxVol * 100) : 0;
+
+    // Components info (for merged groups like XAU + XAUT + PAXG)
+    const comps = r.components ? [...r.components] : [r.coin];
+    const isMerged = comps.length > 1;
+
+    // Build per-component volume breakdown for tooltip & subtitle
+    const compVolMap = {};
+    comps.forEach(c => { compVolMap[c] = 0; });
+    Object.values(r.venues).forEach(v => {
+      const sym = v.origSymbol || r.coin;
+      compVolMap[sym] = (compVolMap[sym] || 0) + v.vol30d;
+    });
+
+    // Venue breakdown — use origVenue for CSS class, show origSymbol in tooltip
+    const venueEntries = Object.entries(r.venues)
+      .filter(([, v]) => v.vol30d > 0)
+      .sort((a, b) => b[1].vol30d - a[1].vol30d);
+    const venueDots = venueEntries.map(([vk, v]) => {
+      const realVenue = v.origVenue || vk;
+      const vName = (VENUES[realVenue] || SPOT_PERP_VENUES[realVenue] || {}).name || realVenue;
+      const symLabel = (v.origSymbol && v.origSymbol !== r.coin) ? ` [${v.origSymbol}]` : '';
+      const tag = v.method === 'est' ? ' (est)' : '';
+      return `<span class="venue-dot ${realVenue}" title="${vName}${symLabel}: $${fmtVolume(v.vol30d)}${tag}" style="cursor:help"></span>`;
+    }).join(' ');
+
+    const methodTag = r.hasReal ? '' : '<span style="color:var(--foreground-dim);font-size:9px;margin-left:4px" title="No kline API; estimated from 24h×30">est</span>';
+
+    const fStr = funding !== undefined && funding !== null
+      ? `<span style="color:${funding >= 0 ? 'var(--positive)' : 'var(--negative)'}">${(funding * 100).toFixed(1)}%</span>`
+      : '<span style="color:var(--foreground-dim)">—</span>';
+
+    const catColors = { equity: '#60a5fa', commodity: '#f59e0b', index: '#a78bfa', etf: '#34d399' };
+    const catColor = catColors[cat] || 'var(--foreground-dim)';
+
+    // Build component breakdown line for merged assets
+    let compLine = '';
+    if (isMerged) {
+      const parts = comps
+        .sort((a, b) => (compVolMap[b] || 0) - (compVolMap[a] || 0))
+        .map(c => {
+          const vol = compVolMap[c] || 0;
+          const pct = r.totalVol30d > 0 ? (vol / r.totalVol30d * 100).toFixed(0) : 0;
+          return `${c} $${fmtVolume(vol)} (${pct}%)`;
+        });
+      compLine = `<div style="font-size:9px;color:var(--foreground-dim);margin-top:1px;opacity:0.8">= ${parts.join(' + ')}</div>`;
+    }
+
+    rows += `<tr>
+      <td style="text-align:center;color:var(--foreground-dim);font-size:11px;width:30px">${i + 1}</td>
+      <td style="text-align:left">
+        <div style="font-weight:600;font-size:13px">${r.coin}${isMerged ? '<span style="color:var(--accent);font-size:9px;margin-left:4px;vertical-align:middle" title="Combined: ' + comps.join(' + ') + '">MERGED</span>' : ''}${methodTag}</div>
+        <div style="font-size:10px;color:var(--foreground-dim)">${name} · <span style="color:${catColor}">${cat}</span></div>
+        ${compLine}
+      </td>
+      <td class="mono" style="font-size:13px;font-weight:700">${fmtVolume(r.totalVol30d)}</td>
+      <td style="width:120px">
+        <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden">
+          <div style="width:${barW}%;height:100%;background:var(--accent);border-radius:3px"></div>
+        </div>
+      </td>
+      <td class="mono">${fmtVolume(oi)}</td>
+      <td class="mono">${fStr}</td>
+      <td>${venueDots}</td>
+    </tr>`;
+  });
+
+  const totalVol30d = ranked.reduce((s, r) => s + r.totalVol30d, 0);
+
+  section.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <div>
+        <div class="section-title">Top 30 RWA Perps by 30-Day Volume</div>
+        <div class="section-subtitle">Real kline data from ${realCount} assets · ${estCount > 0 ? estCount + ' estimated (24h×30) · ' : ''}Total: ${fmtVolume(totalVol30d)} · Updated ${new Date(_top30Cache.ts).toLocaleTimeString()}</div>
+      </div>
+      <button class="sr-btn" onclick="_top30Cache=null;renderTop30Volume()" style="font-size:11px">⟳ Refresh</button>
+    </div>
+    <div class="table-wrap" style="margin-top:12px">
+      <table>
+        <thead><tr>
+          <th style="width:30px">#</th>
+          <th style="text-align:left">Asset</th>
+          <th>30d Volume</th>
+          <th style="width:120px"></th>
+          <th>OI</th>
+          <th>Funding APR</th>
+          <th>Venues</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
 }
 
 // ═══════════════════════════════════════════════════
@@ -4606,7 +4921,100 @@ async function fetchSpotRwaKraken() {
   for (let i = 0; i < depthTasks.length; i += 5) {
     await Promise.allSettled(depthTasks.slice(i, i + 5).map(fn => fn()));
   }
-  console.log(`[Spot] Kraken: ${assets.length} RWA spot assets discovered`);
+
+  // ── Also fetch Kraken xStocks (tokenized equities) ──
+  try {
+    const xStocksAssets = await _fetchKrakenXStocks();
+    assets.push(...xStocksAssets);
+  } catch (e) {
+    console.warn('[Spot] Kraken xStocks error:', e.message);
+  }
+
+  console.log(`[Spot] Kraken: ${assets.length} RWA spot assets discovered (incl xStocks)`);
+  return assets;
+}
+
+// ── Kraken xStocks (tokenized equities) ──
+async function _fetchKrakenXStocks() {
+  // Step 1: Discover all xStocks trading pairs (aclass_base=tokenized_asset)
+  const pairsRes = await fetch(`${KRAKEN_SPOT_BASE}/AssetPairs?aclass_base=tokenized_asset`);
+  if (!pairsRes.ok) throw new Error(`xStocks HTTP ${pairsRes.status}`);
+  const pairsJson = await pairsRes.json();
+  if (pairsJson.error && pairsJson.error.length) throw new Error(pairsJson.error[0]);
+  const allPairs = pairsJson.result || {};
+
+  // Deduplicate: each xStock has two pair entries (e.g. AAPLxUSD + AAPLSPVUSD)
+  const seen = new Set();
+  const xPairs = [];
+  for (const [pairName, info] of Object.entries(allPairs)) {
+    const quote = (info.quote || '').replace(/^[XZ]/, '');
+    if (quote !== 'USD' && quote !== 'USDT') continue;
+    const base = (info.base || '');
+    if (seen.has(base)) continue;
+    seen.add(base);
+    // Extract underlying: "AAPLx" → "AAPL", "GOOGLx" → "GOOGL"
+    const underlying = base.replace(/x$/i, '').toUpperCase();
+    if (!underlying || underlying.length < 1) continue;
+    xPairs.push({ pairName, base, underlying, altname: info.altname || pairName });
+  }
+  if (xPairs.length === 0) return [];
+
+  // Step 2: Fetch tickers in batches of 15 (with asset_class param)
+  const assets = [];
+  for (let i = 0; i < xPairs.length; i += 15) {
+    const chunk = xPairs.slice(i, i + 15);
+    try {
+      const pairStr = chunk.map(p => p.altname).join(',');
+      const tickerRes = await fetch(`${KRAKEN_SPOT_BASE}/Ticker?pair=${encodeURIComponent(pairStr)}&asset_class=tokenized_asset`);
+      if (!tickerRes.ok) continue;
+      const tickerJson = await tickerRes.json();
+      if (tickerJson.error && tickerJson.error.length) {
+        console.warn('[Spot] Kraken xStocks ticker batch error:', tickerJson.error[0]);
+        continue;
+      }
+      const results = tickerJson.result || {};
+      for (const [pairKey, t] of Object.entries(results)) {
+        // Find matching pair info (try exact match, then fuzzy)
+        let pairInfo = chunk.find(p => p.pairName === pairKey || p.altname === pairKey);
+        if (!pairInfo) {
+          pairInfo = chunk.find(p => pairKey.includes(p.base));
+        }
+        if (!pairInfo) continue;
+        const last = parseFloat(t.c?.[0]) || 0;
+        if (last <= 0) continue;
+        const open = parseFloat(t.o) || last;
+        const vol24 = parseFloat(t.v?.[1]) || 0;
+        assets.push({
+          coin: pairInfo.underlying, pair: pairKey,
+          last,
+          chg: open > 0 ? ((last - open) / open * 100) : 0,
+          vol: vol24 * last,
+          hi: parseFloat(t.h?.[1]) || 0,
+          lo: parseFloat(t.l?.[1]) || 0,
+          bid: parseFloat(t.b?.[0]) || 0,
+          ask: parseFloat(t.a?.[0]) || 0,
+          xstock: true, // Flag as xStock
+        });
+      }
+    } catch (e) { console.warn('[Spot] Kraken xStocks ticker batch error:', e); }
+  }
+
+  // Fetch orderbook depth for xStocks assets
+  const xDepthTasks = assets.map(a => async () => {
+    try {
+      const res = await fetch(`${KRAKEN_SPOT_BASE}/Depth?pair=${encodeURIComponent(a.pair)}&count=50&asset_class=tokenized_asset`);
+      if (!res.ok) return;
+      const json = await res.json();
+      if (json.error?.length) return;
+      const bookData = Object.values(json.result || {})[0];
+      if (bookData) a.depth2 = liquidityWithinPct({ bids: (bookData.bids||[]), asks: (bookData.asks||[]) });
+    } catch {}
+  });
+  for (let i = 0; i < xDepthTasks.length; i += 5) {
+    await Promise.allSettled(xDepthTasks.slice(i, i + 5).map(fn => fn()));
+  }
+
+  console.log(`[Spot] Kraken xStocks: ${assets.length} tokenized equities discovered`);
   return assets;
 }
 
@@ -5032,26 +5440,47 @@ function setSpotVenueSort(key) {
   if (spotSubView !== 'overview' && spotSubView !== 'allAssets') renderSpotVenueTable(spotSubView);
 }
 
+function _findBestPerp(coinKey, preferVenue) {
+  // Try preferred venue first, then fall back to best across all venues
+  const tryVenue = (pv) => {
+    const pd = SPOT_PERP[pv] || {};
+    let p = pd[coinKey];
+    if (!p) { for (const k of Object.keys(pd)) { if (_arbTickerKey(k) === coinKey) { p = pd[k]; break; } } }
+    if (p) return { p, pv };
+    return null;
+  };
+  const preferred = tryVenue(preferVenue);
+  if (preferred) return preferred;
+  // Fall back: search all perp venues, pick the one with highest mark (most liquid)
+  let best = null;
+  for (const pv of Object.keys(SPOT_PERP)) {
+    if (pv === preferVenue) continue;
+    const found = tryVenue(pv);
+    if (found && (!best || found.p.mark > best.p.mark)) best = found;
+  }
+  return best;
+}
+
 function renderSpotVenueTable(venue) {
   const assets = SPOT_DATA[venue] || [];
-  const pv = document.getElementById('spotPerpSel').value;
-  const pd = SPOT_PERP[pv] || {};
+  const selectedPv = document.getElementById('spotPerpSel').value;
   document.getElementById('spotVenueTitle').innerHTML = '<svg class="ic ic-18" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>' + (SPOT_VENUE_NAMES[venue]||venue) + ' Spot';
 
   // Pre-compute sort values
-  const perpSettles = (SPOT_PERP_VENUES[pv]||{}).settlesPerDay || 3;
   const rows = assets.map(a => {
     // Normalize coin for perp matching (TSLAX→TSLA, AAPLON→AAPL, etc.)
     const coinKey = _arbTickerKey(a.coin);
-    let p = pd[a.coin] || pd[coinKey];
-    if (!p) { for (const k of Object.keys(pd)) { if (_arbTickerKey(k) === coinKey) { p = pd[k]; break; } } }
+    const match = _findBestPerp(coinKey, selectedPv);
+    const p = match ? match.p : null;
+    const pv = match ? match.pv : selectedPv;
+    const perpSettles = (SPOT_PERP_VENUES[pv]||{}).settlesPerDay || 3;
     const basis = p ? (p.mark - a.last)/a.last : -999;
     const fAnn = p ? p.f*perpSettles*365 : 0;
     const spreadRate = (a.ask-a.bid)/a.last;
     const netArb = p ? spotCalcArbAPR(fAnn, venue, pv, spreadRate)*100 : -999;
     const ref = getRefPrice(a.coin);
     const dev = ref ? priceDeviation(a.last, ref) : null;
-    return { a, p, _name: a.coin, _price: a.last, _ref: ref || 0, _dev: dev !== null ? dev : -999, _mark: p?p.mark:0, _basis: basis, _chg: a.chg, _vol: a.vol*a.last, _spread: spreadRate*10000, _depth: a.depth2 || 0, _funding: fAnn, _arb: netArb };
+    return { a, p, pv, _name: a.coin, _price: a.last, _ref: ref || 0, _dev: dev !== null ? dev : -999, _mark: p?p.mark:0, _basis: basis, _chg: a.chg, _vol: a.vol*a.last, _spread: spreadRate*10000, _depth: a.depth2 || 0, _funding: fAnn, _arb: netArb };
   });
 
   const sk = spotVenueSort.key, sd = spotVenueSort.dir;
@@ -5064,10 +5493,11 @@ function renderSpotVenueTable(venue) {
   });
 
   let h = '';
-  rows.forEach(({a, p}) => {
+  rows.forEach(({a, p, pv}) => {
     const cc = a.chg >= 0 ? 'pos' : 'neg';
     const cs = a.chg >= 0 ? '+' : '';
     const spBps = ((a.ask - a.bid)/a.last*10000).toFixed(1);
+    const perpSettles = (SPOT_PERP_VENUES[pv]||{}).settlesPerDay || 3;
 
     let markH='<span class="dim">—</span>', basisH='<span class="dim">—</span>', fundH='<span class="dim">—</span>', arbH='<span class="spot-arb l">N/A</span>';
 
@@ -5081,7 +5511,10 @@ function renderSpotVenueTable(venue) {
       : '<span class="dim">—</span>';
 
     if (p) {
-      markH = spotFP(p.mark);
+      const perpVenueName = (SPOT_PERP_VENUES[pv]||{}).name || pv;
+      const isFallback = pv !== selectedPv;
+      const venueTag = isFallback ? '<span style="font-size:9px;color:var(--foreground-dim);display:block;margin-top:1px">'+perpVenueName+'</span>' : '';
+      markH = spotFP(p.mark) + venueTag;
       const basis = (p.mark - a.last)/a.last;
       const bPct = (basis*100).toFixed(3);
       const absBasis = Math.abs(basis);
