@@ -2177,9 +2177,8 @@ async function fetchGate() {
 // API: Binance (USDT-M Perpetual Futures)
 // ═══════════════════════════════════════════════
 
-const BINANCE_API_BASE = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
-  ? 'https://fapi.binance.com/fapi/v1'
-  : '/api/binance';
+// Binance supports CORS — always call directly to avoid Vercel edge request quota
+const BINANCE_API_BASE = 'https://fapi.binance.com/fapi/v1';
 
 async function fetchBinance() {
   logLoad('Fetching Binance data...');
@@ -4802,10 +4801,10 @@ function _isRwaSpotBase(base) {
 
 // ── Proxy base URLs (Vercel proxy in prod, direct in dev) ──
 const _isDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-const GATE_SPOT_BASE   = _isDev ? 'https://api.gateio.ws/api/v4/spot'   : '/api/gate-spot';
-const KRAKEN_SPOT_BASE = _isDev ? 'https://api.kraken.com/0/public'     : '/api/kraken';
-const BINANCE_SPOT_BASE= _isDev ? 'https://api.binance.com/api/v3'      : '/api/binance-spot';
-// Bitget: no CORS issues, call direct
+const GATE_SPOT_BASE   = _isDev ? 'https://api.gateio.ws/api/v4/spot'   : '/api/gate-spot';  // Gate CORS blocked — must proxy
+// Binance, Kraken, Bitget, Bybit all support CORS — call directly to save Vercel edge requests
+const KRAKEN_SPOT_BASE = 'https://api.kraken.com/0/public';
+const BINANCE_SPOT_BASE= 'https://api.binance.com/api/v3';
 const BITGET_SPOT_BASE = 'https://api.bitget.com';
 
 // ── Gate.io Spot Fetch ──
@@ -5103,7 +5102,7 @@ async function fetchSpotRwaBinance() {
 }
 
 // ── Bybit Spot Fetch ──
-const BYBIT_SPOT_BASE = _isDev ? 'https://api.bybit.com/v5/market' : '/api/bybit-spot';
+const BYBIT_SPOT_BASE = 'https://api.bybit.com/v5/market';  // CORS OK — direct
 // Bit.com: serverless function handles auth server-side (keys in Vercel env vars)
 const BIT_API_BASE = '/api/bit';
 
