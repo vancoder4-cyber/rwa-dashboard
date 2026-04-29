@@ -1,17 +1,17 @@
 // Vercel Serverless Function: proxy Bit.com /rfq-price with server-side HMAC signing
-// Environment Variables: BIT_API_KEY, BIT_API_SECRET
+// Matrixport signing: prehash = timestamp + METHOD + path + "&" + body
 import { createHmac } from 'crypto';
 
-const BIT_API_BASE = 'https://mapi.matrixport.com/trader/v2/api';
+const BIT_API_HOST = 'https://mapi.matrixport.com';
+const API_PATH = '/trader/v2/api/rfq-price';
 
 export default async function handler(req, res) {
-  const apiKey = process.env.BIT_API_KEY;
-  const apiSecret = process.env.BIT_API_SECRET;
+  const apiKey = (process.env.BIT_API_KEY || '').trim();
+  const apiSecret = (process.env.BIT_API_SECRET || '').trim();
   if (!apiKey || !apiSecret) {
     return res.status(500).json({ error: 'BIT_API_KEY or BIT_API_SECRET not configured' });
   }
 
-  // Accept query params: symbol, side (default 0=BUY), cash (default 100)
   const symbol = req.query.symbol;
   if (!symbol) {
     return res.status(400).json({ error: 'symbol parameter required' });
@@ -20,15 +20,15 @@ export default async function handler(req, res) {
   const cash = req.query.cash || '100';
   const timestamp = String(Date.now());
 
-  // Build params and compute HMAC-SHA256 signature
-  const params = { symbol, side, cash, timestamp };
-  const sorted = Object.keys(params).sort().map(k => `${k}=${params[k]}`).join('&');
-  const signature = createHmac('sha256', apiSecret).update(sorted).digest('hex');
+  // Matrixport sign: timestamp + METHOD + request_path + "&" + body
+  // For GET requests, body is empty; query params go in the URL
+  const prehash = timestamp + 'GET' + API_PATH + '&';
+  const signature = createHmac('sha256', apiSecret).update(prehash).digest('hex');
 
-  const qs = `${sorted}&signature=${signature}`;
+  const qs = `symbol=${encodeURIComponent(symbol)}&side=${side}&cash=${cash}&timestamp=${timestamp}&signature=${signature}`;
 
   try {
-    const resp = await fetch(`${BIT_API_BASE}/rfq-price?${qs}`, {
+    const resp = await fetch(`${BIT_API_HOST}${API_PATH}?${qs}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

@@ -73,6 +73,8 @@
   --vest-dim:     rgba(224,36,106,0.10);
   --bit:          #00A3FF;
   --bit-dim:      rgba(0,163,255,0.10);
+  --cbintx:       #0052FF;
+  --cbintx-dim:   rgba(0,82,255,0.10);
 
   /* ── Radius ── generous, pill-like */
   --radius-sm: 8px;
@@ -223,6 +225,7 @@ body {
 .venue-dot.lighter { background: var(--lighter); }
 .venue-dot.vest { background: var(--vest); }
 .venue-dot.bit { background: var(--bit); }
+.venue-dot.cbintx { background: var(--cbintx); }
 
 /* ═══════════════════════════════════════════════════
    FILTER BAR
@@ -1024,6 +1027,7 @@ input[type="checkbox"] {
     <div class="sub-tab" onclick="switchSubTab('binance', this)"><span class="venue-dot binance"></span>Binance</div>
     <div class="sub-tab" onclick="switchSubTab('lighter', this)"><span class="venue-dot lighter"></span>Lighter</div>
     <div class="sub-tab" onclick="switchSubTab('vest', this)"><span class="venue-dot vest"></span>Vest</div>
+    <div class="sub-tab" onclick="switchSubTab('cbintx', this)"><span class="venue-dot cbintx"></span>Coinbase INTX</div>
   </div>
 
   <!-- Aggregator -->
@@ -1232,6 +1236,39 @@ input[type="checkbox"] {
           <div class="spark-range-btns"><button class="sr-btn active" onclick="setSparkRange('vest',24,this)">24h</button><button class="sr-btn" onclick="setSparkRange('vest',72,this)">3d</button><button class="sr-btn" onclick="setSparkRange('vest',168,this)">7d</button></div>
         </div></th>
       </tr></thead><tbody id="vstTableBody"></tbody></table>
+    </div>
+  </div>
+
+  <!-- Coinbase INTX table -->
+  <div class="sub-view" id="sub-cbintx">
+    <div class="filter-bar">
+      <div class="chip active" onclick="setVenueFilter('cbintx','all',this)">All RWA <span class="count" id="cbiCountAll"></span></div>
+      <div class="chip" onclick="setVenueFilter('cbintx','equity',this)">Equities <span class="count" id="cbiCountEquity"></span></div>
+      <div class="chip" onclick="setVenueFilter('cbintx','commodity',this)">Commodities <span class="count" id="cbiCountCommodity"></span></div>
+      <div class="chip" onclick="setVenueFilter('cbintx','index',this)">Indices <span class="count" id="cbiCountIndex"></span></div>
+      <div class="chip" onclick="setVenueFilter('cbintx','etf',this)">ETFs <span class="count" id="cbiCountEtf"></span></div>
+      <div class="chip" onclick="setVenueFilter('cbintx','fx',this)">FX <span class="count" id="cbiCountFx"></span></div>
+      <label style="display:flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;color:var(--foreground-sec);cursor:pointer;user-select:none">
+        <input type="checkbox" id="cbiHideInactive" checked onchange="renderVenueTable('cbintx')"> Hide inactive
+      </label>
+      <input class="search-box" placeholder="Search asset..." oninput="venueTableSearch.cbintx=this.value.toLowerCase();renderVenueTable('cbintx')">
+    </div>
+    <div class="info-bar"><span>Coinbase International Exchange (Stock & Commodity Perps) · USDC-settled · Funding settles every 1h · Maker 0.04% / Taker 0.08%</span><span>Auto-refresh: 30s</span></div>
+    <div class="table-wrap">
+      <table><thead><tr>
+        <th style="text-align:left" data-sort="name" onclick="setVenueSort('cbintx','name')">Asset <span class="arrow"></span></th>
+        <th data-sort="markPx" onclick="setVenueSort('cbintx','markPx')">Mark Price <span class="arrow"></span></th>
+        <th data-sort="indexPx" onclick="setVenueSort('cbintx','indexPx')">Index Price <span class="arrow"></span></th>
+        <th data-sort="change" onclick="setVenueSort('cbintx','change')">24h Change <span class="arrow"></span></th>
+        <th data-sort="volume" onclick="setVenueSort('cbintx','volume')">24h Volume <span class="arrow">▼</span></th>
+        <th data-sort="oi" onclick="setVenueSort('cbintx','oi')">Open Interest <span class="arrow"></span></th>
+        <th data-sort="depth" onclick="setVenueSort('cbintx','depth')">±2% Depth <span class="arrow"></span></th>
+        <th data-sort="funding" onclick="setVenueSort('cbintx','funding')">Funding Rate <span class="arrow"></span></th>
+        <th data-sort="posRate" onclick="setVenueSort('cbintx','posRate')"><span class="th-info">% 有效费率 <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip">排除年化 &lt; 1.5% 的无效周期，取正/负费率中占比更大的方向。绿色 = 多数时间正费率，红色 = 多数时间负费率。比例越高，费率方向越稳定，越适合持仓套利。</span></span></th>
+        <th style="cursor:default"><div style="display:flex;align-items:center;gap:6px;justify-content:flex-end"><span>Funding</span>
+          <div class="spark-range-btns"><button class="sr-btn active" onclick="setSparkRange('cbintx',24,this)">24h</button><button class="sr-btn" onclick="setSparkRange('cbintx',72,this)">3d</button><button class="sr-btn" onclick="setSparkRange('cbintx',168,this)">7d</button></div>
+        </div></th>
+      </tr></thead><tbody id="cbiTableBody"></tbody></table>
     </div>
   </div>
 </div>
@@ -1535,6 +1572,7 @@ const VENUES = {
   binance:  { name: 'Binance',   color: '#C99400', fundingInterval: 8, makerFee: 0.0002, takerFee: 0.0005 },
   lighter:  { name: 'Lighter',   color: '#00B74F', fundingInterval: 8, makerFee: 0.0002, takerFee: 0.0005 },
   vest:     { name: 'Vest',      color: '#E0246A', fundingInterval: 1, makerFee: 0.0002, takerFee: 0.0006 },
+  cbintx:   { name: 'Coinbase INTX', color: '#0052FF', fundingInterval: 1, makerFee: 0.0004, takerFee: 0.0008 },
 };
 
 const CAT_COLORS = { index:'#007AFF', equity:'#AF52DE', commodity:'#C7942A', etf:'#32ADE6', fx:'#FF2D55', other:'#98989D' };
@@ -1814,9 +1852,9 @@ let expandedAsset = null;
 let refreshTimer = null;
 
 // Per-venue table state
-let venueTableCatFilter = { tradexyz: 'all', bitget: 'all', gate: 'all', binance: 'all', lighter: 'all', vest: 'all' };
-let venueTableSearch = { tradexyz: '', bitget: '', gate: '', binance: '', lighter: '', vest: '' };
-let venueTableSort = { tradexyz: { key: 'volume', dir: -1 }, bitget: { key: 'volume', dir: -1 }, gate: { key: 'volume', dir: -1 }, binance: { key: 'volume', dir: -1 }, lighter: { key: 'volume', dir: -1 }, vest: { key: 'volume', dir: -1 } };
+let venueTableCatFilter = { tradexyz: 'all', bitget: 'all', gate: 'all', binance: 'all', lighter: 'all', vest: 'all', cbintx: 'all' };
+let venueTableSearch = { tradexyz: '', bitget: '', gate: '', binance: '', lighter: '', vest: '', cbintx: '' };
+let venueTableSort = { tradexyz: { key: 'volume', dir: -1 }, bitget: { key: 'volume', dir: -1 }, gate: { key: 'volume', dir: -1 }, binance: { key: 'volume', dir: -1 }, lighter: { key: 'volume', dir: -1 }, vest: { key: 'volume', dir: -1 }, cbintx: { key: 'volume', dir: -1 } };
 let assetSort = { key: 'volume', dir: -1 };
 
 // Sparkline state
@@ -2538,6 +2576,78 @@ async function fetchVest() {
 }
 
 // ═══════════════════════════════════════════════
+// COINBASE INTX (via Vercel proxy /api/cbintx/)
+// ═══════════════════════════════════════════════
+const CBINTX_API_BASE = '/api/cbintx';
+
+// Map Coinbase product symbols to our canonical symbols
+const CBINTX_SYMBOL_MAP = {
+  'GOLD': 'XAU', 'SILVER': 'XAG',
+};
+
+async function fetchCoinbaseIntx() {
+  logLoad('Fetching Coinbase INTX data...');
+
+  const res = await fetch(`${CBINTX_API_BASE}/market/products?product_type=FUTURE&contract_expiry_type=PERPETUAL&limit=250`);
+  if (!res.ok) throw new Error(`Coinbase INTX HTTP ${res.status}`);
+  const data = await res.json();
+  const products = data.products || [];
+
+  // Filter to RWA-relevant products only (stocks, ETFs, commodities)
+  const assets = [];
+  for (const p of products) {
+    const rawSym = (p.product_id || '').replace(/-PERP-INTX$/, '');
+    if (!rawSym) continue;
+
+    // Map to canonical symbol
+    const coin = CBINTX_SYMBOL_MAP[rawSym] || canonicalSymbol(rawSym);
+    if (EXCLUDED_SYMBOLS.has(coin)) continue;
+
+    // Only include if it's a known RWA asset
+    const cat = KNOWN_CATEGORIES[coin] || (RWA_ASSETS[coin] ? RWA_ASSETS[coin].category : null);
+    if (!cat) continue; // skip pure crypto
+
+    if (!KNOWN_CATEGORIES[coin]) { KNOWN_CATEGORIES[coin] = cat; }
+    const fullName = KNOWN_NAMES[coin] || (RWA_ASSETS[coin] ? RWA_ASSETS[coin].name : coin);
+
+    const markPx = parseFloat(p.price) || 0;
+    if (markPx <= 0) continue;
+
+    const volume = parseFloat(p.volume_24h) * markPx || 0; // volume_24h is in base units, convert to USD
+    const change = parseFloat(p.price_percentage_change_24h) || 0;
+
+    assets.push({
+      coin, fullName, category: cat, venue: 'cbintx',
+      symbol: p.product_id,
+      markPx, indexPx: markPx, change, volume, oi: 0, funding: null, predictedFunding: null,
+      isActive: volume > 0,
+      makerFee: VENUES.cbintx.makerFee, takerFee: VENUES.cbintx.takerFee
+    });
+  }
+
+  // Fetch individual product details for ticker data (best bid/ask) in parallel
+  const tickerTasks = assets.map(a => async () => {
+    try {
+      const r = await fetch(`${CBINTX_API_BASE}/market/products/${encodeURIComponent(a.symbol)}/ticker`);
+      if (!r.ok) return;
+      const t = await r.json();
+      const bestBid = parseFloat(t.best_bid) || 0;
+      const bestAsk = parseFloat(t.best_ask) || 0;
+      if (bestBid > 0 && bestAsk > 0) {
+        a.depth2 = { bidUsd: parseFloat(t.best_bid_quantity || 0) * bestBid, askUsd: parseFloat(t.best_ask_quantity || 0) * bestAsk };
+      }
+    } catch {}
+  });
+  // Run ticker fetches in parallel batches of 5
+  for (let i = 0; i < tickerTasks.length; i += 5) {
+    await Promise.allSettled(tickerTasks.slice(i, i + 5).map(fn => fn()));
+  }
+
+  logLoad(`Coinbase INTX: ${assets.length} RWA assets processed`);
+  return assets;
+}
+
+// ═══════════════════════════════════════════════
 // FUNDING HISTORY & SPARKLINES
 // ═══════════════════════════════════════════════
 
@@ -3137,16 +3247,17 @@ function renderModalChart(points) {
 
 async function refresh(isFirst) {
   try {
-    const [xyzAssets, bitgetAssets, gateAssets, binanceAssets, lighterAssets, vestAssets] = await Promise.all([
+    const [xyzAssets, bitgetAssets, gateAssets, binanceAssets, lighterAssets, vestAssets, cbintxAssets] = await Promise.all([
       fetchTradeXyz().catch(e => { console.error('trade.xyz error:', e); return []; }),
       fetchBitget().catch(e => { console.error('Bitget error:', e); return []; }),
       fetchGate().catch(e => { console.error('Gate.io error:', e); return []; }),
       fetchBinance().catch(e => { console.error('Binance error:', e); return []; }),
       fetchLighter().catch(e => { console.error('Lighter error:', e); return []; }),
-      fetchVest().catch(e => { console.error('Vest error:', e); return []; })
+      fetchVest().catch(e => { console.error('Vest error:', e); return []; }),
+      fetchCoinbaseIntx().catch(e => { console.error('Coinbase INTX error:', e); return []; })
     ]);
 
-    allData = [...xyzAssets, ...bitgetAssets, ...gateAssets, ...binanceAssets, ...lighterAssets, ...vestAssets];
+    allData = [...xyzAssets, ...bitgetAssets, ...gateAssets, ...binanceAssets, ...lighterAssets, ...vestAssets, ...cbintxAssets];
 
     // Fetch volume growth (cached, re-fetches every 5 min)
     await fetchVolumeGrowthAll().catch(e => console.error('Volume growth error:', e));
@@ -3180,6 +3291,7 @@ function renderCurrentView() {
     else if (currentSubTab === 'binance') renderVenueTable('binance');
     else if (currentSubTab === 'lighter') renderVenueTable('lighter');
     else if (currentSubTab === 'vest') renderVenueTable('vest');
+    else if (currentSubTab === 'cbintx') renderVenueTable('cbintx');
   }
   else if (currentView === 'asset') renderAssetView();
   else if (currentView === 'heatmap') renderHeatmap();
@@ -3985,12 +4097,29 @@ async function fetchReal30DayVolume() {
     } catch {}
   });
 
+  // ── Coinbase INTX: /market/products/{id}/candles ──
+  const cbiKlineTasks = allData.filter(d => d.venue === 'cbintx').map(asset => async () => {
+    try {
+      const now = Math.floor(Date.now() / 1000);
+      const thirtyDaysAgo = now - 30 * 86400;
+      const res = await fetch(`${CBINTX_API_BASE}/market/products/${encodeURIComponent(asset.symbol)}/candles?start=${thirtyDaysAgo}&end=${now}&granularity=ONE_DAY`);
+      if (!res.ok) return;
+      const json = await res.json();
+      const candles = json.candles || json || [];
+      if (!Array.isArray(candles)) return;
+      let totalVol = 0;
+      candles.forEach(c => { totalVol += (parseFloat(c.volume) || 0) * (parseFloat(c.close) || parseFloat(c.open) || 0); });
+      if (totalVol > 0) addVol(asset.coin, 'cbintx', totalVol, 'real');
+    } catch {}
+  });
+
   // ── Run all kline fetches in parallel batches ──
   await Promise.all([
     batchFetch(bnKlineTasks, 5),
     batchFetch(bgKlineTasks, 5),
     batchFetch(gateKlineTasks, 5),
     batchFetch(xyzKlineTasks, 5),
+    batchFetch(cbiKlineTasks, 5),
   ]);
 
   // ── Lighter & Vest: no kline API, fall back to 24h × 30 (tagged as estimate) ──
@@ -4034,7 +4163,7 @@ function renderTop30Volume() {
       <div class="section-subtitle">Fetching real kline data from all venues…</div>
       <div style="text-align:center;padding:40px;color:var(--foreground-dim)">
         <div class="spin" style="display:inline-block;width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite"></div>
-        <div style="margin-top:12px;font-size:12px">Loading 30-day kline data from Binance, Bitget, Gate.io, trade.xyz…</div>
+        <div style="margin-top:12px;font-size:12px">Loading 30-day kline data from Binance, Bitget, Gate.io, trade.xyz, Coinbase INTX…</div>
       </div>`;
     // Kick off the fetch, then re-render
     fetchReal30DayVolume().then(() => renderTop30Volume()).catch(e => {
@@ -4206,7 +4335,8 @@ function renderVenueTable(venue) {
     gate:     { tbodyId: 'gateTableBody', prefix: 'gate', hideId: 'gateHideInactive' },
     binance:  { tbodyId: 'bnTableBody',  prefix: 'bn',  hideId: 'bnHideInactive' },
     lighter:  { tbodyId: 'ltTableBody',  prefix: 'lt',  hideId: 'ltHideInactive' },
-    vest:     { tbodyId: 'vstTableBody', prefix: 'vst', hideId: 'vstHideInactive' }
+    vest:     { tbodyId: 'vstTableBody', prefix: 'vst', hideId: 'vstHideInactive' },
+    cbintx:   { tbodyId: 'cbiTableBody', prefix: 'cbi', hideId: 'cbiHideInactive' }
   };
   const vm = venueMap[venue] || venueMap.bitget;
   const tbodyId = vm.tbodyId;
@@ -5394,7 +5524,7 @@ async function refreshSpotArbData() {
 }
 
 const SPOT_VENUE_NAMES = { gate:'Gate.io', binance:'Binance', bitget:'Bitget', kraken:'Kraken', bybit:'Bybit', bit:'Bit.com' };
-const SPOT_PERP_VENUES = { gate:{name:'Gate.io',settlesPerDay:3}, binance:{name:'Binance',settlesPerDay:3}, bitget:{name:'Bitget',settlesPerDay:3}, tradexyz:{name:'trade.xyz',settlesPerDay:24}, lighter:{name:'Lighter',settlesPerDay:3}, vest:{name:'Vest',settlesPerDay:24} };
+const SPOT_PERP_VENUES = { gate:{name:'Gate.io',settlesPerDay:3}, binance:{name:'Binance',settlesPerDay:3}, bitget:{name:'Bitget',settlesPerDay:3}, tradexyz:{name:'trade.xyz',settlesPerDay:24}, lighter:{name:'Lighter',settlesPerDay:3}, vest:{name:'Vest',settlesPerDay:24}, cbintx:{name:'Coinbase INTX',settlesPerDay:24} };
 
 const ASSET_META = {
   // ── Tokenized Gold ──
