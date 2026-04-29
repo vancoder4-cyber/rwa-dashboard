@@ -2634,7 +2634,10 @@ async function fetchCoinbaseIntx() {
       const bestBid = parseFloat(t.best_bid) || 0;
       const bestAsk = parseFloat(t.best_ask) || 0;
       if (bestBid > 0 && bestAsk > 0) {
-        a.depth2 = { bidUsd: parseFloat(t.best_bid_quantity || 0) * bestBid, askUsd: parseFloat(t.best_ask_quantity || 0) * bestAsk };
+        // depth2 must be a single number (total USD within ±2%), not an object
+        const bidDepth = parseFloat(t.best_bid_quantity || 0) * bestBid;
+        const askDepth = parseFloat(t.best_ask_quantity || 0) * bestAsk;
+        a.depth2 = bidDepth + askDepth; // BBO-only depth (single level)
       }
     } catch {}
   });
