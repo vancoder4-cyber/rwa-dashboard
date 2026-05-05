@@ -605,20 +605,31 @@ th.op-col:hover { color:var(--foreground-dim) !important; }
 .cov-chip.tri { background: var(--purple-dim); border-color: rgba(175,82,222,0.18); color: var(--purple); }
 .cov-chip.dual { background: var(--accent-dim); border-color: rgba(0,122,255,0.18); color: var(--accent); }
 
-.div-cards { display: flex; flex-wrap: wrap; gap: 10px; }
-.div-card {
-  background: rgba(120,120,128,0.04);
-  border: 1px solid rgba(0,0,0,0.04);
-  border-radius: var(--radius);
-  padding: 12px 16px; min-width: 200px; flex: 1; max-width: 280px;
-  transition: all 0.2s ease-out;
+.fr-panels { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 900px) { .fr-panels { grid-template-columns: 1fr; } }
+.fr-panel { background: rgba(120,120,128,0.02); border: 1px solid rgba(0,0,0,0.04); border-radius: var(--radius); padding: 14px 16px; }
+.fr-panel-title { font-size: 13px; font-weight: 700; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+.fr-panel-title .fr-icon { font-size: 15px; }
+.fr-rows { display: flex; flex-direction: column; gap: 6px; }
+.fr-row {
+  display: grid; grid-template-columns: 140px 90px 1fr; align-items: center; gap: 8px;
+  padding: 8px 12px; border-radius: 8px; background: rgba(120,120,128,0.03);
+  border: 1px solid rgba(0,0,0,0.02); transition: all 0.15s ease-out; cursor: default;
 }
-.div-card:hover { border-color: rgba(0,0,0,0.08); background: rgba(120,120,128,0.07); }
-.dc-coin { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
-.dc-net { font-size: 18px; font-weight: 700; position: relative; cursor: default; }
-.dc-net .dc-tip { display: none; position: absolute; left: 0; top: 100%; margin-top: 6px; background: rgba(255,255,255,0.85); border: 1px solid rgba(0,0,0,0.06); border-radius: var(--radius); padding: 10px 14px; font-size: 11px; font-weight: 400; color: var(--foreground-sec); white-space: nowrap; z-index: 100; box-shadow: 0 8px 30px rgba(0,0,0,0.10); line-height: 1.7; backdrop-filter:blur(20px) saturate(1.8); -webkit-backdrop-filter:blur(20px) saturate(1.8); }
-.dc-net:hover .dc-tip { display: block; }
-.dc-venues { font-size: 11px; color: var(--foreground-dim); }
+.fr-row:hover { background: rgba(120,120,128,0.07); border-color: rgba(0,0,0,0.06); }
+.fr-coin { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fr-coin span { font-weight: 400; font-size: 10px; color: var(--foreground-dim); margin-left: 3px; }
+.fr-apr { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.fr-venues { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.fr-venue-chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 10px; padding: 2px 7px; border-radius: 4px;
+  background: rgba(120,120,128,0.06); color: var(--foreground-sec);
+  white-space: nowrap; position: relative;
+}
+.fr-venue-chip .venue-dot { width: 6px; height: 6px; margin: 0; }
+.fr-venue-chip .fr-chip-rate { font-variant-numeric: tabular-nums; }
+.fr-empty { color: var(--foreground-dim); font-style: italic; font-size: 12px; padding: 8px 0; }
 
 .th-info { position: relative; display: inline-flex; align-items: center; gap: 3px; }
 .th-info-icon { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; border-radius: 50%; border: 1px solid var(--foreground-dim); font-size: 9px; color: var(--foreground-dim); cursor: default; opacity: 0.5; font-style: italic; font-family: Georgia, serif; }
@@ -1674,8 +1685,9 @@ const SYMBOL_ALIASES = {
 
 const EXCLUDED_SYMBOLS = new Set([
   "XYZ100", "STABLE", "SOLV", "EUR", "JPY", "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "USDCAD", "AUDUSD", "NZDUSD", "USDKRW",
-  // Crypto tokens that share tickers with stocks — price <$1 confirms they are NOT the stock
-  "BR", "MET", "AI", "ON", "IR", "T", "A", "ALL"
+  // Crypto tokens that share tickers with stocks/indices — price confirms they are NOT the real asset
+  "BR", "MET", "AI", "ON", "IR", "T", "A", "ALL",
+  "SPX" // SPX6900 meme token (~$0.37), not S&P 500 Index
 ]);
 
 function canonicalSymbol(symbol) {
@@ -3268,7 +3280,8 @@ async function refresh(isFirst) {
       fetchCoinbaseIntx().catch(e => { console.error('Coinbase INTX error:', e); return []; })
     ]);
 
-    allData = [...xyzAssets, ...bitgetAssets, ...gateAssets, ...binanceAssets, ...lighterAssets, ...vestAssets, ...cbintxAssets];
+    allData = [...xyzAssets, ...bitgetAssets, ...gateAssets, ...binanceAssets, ...lighterAssets, ...vestAssets, ...cbintxAssets]
+      .filter(d => !EXCLUDED_SYMBOLS.has(canonicalSymbol(d.coin)));
 
     // Fetch volume growth (cached, re-fetches every 5 min)
     await fetchVolumeGrowthAll().catch(e => console.error('Volume growth error:', e));
@@ -3514,91 +3527,68 @@ function renderCoverage() {
   `;
 }
 
-function setDivHold(days, el) {
-  divHoldDays = days;
-  document.querySelectorAll('#divSection .sr-btn').forEach(b => b.classList.remove('active'));
-  if (el) el.classList.add('active');
-  renderDivergence();
-}
-
 function renderDivergence() {
   const section = document.getElementById('divSection');
-  const grouped = {};
-  allData.forEach(d => { if (!grouped[d.coin]) grouped[d.coin]={coin:d.coin,fullName:d.fullName,venues:{}}; grouped[d.coin].venues[d.venue]=d; });
 
-  const MIN_ANN = 0.015;
-  const divergences = [];
+  // Group all funding rates by asset, collecting every venue's annualized rate
+  const grouped = {};
+  allData.forEach(d => {
+    if (d.funding === null) return;
+    const ann = annualize(d.funding, d.venue);
+    if (ann === null) return;
+    if (!grouped[d.coin]) grouped[d.coin] = { coin: d.coin, fullName: d.fullName, category: d.category, venues: [] };
+    grouped[d.coin].venues.push({ venue: d.venue, ann, raw: d.funding });
+  });
+
+  // Build two lists: positive (longs pay shorts) and negative (shorts pay longs)
+  // For each asset, pick the MAX |rate| as the sort key, but show ALL venues
+  const positives = []; // assets where at least one venue has positive funding
+  const negatives = []; // assets where at least one venue has negative funding
+
   Object.values(grouped).forEach(a => {
-    const vKeys = Object.keys(a.venues);
-    if (vKeys.length < 2) return;
-    const rates = vKeys.map(v => ({venue:v, ann:annualize(a.venues[v].funding,v), asset: a.venues[v]})).filter(r => r.ann !== null);
-    // enumerate all positive vs negative pairs
-    for (const p of rates) {
-      for (const n of rates) {
-        if (p.venue === n.venue) continue;
-        if (p.ann <= 0 || n.ann >= 0) continue;
-        if (p.ann < MIN_ANN || Math.abs(n.ann) < MIN_ANN) continue;
-        const grossSpread = p.ann - n.ann;
-        // Per-contract taker fees (open+close = ×2)
-        const feeP = (p.asset.takerFee || VENUES[p.venue].takerFee) * 2;
-        const feeN = (n.asset.takerFee || VENUES[n.venue].takerFee) * 2;
-        const feePMaker = p.asset.makerFee !== undefined ? p.asset.makerFee : VENUES[p.venue].makerFee;
-        const feeNMaker = n.asset.makerFee !== undefined ? n.asset.makerFee : VENUES[n.venue].makerFee;
-        const feePTaker = p.asset.takerFee || VENUES[p.venue].takerFee;
-        const feeNTaker = n.asset.takerFee || VENUES[n.venue].takerFee;
-        let netSpread, feeAnnualized;
-        if (divHoldDays <= 0) {
-          netSpread = grossSpread;
-          feeAnnualized = 0;
-        } else {
-          feeAnnualized = (feeP + feeN) * (365 / divHoldDays);
-          netSpread = grossSpread - feeAnnualized;
-        }
-        divergences.push({coin:a.coin, fullName:a.fullName, spread:grossSpread, netSpread, feeP, feeN, feePMaker, feeNMaker, feePTaker, feeNTaker, feeAnnualized, posVenue:p, negVenue:n});
-      }
+    const posVenues = a.venues.filter(v => v.ann > 0).sort((x, y) => y.ann - x.ann);
+    const negVenues = a.venues.filter(v => v.ann < 0).sort((x, y) => Math.abs(y.ann) - Math.abs(x.ann));
+    if (posVenues.length > 0) {
+      positives.push({ coin: a.coin, fullName: a.fullName, category: a.category, maxApr: posVenues[0].ann, venues: posVenues });
+    }
+    if (negVenues.length > 0) {
+      negatives.push({ coin: a.coin, fullName: a.fullName, category: a.category, maxApr: Math.abs(negVenues[0].ann), venues: negVenues });
     }
   });
-  divergences.sort((a,b) => b.netSpread-a.netSpread);
 
-  let html = '';
-  if (divergences.length === 0) {
-    html = '<div style="color:var(--foreground-dim);font-style:italic;font-size:12px">No divergences — requires one positive and one negative venue, both exceeding 1.5% APR</div>';
-  } else {
-    html = divergences.map(d => {
-      const sp = (d.spread*100).toFixed(2);
-      const net = (d.netSpread*100).toFixed(2);
-      const isGross = divHoldDays <= 0;
-      const nc = isGross ? (d.spread > 0.10 ? 'var(--positive)' : d.spread > 0.05 ? 'var(--accent)' : 'var(--foreground-sec)') : (d.netSpread > 0.05 ? 'var(--positive)' : d.netSpread > 0 ? 'var(--accent)' : 'var(--negative)');
-      const pName = VENUES[d.posVenue.venue].name;
-      const nName = VENUES[d.negVenue.venue].name;
-      // Per-contract fees for tooltip
-      const pMk = (d.feePMaker*100).toFixed(3);
-      const pTk = (d.feePTaker*100).toFixed(3);
-      const nMk = (d.feeNMaker*100).toFixed(3);
-      const nTk = (d.feeNTaker*100).toFixed(3);
-      const pRT = (d.feeP*100).toFixed(3);
-      const nRT = (d.feeN*100).toFixed(3);
-      const feeBoth = ((d.feeP + d.feeN)*100).toFixed(3);
-      const feeAnn = (d.feeAnnualized * 100).toFixed(2);
-      const holdLabel = divHoldDays < 1 ? '8h' : divHoldDays + 'd';
-      const tipContent = isGross
-        ? `<div style="color:var(--foreground);font-weight:600;margin-bottom:4px">Gross APR</div><div>No fee deduction applied.</div><div>Select a hold period to see net returns.</div>`
-        : `<div style="color:var(--foreground);font-weight:600;margin-bottom:4px">Net APR Breakdown</div><div>Gross spread: <span style="color:var(--foreground)">${sp}%</span> APR</div><div style="margin-top:4px">${pName} <span style="color:var(--foreground-dim)">(m:${pMk}% / t:${pTk}%)</span></div><div>&nbsp;&nbsp;round-trip: <span style="color:var(--foreground)">-${pRT}%</span></div><div style="margin-top:2px">${nName} <span style="color:var(--foreground-dim)">(m:${nMk}% / t:${nTk}%)</span></div><div>&nbsp;&nbsp;round-trip: <span style="color:var(--foreground)">-${nRT}%</span></div><div style="margin-top:4px">Total: <span style="color:var(--foreground)">${feeBoth}%</span> → <span style="color:var(--foreground)">${feeAnn}%</span> ann. (${holdLabel})</div><div style="border-top:1px solid var(--border);margin-top:4px;padding-top:4px;color:var(--foreground);font-weight:600">Net: ${net}% APR</div>`;
-      return `<div class="div-card"><div class="dc-coin">${d.coin} <span style="font-size:11px;font-weight:400;color:var(--foreground-dim)">${d.fullName}</span></div><div class="dc-net" style="color:${nc};margin-bottom:6px">${isGross ? sp : net}% <span style="font-size:11px;font-weight:500">APR</span><div class="dc-tip">${tipContent}</div></div><div class="dc-venues"><span class="venue-badge-sm ${d.posVenue.venue}" style="margin-right:4px">${pName}</span><span style="color:var(--positive)">+${(d.posVenue.ann*100).toFixed(2)}%</span> &nbsp;vs&nbsp; <span class="venue-badge-sm ${d.negVenue.venue}" style="margin-right:4px">${nName}</span><span style="color:var(--negative)">${(d.negVenue.ann*100).toFixed(2)}%</span></div></div>`;
+  positives.sort((a, b) => b.maxApr - a.maxApr);
+  negatives.sort((a, b) => b.maxApr - a.maxApr);
+
+  function buildRows(list, isPositive) {
+    if (list.length === 0) return '<div class="fr-empty">No data</div>';
+    return list.map(a => {
+      const aprPct = (a.maxApr * 100).toFixed(2);
+      const aprColor = isPositive
+        ? (a.maxApr > 0.50 ? '#D70015' : a.maxApr > 0.10 ? 'var(--negative)' : 'var(--foreground-sec)')
+        : (a.maxApr > 0.50 ? '#248A3D' : a.maxApr > 0.10 ? 'var(--positive)' : 'var(--foreground-sec)');
+      const cc = CAT_COLORS[a.category] || 'var(--foreground)';
+      const chips = a.venues.map(v => {
+        const vn = VENUES[v.venue]?.name || v.venue;
+        const rate = (v.ann * 100).toFixed(2);
+        return `<span class="fr-venue-chip"><span class="venue-dot ${v.venue}"></span>${vn} <span class="fr-chip-rate" style="color:${isPositive ? 'var(--negative)' : 'var(--positive)'}">${isPositive ? '+' : ''}${rate}%</span></span>`;
+      }).join('');
+      return `<div class="fr-row"><div class="fr-coin" style="color:${cc}">${a.coin}<span>${a.fullName}</span></div><div class="fr-apr" style="color:${aprColor}">${isPositive ? '+' : '-'}${aprPct}%</div><div class="fr-venues">${chips}</div></div>`;
     }).join('');
   }
-  const holdOptions = [
-    { val: 0, label: 'No Fees' },
-    { val: 1/3, label: '8h' },
-    { val: 1, label: '1d' },
-    { val: 5, label: '5d' },
-    { val: 15, label: '15d' },
-  ];
-  const holdBtns = holdOptions.map(o => `<button class="sr-btn ${divHoldDays === o.val ? 'active' : ''}" onclick="setDivHold(${o.val},this)">${o.label}</button>`).join('');
-  const subtitleText = divHoldDays <= 0
-    ? 'Gross APR · fees not deducted'
-    : `Net APR · entry+exit fees amortized over ${divHoldDays < 1 ? '8h' : divHoldDays + 'd'} position`;
-  section.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><div><div class="section-title">Funding Rate Divergence</div><div class="section-subtitle">${subtitleText}</div></div><div class="spark-range-btns" style="margin:0">${holdBtns}</div></div><div class="div-cards" style="margin-top:12px">${html}</div>`;
+
+  section.innerHTML = `
+    <div><div class="section-title">Funding Rate Ranking</div>
+    <div class="section-subtitle">Annualized funding rates across all venues · sorted by absolute value</div></div>
+    <div class="fr-panels" style="margin-top:14px">
+      <div class="fr-panel">
+        <div class="fr-panel-title"><span class="fr-icon" style="color:var(--negative)">▲</span> <span style="color:var(--negative)">Longs Pay Shorts</span> <span style="font-weight:400;color:var(--foreground-dim);font-size:11px">· short opportunity</span></div>
+        <div class="fr-rows">${buildRows(positives, true)}</div>
+      </div>
+      <div class="fr-panel">
+        <div class="fr-panel-title"><span class="fr-icon" style="color:var(--positive)">▼</span> <span style="color:var(--positive)">Shorts Pay Longs</span> <span style="font-weight:400;color:var(--foreground-dim);font-size:11px">· long opportunity</span></div>
+        <div class="fr-rows">${buildRows(negatives, false)}</div>
+      </div>
+    </div>`;
 }
 
 // ═══════════════════════════════════════════════════
@@ -5448,6 +5438,7 @@ function _buildSpotPerpFromAllData() {
   const result = {};
   for (const d of allData) {
     if (!d.venue || !d.coin) continue;
+    if (EXCLUDED_SYMBOLS.has(canonicalSymbol(d.coin))) continue;
     if (!result[d.venue]) result[d.venue] = {};
     const entry = { mark: d.markPx || 0, f: d.funding || 0, depth2: d.depth2 || null };
     result[d.venue][d.coin] = entry;
