@@ -3892,9 +3892,10 @@ function renderDivergence() {
   positives.sort((a, b) => b.maxApr - a.maxApr);
   negatives.sort((a, b) => b.maxApr - a.maxApr);
 
-  function buildRows(list, isPositive) {
+  const DIV_INITIAL_SHOW = 10;
+  function buildRows(list, isPositive, panelId) {
     if (list.length === 0) return '<div class="fr-empty">No data</div>';
-    return list.map(a => {
+    const rows = list.map((a, idx) => {
       const aprPct = (a.maxApr * 100).toFixed(2);
       const aprColor = isPositive
         ? (a.maxApr > 0.50 ? '#D70015' : a.maxApr > 0.10 ? 'var(--negative)' : 'var(--foreground-sec)')
@@ -3905,8 +3906,13 @@ function renderDivergence() {
         const rate = (v.ann * 100).toFixed(2);
         return `<span class="fr-venue-chip"><span class="venue-dot ${v.venue}"></span>${vn} <span class="fr-chip-rate" style="color:${isPositive ? 'var(--negative)' : 'var(--positive)'}">${isPositive ? '+' : ''}${rate}%</span></span>`;
       }).join('');
-      return `<div class="fr-row"><div class="fr-coin" style="color:${cc}">${a.coin}<span>${a.fullName}</span></div><div class="fr-apr" style="color:${aprColor}">${isPositive ? '+' : '-'}${aprPct}%</div><div class="fr-venues">${chips}</div></div>`;
+      const hidden = idx >= DIV_INITIAL_SHOW ? ' style="display:none"' : '';
+      return `<div class="fr-row" data-panel="${panelId}"${hidden}><div class="fr-coin" style="color:${cc}">${a.coin}<span>${a.fullName}</span></div><div class="fr-apr" style="color:${aprColor}">${isPositive ? '+' : '-'}${aprPct}%</div><div class="fr-venues">${chips}</div></div>`;
     }).join('');
+    const toggle = list.length > DIV_INITIAL_SHOW
+      ? `<div class="fr-toggle" id="toggle-${panelId}" style="text-align:center;padding:10px;cursor:pointer;color:var(--accent);font-size:13px;font-weight:600" onclick="toggleDivRows('${panelId}')">Show all ${list.length} assets ▾</div>`
+      : '';
+    return rows + toggle;
   }
 
   section.innerHTML = `
@@ -3915,17 +3921,31 @@ function renderDivergence() {
     <div class="fr-panels" style="margin-top:14px">
       <div class="fr-panel">
         <div class="fr-panel-title"><span class="fr-icon" style="color:var(--negative)">▲</span> <span style="color:var(--negative)">Longs Pay Shorts</span> <span style="font-weight:400;color:var(--foreground-dim);font-size:11px">· short opportunity</span></div>
-        <div class="fr-rows">${buildRows(positives, true)}</div>
+        <div class="fr-rows">${buildRows(positives, true, 'pos')}</div>
       </div>
       <div class="fr-panel">
         <div class="fr-panel-title"><span class="fr-icon" style="color:var(--positive)">▼</span> <span style="color:var(--positive)">Shorts Pay Longs</span> <span style="font-weight:400;color:var(--foreground-dim);font-size:11px">· long opportunity</span></div>
-        <div class="fr-rows">${buildRows(negatives, false)}</div>
+        <div class="fr-rows">${buildRows(negatives, false, 'neg')}</div>
       </div>
     </div>`;
 }
 
 // ═══════════════════════════════════════════════════
 // REVENUE ESTIMATOR
+function toggleDivRows(panelId) {
+  const rows = document.querySelectorAll(`.fr-row[data-panel="${panelId}"]`);
+  const btn = document.getElementById('toggle-' + panelId);
+  const hidden = Array.from(rows).filter(r => r.style.display === 'none');
+  if (hidden.length > 0) {
+    hidden.forEach(r => r.style.display = '');
+    if (btn) btn.textContent = 'Show top 10 only ▴';
+  } else {
+    rows.forEach((r, i) => { if (i >= DIV_INITIAL_SHOW) r.style.display = 'none'; });
+    if (btn) btn.textContent = `Show all ${rows.length} assets ▾`;
+  }
+}
+const DIV_INITIAL_SHOW = 10;
+
 // ═══════════════════════════════════════════════════
 
 let revPeriod = 'daily'; // daily | weekly | monthly | ytd
