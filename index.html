@@ -1978,13 +1978,14 @@ async function fetchTradeXyz() {
     const oraclePx = parseFloat(c.oraclePx) || 0;
     const prevDayPx = parseFloat(c.prevDayPx) || 0;
     const volume = parseFloat(c.dayNtlVlm) || 0;
-    const oi = parseFloat(c.openInterest) || 0;
+    const oiCoins = parseFloat(c.openInterest) || 0;
+    const oiUsd = oiCoins * markPx; // openInterest is in base asset units, convert to USD notional
     const rawFunding = parseFloat(c.funding);
     const funding = isNaN(rawFunding) ? null : rawFunding;
     const rawPremium = parseFloat(c.premium);
     const predictedFunding = isNaN(rawPremium) ? null : rawPremium;
     const change = prevDayPx ? ((markPx - prevDayPx) / prevDayPx) * 100 : 0;
-    const isActive = volume > 0 || oi > 0 || (funding !== null && funding !== 0);
+    const isActive = volume > 0 || oiUsd > 0 || (funding !== null && funding !== 0);
 
     const cat = KNOWN_CATEGORIES[coin] || inferCategory(coin, u.fullName || '');
     if (!KNOWN_CATEGORIES[coin]) { KNOWN_CATEGORIES[coin] = cat; console.info(`[RWA] Auto-categorized trade.xyz: ${coin} → ${cat}`); }
@@ -1992,7 +1993,7 @@ async function fetchTradeXyz() {
 
     assets.push({
       coin, fullName, category: cat, venue: 'tradexyz',
-      markPx, indexPx: oraclePx, change, volume, oi, funding, predictedFunding, isActive,
+      markPx, indexPx: oraclePx, change, volume, oi: oiUsd, funding, predictedFunding, isActive,
       makerFee: VENUES.tradexyz.makerFee, takerFee: VENUES.tradexyz.takerFee
     });
   }
@@ -2189,7 +2190,8 @@ async function fetchGate() {
     const change = parseFloat(t.change_percentage) || 0;
     const volume = parseFloat(t.volume_24h_quote) || parseFloat(t.volume_24h_usd) || 0;
     const oi = parseFloat(t.total_size) || 0;
-    const oiUsd = oi * markPx;
+    const quantoMult = parseFloat(t.quanto_multiplier) || 1;
+    const oiUsd = oi * quantoMult * markPx;
 
     const rawFunding = parseFloat(t.funding_rate);
     const funding = isNaN(rawFunding) ? null : rawFunding;
@@ -2313,8 +2315,8 @@ async function fetchBinance() {
     const volume = parseFloat(t.quoteVolume) || 0;
     const change = parseFloat(t.priceChangePercent) || 0;
 
-    // OI needs separate call per symbol — skip for now, use ticker data
-    const oi = volume > 0 ? volume * 0.3 : 0; // rough estimate; we'll refine later
+    // OI needs separate call per symbol — set to 0 until actual fetch
+    const oi = 0;
 
     const cat = KNOWN_CATEGORIES[base] || inferCategory(base);
     if (!KNOWN_CATEGORIES[base]) { KNOWN_CATEGORIES[base] = cat; }
