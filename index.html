@@ -1939,8 +1939,44 @@ KNOWN_CATEGORIES['XYZ100'] = 'index';
 KNOWN_CATEGORIES['ZS'] = 'equity';
 KNOWN_CATEGORIES['TTF'] = 'commodity';
 KNOWN_CATEGORIES['BX'] = 'equity';
+// ── ETF fixes (were defaulting to equity) ──
+KNOWN_CATEGORIES['SOXL'] = 'etf';   // Direxion Daily Semiconductor Bull 3X Shares ETF
+KNOWN_CATEGORIES['SOXS'] = 'etf';   // Direxion Daily Semiconductor Bear 3X Shares ETF
+KNOWN_CATEGORIES['SOXX'] = 'etf';   // iShares Semiconductor ETF
+KNOWN_CATEGORIES['DRAM'] = 'etf';   // Roundhill DRAM ETF
+KNOWN_CATEGORIES['DFEN'] = 'etf';   // Direxion Daily Aerospace & Defense Bull 3X Shares ETF
+KNOWN_CATEGORIES['EWH'] = 'etf';    // iShares MSCI Hong Kong ETF
+KNOWN_CATEGORIES['EWZ'] = 'etf';    // iShares MSCI Brazil ETF
+KNOWN_CATEGORIES['INDA'] = 'etf';   // iShares MSCI India ETF
+KNOWN_CATEGORIES['GDX'] = 'etf';    // VanEck Gold Miners ETF (was commodity)
+// ── Index fixes (were defaulting to equity) ──
+KNOWN_CATEGORIES['NIFTY'] = 'index';  // NSE Nifty 50 Index
+KNOWN_CATEGORIES['NDX100'] = 'index'; // NASDAQ 100 Index
+KNOWN_CATEGORIES['US100'] = 'index';  // US 100 (NASDAQ 100)
+KNOWN_CATEGORIES['US500'] = 'index';  // US 500 (S&P 500)
+KNOWN_CATEGORIES['IBOV'] = 'index';   // Bovespa Index (Brazil)
+// ── Pre-IPO fixes (were defaulting to equity) ──
+KNOWN_CATEGORIES['SPCX'] = 'pre-ipo';      // SpaceX pre-IPO synthetic
+KNOWN_CATEGORIES['SPACEX'] = 'pre-ipo';    // SpaceX (alt ticker)
+KNOWN_CATEGORIES['OPENAI'] = 'pre-ipo';    // OpenAI pre-IPO synthetic
+KNOWN_CATEGORIES['ANTHROPIC'] = 'pre-ipo'; // Anthropic pre-IPO synthetic
+KNOWN_CATEGORIES['MINIMAX'] = 'pre-ipo';   // MiniMax AI pre-IPO synthetic
 KNOWN_NAMES['TTF'] = 'Dutch TTF Natural Gas';
 KNOWN_NAMES['BX'] = 'Blackstone';
+KNOWN_NAMES['SOXL'] = 'Direxion 3x Semiconductor Bull ETF';
+KNOWN_NAMES['SOXS'] = 'Direxion 3x Semiconductor Bear ETF';
+KNOWN_NAMES['SOXX'] = 'iShares Semiconductor ETF';
+KNOWN_NAMES['DRAM'] = 'Roundhill DRAM ETF';
+KNOWN_NAMES['DFEN'] = 'Direxion 3x Aerospace & Defense ETF';
+KNOWN_NAMES['EWH'] = 'iShares MSCI Hong Kong ETF';
+KNOWN_NAMES['EWZ'] = 'iShares MSCI Brazil ETF';
+KNOWN_NAMES['INDA'] = 'iShares MSCI India ETF';
+KNOWN_NAMES['GDX'] = 'VanEck Gold Miners ETF';
+KNOWN_NAMES['SPCX'] = 'SpaceX (Pre-IPO)';
+KNOWN_NAMES['SPACEX'] = 'SpaceX (Pre-IPO)';
+KNOWN_NAMES['OPENAI'] = 'OpenAI (Pre-IPO)';
+KNOWN_NAMES['ANTHROPIC'] = 'Anthropic (Pre-IPO)';
+KNOWN_NAMES['MINIMAX'] = 'MiniMax AI (Pre-IPO)';
 
 // ═══════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════
