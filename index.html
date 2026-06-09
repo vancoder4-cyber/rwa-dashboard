@@ -4330,13 +4330,15 @@ async function fetchReal30DayVolume() {
     const mergeKey = VOLUME_MERGE_GROUPS[key] || key;
     if (!merged[mergeKey]) merged[mergeKey] = { venues: {}, totalVol30d: 0, components: new Set() };
     merged[mergeKey].components.add(key);
-    // Use venue:symbol compound key when merging different symbols to preserve breakdown
-    const vKey = (key !== mergeKey) ? `${venue}:${key}` : venue;
-    if (!merged[mergeKey].venues[vKey]) merged[mergeKey].venues[vKey] = { vol30d: 0, method, origVenue: venue, origSymbol: key };
+    // Always key by venue name — aggregate merged symbols (XAUT, PAXG → XAU) into one venue entry
+    const vKey = venue;
+    if (!merged[mergeKey].venues[vKey]) {
+      merged[mergeKey].venues[vKey] = { vol30d: 0, method, origVenue: venue, origSymbol: key, symbols: new Set() };
+    }
     merged[mergeKey].venues[vKey].vol30d += vol;
-    merged[mergeKey].venues[vKey].method = method;
-    if (!merged[mergeKey].venues[vKey].origVenue) merged[mergeKey].venues[vKey].origVenue = venue;
-    if (!merged[mergeKey].venues[vKey].origSymbol) merged[mergeKey].venues[vKey].origSymbol = key;
+    merged[mergeKey].venues[vKey].symbols.add(key);
+    // Prefer 'real' method over 'est'
+    if (method === 'real') merged[mergeKey].venues[vKey].method = 'real';
   }
 
   // ── Binance: /klines?interval=1d&limit=30 ──
@@ -4562,18 +4564,22 @@ function renderTop30Volume() {
     const compVolMap = {};
     comps.forEach(c => { compVolMap[c] = 0; });
     Object.values(r.venues).forEach(v => {
-      const sym = v.origSymbol || r.coin;
-      compVolMap[sym] = (compVolMap[sym] || 0) + v.vol30d;
+      // Distribute venue volume across its symbols
+      const syms = v.symbols ? [...v.symbols] : [v.origSymbol || r.coin];
+      syms.forEach(sym => {
+        compVolMap[sym] = (compVolMap[sym] || 0) + v.vol30d / syms.length;
+      });
     });
 
-    // Venue breakdown — use origVenue for CSS class, show origSymbol in tooltip
+    // Venue breakdown — one dot per actual venue
     const venueEntries = Object.entries(r.venues)
       .filter(([, v]) => v.vol30d > 0)
       .sort((a, b) => b[1].vol30d - a[1].vol30d);
     const venueDots = venueEntries.map(([vk, v]) => {
       const realVenue = v.origVenue || vk;
       const vName = (VENUES[realVenue] || SPOT_PERP_VENUES[realVenue] || {}).name || realVenue;
-      const symLabel = (v.origSymbol && v.origSymbol !== r.coin) ? ` [${v.origSymbol}]` : '';
+      const syms = v.symbols ? [...v.symbols] : [];
+      const symLabel = syms.length > 0 && syms.some(s => s !== r.coin) ? ` [${syms.join('+')}]` : '';
       const tag = v.method === 'est' ? ' (est)' : '';
       return `<span class="venue-dot ${realVenue}" title="${vName}${symLabel}: $${fmtVolume(v.vol30d)}${tag}" style="cursor:help"></span>`;
     }).join(' ');
