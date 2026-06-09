@@ -1950,7 +1950,8 @@ KNOWN_NAMES['BX'] = 'Blackstone';
 // allData: array of { coin, fullName, category, venue, markPx, indexPx, change, volume, oi, funding }
 let allData = [];
 // Volume growth: venue → { coin: { prevVol, currVol, growth% } }
-let volumeGrowthData = { tradexyz: {}, bitget: {}, gate: {}, binance: {}, lighter: {}, vest: {} };
+let volumeGrowthData = { tradexyz: {}, bitget: {}, gate: {}, binance: {}, lighter: {}, vest: {}, cbintx: {} };
+const VENUES_WITH_GROWTH = new Set(['tradexyz', 'bitget', 'gate']); // Only these venues have volume growth fetchers
 let lastGrowthFetch = 0;
 const GROWTH_FETCH_INTERVAL = 300000; // re-fetch every 5 min
 const REFRESH_INTERVAL = 30000; // auto-refresh every 30s
@@ -2545,7 +2546,7 @@ async function fetchLighter() {
 
     assets.push({
       coin, fullName, category: cat, venue: 'lighter',
-      markPx: lastPrice, indexPx: lastPrice, change: 0, volume,
+      markPx: lastPrice, indexPx: lastPrice, change: null, volume,
       oi: oiBase * lastPrice, funding, predictedFunding: null, isActive,
       makerFee: VENUES.lighter.makerFee, takerFee: VENUES.lighter.takerFee
     });
@@ -3155,7 +3156,8 @@ function renderModalContent() {
   const annPct = annRate !== null ? (annRate * 100).toFixed(2) : 'N/A';
 
   const spreadColor = Math.abs(spreadPct) > 0.05 ? 'var(--red)' : 'var(--text-primary)';
-  const changeColor = d.change >= 0 ? 'var(--green)' : 'var(--red)';
+  const hasChange = d.change !== null && d.change !== undefined;
+  const changeColor = !hasChange ? 'var(--foreground-dim)' : d.change >= 0 ? 'var(--green)' : 'var(--red)';
   const fundingColor = d.funding === null ? 'var(--text-muted)' : d.funding > 0 ? 'var(--green)' : d.funding < 0 ? 'var(--red)' : '#6b9fff';
   const premiumColor = premium > 0 ? 'var(--green)' : premium < 0 ? 'var(--red)' : 'var(--text-muted)';
   const catColor = CAT_COLORS[d.category] || '#6b7280';
@@ -3183,7 +3185,7 @@ function renderModalContent() {
       </div>
       <div class="modal-metric">
         <div class="mm-label">24h Change</div>
-        <div class="mm-value" style="color:${changeColor}">${d.change >= 0 ? '+' : ''}${d.change.toFixed(2)}%</div>
+        <div class="mm-value" style="color:${changeColor}">${hasChange ? (d.change >= 0 ? '+' : '') + d.change.toFixed(2) + '%' : '—'}</div>
       </div>
       <div class="modal-metric">
         <div class="mm-label">24h Volume</div>
@@ -3455,25 +3457,32 @@ function getFilteredData() {
 function computeAlerts() {
   alertsData = [];
 
-  // 1. Extreme funding rates (>50% APR)
+  // 1. Extreme funding rates — interval-aware thresholds
+  // 1h venues (trade.xyz, vest, cbintx): small per-hour rates annualize aggressively, use higher thresholds
+  // 8h venues (binance, bitget, gate): standard thresholds
   allData.forEach(d => {
     if (d.funding === null || d.funding === 0) return;
-    const ann = d.funding * (24 / VENUES[d.venue].fundingInterval) * 365;
+    const interval = VENUES[d.venue].fundingInterval;
+    const ann = d.funding * (24 / interval) * 365;
     const absAnn = Math.abs(ann);
-    if (absAnn > 1.0) { // > 100% APR
+    // Scale thresholds: 1h venues get 3× higher thresholds to account for annualization amplification
+    const scale = interval <= 1 ? 3 : 1;
+    const highThresh = 1.0 * scale;  // 100% for 8h, 300% for 1h
+    const medThresh = 0.5 * scale;   // 50% for 8h, 150% for 1h
+    if (absAnn > highThresh) {
       alertsData.push({
         type: 'extreme_funding', severity: 'high',
         icon: '⚠',
         title: `${d.coin} on ${VENUES[d.venue].name}: ${(ann*100).toFixed(1)}% APR`,
-        detail: `Funding rate ${(d.funding*100).toFixed(4)}% per ${VENUES[d.venue].fundingInterval}h — extremely elevated`,
+        detail: `Funding rate ${(d.funding*100).toFixed(4)}% per ${interval}h — extremely elevated`,
         venue: d.venue, coin: d.coin, data: d
       });
-    } else if (absAnn > 0.5) { // > 50% APR
+    } else if (absAnn > medThresh) {
       alertsData.push({
         type: 'high_funding', severity: 'med',
         icon: '◈',
         title: `${d.coin} on ${VENUES[d.venue].name}: ${(ann*100).toFixed(1)}% APR`,
-        detail: `Funding rate ${(d.funding*100).toFixed(4)}% per ${VENUES[d.venue].fundingInterval}h — elevated`,
+        detail: `Funding rate ${(d.funding*100).toFixed(4)}% per ${interval}h — elevated`,
         venue: d.venue, coin: d.coin, data: d
       });
     }
@@ -3713,7 +3722,8 @@ function renderVenueCards() {
       .map(d => ({coin:d.coin, fullName:d.fullName, ...vgData[d.coin]}))
       .sort((a,b) => b.growth-a.growth).slice(0,3);
 
-    const topGainer = [...vData].sort((a,b) => b.change-a.change)[0];
+    const vDataWithChange = vData.filter(d => d.change !== null && d.change !== undefined);
+    const topGainer = vDataWithChange.length > 0 ? [...vDataWithChange].sort((a,b) => b.change-a.change)[0] : null;
     const topFunding = [...vData].filter(d => d.funding !== null).sort((a,b) => Math.abs(annualize(b.funding,vKey))-Math.abs(annualize(a.funding,vKey)))[0] || vData[0];
     const topOI = [...vData].sort((a,b) => b.oi-a.oi)[0];
 
@@ -3756,7 +3766,9 @@ function renderVenueCards() {
     // Volume growth — compact leaderboard cards
     let volGrowthHTML = '';
     if (volGrowers.length === 0) {
-      volGrowthHTML = '<div style="color:var(--foreground-dim);font-style:italic;font-size:12px;padding:4px 0">Loading volume data...</div>';
+      volGrowthHTML = VENUES_WITH_GROWTH.has(vKey)
+        ? '<div style="color:var(--foreground-dim);font-style:italic;font-size:12px;padding:4px 0">Loading volume data...</div>'
+        : '<div style="color:var(--foreground-dim);font-style:italic;font-size:12px;padding:4px 0">Volume growth data not available for this venue</div>';
     } else {
       volGrowthHTML = '<div style="display:flex;gap:8px">' + volGrowers.map((g, i) => {
         const isUp = g.growth >= 0;
@@ -3788,7 +3800,7 @@ function renderVenueCards() {
         <div class="vc-asset-count">${fmtVolume(totalVol)}</div>
       </div>
       <div class="vc-metrics">
-        <div class="vc-metric"><div class="vm-label">24h Top Gainer</div><div class="vm-asset">${topGainer.coin} <span class="vm-tag" style="background:var(--positive-dim);color:var(--positive)">+${topGainer.change.toFixed(2)}%</span></div><div class="vm-value">${topGainer.fullName}</div></div>
+        <div class="vc-metric"><div class="vm-label">24h Top Gainer</div>${topGainer ? `<div class="vm-asset">${topGainer.coin} <span class="vm-tag" style="background:var(--positive-dim);color:var(--positive)">${topGainer.change >= 0 ? '+' : ''}${topGainer.change.toFixed(2)}%</span></div><div class="vm-value">${topGainer.fullName}</div>` : `<div class="vm-asset"><span style="color:var(--foreground-dim)">N/A</span></div><div class="vm-value">Change data not available</div>`}</div>
         <div class="vc-metric"><div class="vm-label">Highest Funding</div><div class="vm-asset">${topFunding.coin} <span class="vm-tag" style="background:${tfBg};color:${tfColor}">${fmtAnnual(topFunding.funding, vKey)} APR</span></div><div class="vm-value">${topFunding.fullName}</div></div>
         <div class="vc-metric"><div class="vm-label">Largest OI</div><div class="vm-asset">${topOI.coin}</div><div class="vm-value">${fmtVolume(topOI.oi)} notional</div></div>
       </div>
@@ -4715,7 +4727,7 @@ function renderVenueTable(venue) {
       case 'name':    return sortDir * a.coin.localeCompare(b.coin);
       case 'markPx':  va = a.markPx; vb = b.markPx; break;
       case 'indexPx': va = a.indexPx; vb = b.indexPx; break;
-      case 'change':  va = a.change; vb = b.change; break;
+      case 'change':  va = a.change ?? -Infinity; vb = b.change ?? -Infinity; break;
       case 'volume':  va = a.volume; vb = b.volume; break;
       case 'oi':      va = a.oi; vb = b.oi; break;
       case 'depth':   va = a.depth2||0; vb = b.depth2||0; break;
@@ -4752,11 +4764,15 @@ function renderVenueTable(venue) {
   });
 
   data.forEach(d => {
-    const isUp = d.change >= 0;
+    const hasChange = d.change !== null && d.change !== undefined;
+    const isUp = hasChange ? d.change >= 0 : true;
     const catColor = CAT_COLORS[d.category] || '#63656e';
     const annRate = annualize(d.funding, venue);
     const annPct = annRate !== null ? (annRate * 100).toFixed(2) : 'N/A';
     const sparkId = `spark_${venue}_${d.coin}`;
+    const changeHTML = hasChange
+      ? `<span class="change-badge ${isUp?'up':'down'}">${isUp?'+':''}${d.change.toFixed(2)}%</span>`
+      : `<span style="color:var(--foreground-dim)">—</span>`;
 
     const tr = document.createElement('tr');
     tr.style.cursor = 'pointer';
@@ -4765,7 +4781,7 @@ function renderVenueTable(venue) {
       <td><div class="asset-cell"><div class="asset-icon" style="background:${catColor}12;color:${catColor};border:1px solid ${catColor}25">${d.coin.slice(0,2)}</div><div class="asset-info"><div class="asset-name">${d.coin} <span class="asset-tag tag-${d.category}">${d.category.toUpperCase()}</span></div><div class="asset-type">${d.fullName}</div></div></div></td>
       <td class="mono" style="font-weight:600">$${fmtPrice(d.markPx)}</td>
       <td class="mono" style="color:var(--foreground-sec)">$${fmtPrice(d.indexPx)}</td>
-      <td><span class="change-badge ${isUp?'up':'down'}">${isUp?'+':''}${d.change.toFixed(2)}%</span></td>
+      <td>${changeHTML}</td>
       <td class="mono">${fmtVolume(d.volume)}</td>
       <td class="mono">${fmtVolume(d.oi)}</td>
       <td class="mono ${d.depth2 > 100000 ? 'pos' : d.depth2 > 10000 ? '' : 'neg'}">${d.depth2 != null ? '$' + fmtVolume(d.depth2) : '<span style="color:var(--foreground-dim)">—</span>'}</td>
@@ -4829,7 +4845,7 @@ function renderAssetView() {
       case 'name':   return sd * a.coin.localeCompare(b.coin);
       case 'venues': va = Object.keys(a.venues).length; vb = Object.keys(b.venues).length; break;
       case 'price':  va = Math.max(...aVols.map(v=>v.markPx)); vb = Math.max(...bVols.map(v=>v.markPx)); break;
-      case 'change': va = aVols.reduce((s,v)=>s+v.change,0)/aVols.length; vb = bVols.reduce((s,v)=>s+v.change,0)/bVols.length; break;
+      case 'change': { const aC = aVols.filter(v=>v.change!=null), bC = bVols.filter(v=>v.change!=null); va = aC.length ? aC.reduce((s,v)=>s+v.change,0)/aC.length : -Infinity; vb = bC.length ? bC.reduce((s,v)=>s+v.change,0)/bC.length : -Infinity; break; }
       case 'volume': va = aVols.reduce((s,v)=>s+v.volume,0); vb = bVols.reduce((s,v)=>s+v.volume,0); break;
       case 'oi':     va = aVols.reduce((s,v)=>s+v.oi,0); vb = bVols.reduce((s,v)=>s+v.oi,0); break;
       case 'spread':
@@ -4855,8 +4871,10 @@ function renderAssetView() {
     const totVol = Object.values(a.venues).reduce((s,v)=>s+v.volume,0);
     const totOI = Object.values(a.venues).reduce((s,v)=>s+v.oi,0);
     const bestPx = Math.max(...Object.values(a.venues).map(v=>v.markPx));
-    const avgChg = Object.values(a.venues).reduce((s,v)=>s+v.change,0)/vCount;
-    const isUp = avgChg >= 0;
+    const venuesWithChange = Object.values(a.venues).filter(v => v.change !== null && v.change !== undefined);
+    const avgChg = venuesWithChange.length > 0 ? venuesWithChange.reduce((s,v)=>s+v.change,0)/venuesWithChange.length : null;
+    const hasAvgChg = avgChg !== null;
+    const isUp = hasAvgChg ? avgChg >= 0 : true;
     const catColor = CAT_COLORS[a.category];
     let fs = '—', fsc = '';
     if (vCount >= 2) {
@@ -4875,7 +4893,8 @@ function renderAssetView() {
     const tr = document.createElement('tr');
     tr.style.cssText = rowOp + 'cursor:pointer;';
     tr.onclick = () => { expandedAsset = expandedAsset===a.coin?null:a.coin; renderAssetView(); };
-    tr.innerHTML = `<td><div class="asset-cell"><div class="asset-icon" style="background:${catColor}12;color:${catColor};border:1px solid ${catColor}25">${a.coin.slice(0,2)}</div><div class="asset-info"><div class="asset-name">${a.coin} <span class="asset-tag tag-${a.category}">${a.category.toUpperCase()}</span>${inactiveTag}</div><div class="asset-type">${a.fullName}</div></div></div></td><td>${dots} <span style="font-size:12px;color:var(--foreground-sec)">${vCount}</span></td><td class="mono" style="font-weight:600">$${fmtPrice(bestPx)}</td><td><span class="change-badge ${isUp?'up':'down'}">${isUp?'+':''}${avgChg.toFixed(2)}%</span></td><td class="mono">${fmtVolume(totVol)}</td><td class="mono">${fmtVolume(totOI)}</td><td class="mono" ${fsc}>${fs}</td>`;
+    const chgHTML = hasAvgChg ? `<span class="change-badge ${isUp?'up':'down'}">${isUp?'+':''}${avgChg.toFixed(2)}%</span>` : `<span style="color:var(--foreground-dim)">—</span>`;
+    tr.innerHTML = `<td><div class="asset-cell"><div class="asset-icon" style="background:${catColor}12;color:${catColor};border:1px solid ${catColor}25">${a.coin.slice(0,2)}</div><div class="asset-info"><div class="asset-name">${a.coin} <span class="asset-tag tag-${a.category}">${a.category.toUpperCase()}</span>${inactiveTag}</div><div class="asset-type">${a.fullName}</div></div></div></td><td>${dots} <span style="font-size:12px;color:var(--foreground-sec)">${vCount}</span></td><td class="mono" style="font-weight:600">$${fmtPrice(bestPx)}</td><td>${chgHTML}</td><td class="mono">${fmtVolume(totVol)}</td><td class="mono">${fmtVolume(totOI)}</td><td class="mono" ${fsc}>${fs}</td>`;
     tbody.appendChild(tr);
 
     if (expandedAsset === a.coin) {
@@ -4885,7 +4904,9 @@ function renderAssetView() {
         const fAnnLabel = fAnn === 'N/A' ? 'N/A' : fAnn + ' APR';
         const sub = document.createElement('tr');
         sub.className = 'venue-subrow';
-        sub.innerHTML = `<td style="padding-left:56px"><span class="venue-badge-sm ${vk}">${VENUES[vk].name}</span> <span style="font-size:11px;color:var(--foreground-dim);margin-left:6px">${VENUES[vk].fundingInterval}h funding</span> <span style="font-size:10px;color:var(--info);margin-left:8px;cursor:pointer" title="Click for detail">⊕ Detail</span></td><td></td><td class="mono" style="font-weight:600">$${fmtPrice(d.markPx)}</td><td><span class="change-badge ${d.change>=0?'up':'down'}">${d.change>=0?'+':''}${d.change.toFixed(2)}%</span></td><td class="mono">${fmtVolume(d.volume)}</td><td class="mono">${fmtVolume(d.oi)}</td><td><span class="funding-badge ${fundingClass(d.funding, vk)}">${fmtFunding(d.funding)}</span> <span style="font-size:10px;color:var(--foreground-dim)">${fAnnLabel}</span></td>`;
+        const subHasChg = d.change !== null && d.change !== undefined;
+        const subChgHTML = subHasChg ? `<span class="change-badge ${d.change>=0?'up':'down'}">${d.change>=0?'+':''}${d.change.toFixed(2)}%</span>` : `<span style="color:var(--foreground-dim)">—</span>`;
+        sub.innerHTML = `<td style="padding-left:56px"><span class="venue-badge-sm ${vk}">${VENUES[vk].name}</span> <span style="font-size:11px;color:var(--foreground-dim);margin-left:6px">${VENUES[vk].fundingInterval}h funding</span> <span style="font-size:10px;color:var(--info);margin-left:8px;cursor:pointer" title="Click for detail">⊕ Detail</span></td><td></td><td class="mono" style="font-weight:600">$${fmtPrice(d.markPx)}</td><td>${subChgHTML}</td><td class="mono">${fmtVolume(d.volume)}</td><td class="mono">${fmtVolume(d.oi)}</td><td><span class="funding-badge ${fundingClass(d.funding, vk)}">${fmtFunding(d.funding)}</span> <span style="font-size:10px;color:var(--foreground-dim)">${fAnnLabel}</span></td>`;
         sub.onclick = (e) => { e.stopPropagation(); openAssetModal(vk, d); };
         tbody.appendChild(sub);
       });
