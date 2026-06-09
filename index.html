@@ -149,7 +149,89 @@ body {
 .logo-divider { width: 1px; height: 20px; background: var(--border); }
 .logo-label { font-size: 12px; font-weight: 500; color: var(--foreground-sec); letter-spacing: 0.5px; }
 
-.header-right { display: flex; align-items: center; gap: 16px; }
+.header-right { display: flex; align-items: center; gap: 12px; }
+
+/* ── Global Search ── */
+.global-search {
+  position: relative; display: flex; align-items: center;
+}
+.global-search input {
+  width: 200px; padding: 6px 12px 6px 30px; border-radius: 8px;
+  border: 1px solid var(--border); background: rgba(255,255,255,0.6);
+  font-size: 12px; font-family: Inter, sans-serif; color: var(--foreground);
+  outline: none; transition: all .2s;
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+.global-search input:focus {
+  width: 280px; border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring);
+  background: rgba(255,255,255,0.85);
+}
+.global-search input::placeholder { color: var(--foreground-dim); font-size: 11px; }
+.global-search .search-icon {
+  position: absolute; left: 9px; top: 50%; transform: translateY(-50%);
+  color: var(--foreground-dim); pointer-events: none; font-size: 13px;
+}
+.global-search .search-clear {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; cursor: pointer; font-size: 14px;
+  color: var(--foreground-dim); display: none; padding: 0 4px; line-height: 1;
+}
+.global-search .search-clear.visible { display: block; }
+
+/* ── Alert Badge ── */
+.alert-badge {
+  position: relative; display: flex; align-items: center; gap: 6px;
+  padding: 5px 12px 5px 10px; border-radius: 9999px; cursor: pointer;
+  font-size: 11px; font-weight: 600; letter-spacing: .02em; transition: all .15s;
+}
+.alert-badge.has-alerts {
+  background: rgba(255,149,0,0.10); border: 1px solid rgba(255,149,0,0.25);
+  color: var(--orange);
+}
+.alert-badge.no-alerts {
+  background: rgba(52,199,89,0.08); border: 1px solid rgba(52,199,89,0.18);
+  color: var(--foreground-dim);
+}
+.alert-badge:hover { transform: translateY(-1px); }
+.alert-badge .alert-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 16px; height: 16px; border-radius: 8px; font-size: 10px;
+  font-weight: 700; background: var(--orange); color: #fff; padding: 0 4px;
+}
+
+/* ── Alert Panel ── */
+.alert-panel {
+  display: none; position: absolute; top: 54px; right: 28px;
+  width: 420px; max-height: 400px; overflow-y: auto;
+  background: rgba(255,255,255,0.92); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(24px) saturate(1.8); -webkit-backdrop-filter: blur(24px) saturate(1.8);
+  z-index: 200; padding: 0;
+}
+.alert-panel.open { display: block; }
+.alert-panel-header {
+  padding: 14px 16px 10px; border-bottom: 1px solid var(--border);
+  font-size: 13px; font-weight: 700; color: var(--foreground);
+  display: flex; justify-content: space-between; align-items: center;
+}
+.alert-panel-close {
+  background: none; border: none; cursor: pointer; font-size: 16px;
+  color: var(--foreground-dim); padding: 0 4px;
+}
+.alert-item {
+  padding: 10px 16px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: flex-start; gap: 10px; font-size: 12px;
+  cursor: pointer; transition: background .15s;
+}
+.alert-item:hover { background: rgba(0,122,255,0.04); }
+.alert-item:last-child { border-bottom: none; }
+.alert-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+.alert-text { flex: 1; }
+.alert-title { font-weight: 600; color: var(--foreground); margin-bottom: 2px; }
+.alert-detail { color: var(--foreground-dim); font-size: 11px; }
+.alert-severity-high { border-left: 3px solid var(--negative); }
+.alert-severity-med { border-left: 3px solid var(--orange); }
+.alert-severity-low { border-left: 3px solid var(--info); }
 .status-pill {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 5px 14px 5px 10px; border-radius: 9999px;
@@ -1002,11 +1084,27 @@ input[type="checkbox"] {
     <span class="logo-label">RWA Perps Analytics</span>
   </div>
   <div class="header-right">
+    <div class="global-search">
+      <span class="search-icon">⌕</span>
+      <input type="text" id="globalSearchInput" placeholder="Search assets (⌘K)" oninput="handleGlobalSearch(this.value)" />
+      <button class="search-clear" id="globalSearchClear" onclick="clearGlobalSearch()">×</button>
+    </div>
+    <div class="alert-badge no-alerts" id="alertBadge" onclick="toggleAlertPanel()">
+      <span>⚑</span>
+      <span id="alertBadgeText">No alerts</span>
+    </div>
     <div class="status-pill">
       <div class="live-dot"></div>
       <span id="statusText">Connecting...</span>
     </div>
   </div>
+</div>
+<div class="alert-panel" id="alertPanel">
+  <div class="alert-panel-header">
+    <span>Alerts & Anomalies</span>
+    <button class="alert-panel-close" onclick="toggleAlertPanel()">×</button>
+  </div>
+  <div id="alertPanelBody"></div>
 </div>
 
 <!-- ★★★ TOP-LEVEL PAGE TABS ★★★ -->
@@ -1862,6 +1960,8 @@ let assetCatFilter = 'all';
 let assetSearch = '';
 let expandedAsset = null;
 let refreshTimer = null;
+let globalSearchTerm = '';
+let alertsData = [];
 
 // Per-venue table state
 let venueTableCatFilter = { tradexyz: 'all', bitget: 'all', gate: 'all', binance: 'all', lighter: 'all', vest: 'all', cbintx: 'all' };
@@ -2094,26 +2194,21 @@ async function fetchBitget() {
     if (funding === null) needFunding.push({ symbol, idx });
   }
 
-  // Fetch individual funding rates + predicted rates for all assets
+  // Fetch individual funding rates for ALL assets (bulk ticker often returns 0 as placeholder)
   {
-    const fetchTargets = needFunding.length > 0 ? needFunding : assets.map((a, idx) => ({ symbol: a.symbol, idx }));
+    const fetchTargets = assets.map((a, idx) => ({ symbol: a.symbol, idx }));
     logLoad(`Bitget: fetching funding details for ${fetchTargets.length} assets...`);
     const tasks = fetchTargets.map(({ symbol, idx }) => async () => {
       try {
         const data = await apiGet(`/api/v2/mix/market/current-fund-rate?symbol=${symbol}&productType=${PRODUCT_TYPE}`);
-        if (data) {
-          if (assets[idx].funding === null && data.fundingRate !== undefined && data.fundingRate !== null && data.fundingRate !== '') {
-            const r = parseFloat(data.fundingRate);
-            if (!isNaN(r)) assets[idx].funding = r;
-          }
-          // Bitget doesn't provide a predicted rate directly, but we can store the current as reference
-          // The fundingRate from current-fund-rate is the upcoming settlement rate
-          if (data.fundingRate !== undefined) {
-            const pr = parseFloat(data.fundingRate);
-            if (!isNaN(pr)) assets[idx].predictedFunding = pr;
+        if (data && data.fundingRate !== undefined && data.fundingRate !== null && data.fundingRate !== '') {
+          const r = parseFloat(data.fundingRate);
+          if (!isNaN(r)) {
+            assets[idx].funding = r; // always prefer individual endpoint over bulk ticker
+            assets[idx].predictedFunding = r; // current-fund-rate returns upcoming settlement rate
           }
         }
-      } catch (e) { /* funding stays null = no data */ }
+      } catch (e) { /* funding stays as-is from ticker */ }
     });
     await batchFetch(tasks, 5);
   }
@@ -3299,6 +3394,7 @@ async function refresh(isFirst) {
       document.getElementById('loadingOverlay').style.display = 'none';
     }
 
+    computeAlerts();
     renderCurrentView();
   } catch (e) {
     console.error('Refresh error:', e);
@@ -3307,6 +3403,179 @@ async function refresh(isFirst) {
     document.getElementById('loadingOverlay').style.display = 'none';
   }
 }
+
+// ═══════════════════════════════════════════════
+// GLOBAL SEARCH
+// ═══════════════════════════════════════════════
+
+function handleGlobalSearch(value) {
+  globalSearchTerm = (value || '').toLowerCase().trim();
+  const clearBtn = document.getElementById('globalSearchClear');
+  if (clearBtn) clearBtn.classList.toggle('visible', globalSearchTerm.length > 0);
+  renderCurrentView();
+}
+function clearGlobalSearch() {
+  globalSearchTerm = '';
+  const input = document.getElementById('globalSearchInput');
+  if (input) input.value = '';
+  const clearBtn = document.getElementById('globalSearchClear');
+  if (clearBtn) clearBtn.classList.remove('visible');
+  renderCurrentView();
+}
+// Keyboard shortcut: Cmd/Ctrl+K → focus search
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    e.preventDefault();
+    const input = document.getElementById('globalSearchInput');
+    if (input) input.focus();
+  }
+  if (e.key === 'Escape') {
+    const input = document.getElementById('globalSearchInput');
+    if (input && document.activeElement === input) { clearGlobalSearch(); input.blur(); }
+    const panel = document.getElementById('alertPanel');
+    if (panel && panel.classList.contains('open')) toggleAlertPanel();
+  }
+});
+
+// Apply global search filter to allData
+function getFilteredData() {
+  if (!globalSearchTerm) return allData;
+  return allData.filter(d =>
+    d.coin.toLowerCase().includes(globalSearchTerm) ||
+    d.fullName.toLowerCase().includes(globalSearchTerm) ||
+    d.venue.toLowerCase().includes(globalSearchTerm) ||
+    (d.category && d.category.toLowerCase().includes(globalSearchTerm))
+  );
+}
+
+// ═══════════════════════════════════════════════
+// ALERT SYSTEM
+// ═══════════════════════════════════════════════
+
+function computeAlerts() {
+  alertsData = [];
+
+  // 1. Extreme funding rates (>50% APR)
+  allData.forEach(d => {
+    if (d.funding === null || d.funding === 0) return;
+    const ann = d.funding * (24 / VENUES[d.venue].fundingInterval) * 365;
+    const absAnn = Math.abs(ann);
+    if (absAnn > 1.0) { // > 100% APR
+      alertsData.push({
+        type: 'extreme_funding', severity: 'high',
+        icon: '⚠',
+        title: `${d.coin} on ${VENUES[d.venue].name}: ${(ann*100).toFixed(1)}% APR`,
+        detail: `Funding rate ${(d.funding*100).toFixed(4)}% per ${VENUES[d.venue].fundingInterval}h — extremely elevated`,
+        venue: d.venue, coin: d.coin, data: d
+      });
+    } else if (absAnn > 0.5) { // > 50% APR
+      alertsData.push({
+        type: 'high_funding', severity: 'med',
+        icon: '◈',
+        title: `${d.coin} on ${VENUES[d.venue].name}: ${(ann*100).toFixed(1)}% APR`,
+        detail: `Funding rate ${(d.funding*100).toFixed(4)}% per ${VENUES[d.venue].fundingInterval}h — elevated`,
+        venue: d.venue, coin: d.coin, data: d
+      });
+    }
+  });
+
+  // 2. Cross-venue funding spread opportunities (>30% APR spread)
+  const grouped = {};
+  allData.forEach(d => {
+    if (!grouped[d.coin]) grouped[d.coin] = [];
+    if (d.funding !== null) grouped[d.coin].push(d);
+  });
+  Object.entries(grouped).forEach(([coin, venues]) => {
+    if (venues.length < 2) return;
+    const annRates = venues.map(d => ({
+      venue: d.venue, ann: d.funding * (24 / VENUES[d.venue].fundingInterval) * 365
+    }));
+    const maxR = annRates.reduce((a, b) => a.ann > b.ann ? a : b);
+    const minR = annRates.reduce((a, b) => a.ann < b.ann ? a : b);
+    const spread = maxR.ann - minR.ann;
+    if (Math.abs(spread) > 0.3) { // > 30% APR spread
+      alertsData.push({
+        type: 'funding_spread', severity: spread > 0.8 ? 'high' : 'med',
+        icon: '⇄',
+        title: `${coin}: ${(spread*100).toFixed(1)}% APR spread`,
+        detail: `${VENUES[maxR.venue].name} (${(maxR.ann*100).toFixed(1)}%) vs ${VENUES[minR.venue].name} (${(minR.ann*100).toFixed(1)}%) — arb opportunity`,
+        coin
+      });
+    }
+  });
+
+  // 3. Mark-Index divergence > 1%
+  allData.forEach(d => {
+    if (d.indexPx <= 0 || d.markPx <= 0) return;
+    const div = Math.abs((d.markPx - d.indexPx) / d.indexPx);
+    if (div > 0.01) { // > 1% mark-index divergence
+      alertsData.push({
+        type: 'price_divergence', severity: div > 0.03 ? 'high' : 'low',
+        icon: '◇',
+        title: `${d.coin} on ${VENUES[d.venue].name}: ${(div*100).toFixed(2)}% mark-index gap`,
+        detail: `Mark $${fmtPrice(d.markPx)} vs Index $${fmtPrice(d.indexPx)}`,
+        venue: d.venue, coin: d.coin, data: d
+      });
+    }
+  });
+
+  // Sort: high severity first, then medium, then low
+  const sevOrder = { high: 0, med: 1, low: 2 };
+  alertsData.sort((a, b) => (sevOrder[a.severity] || 2) - (sevOrder[b.severity] || 2));
+
+  updateAlertBadge();
+}
+
+function updateAlertBadge() {
+  const badge = document.getElementById('alertBadge');
+  const badgeText = document.getElementById('alertBadgeText');
+  if (!badge || !badgeText) return;
+
+  const highCount = alertsData.filter(a => a.severity === 'high').length;
+  const total = alertsData.length;
+
+  if (total > 0) {
+    badge.className = 'alert-badge has-alerts';
+    badgeText.innerHTML = `<span class="alert-count">${total}</span> alert${total > 1 ? 's' : ''}`;
+  } else {
+    badge.className = 'alert-badge no-alerts';
+    badgeText.textContent = 'No alerts';
+  }
+}
+
+function toggleAlertPanel() {
+  const panel = document.getElementById('alertPanel');
+  if (!panel) return;
+  panel.classList.toggle('open');
+  if (panel.classList.contains('open')) renderAlertPanel();
+}
+
+function renderAlertPanel() {
+  const body = document.getElementById('alertPanelBody');
+  if (!body) return;
+  if (alertsData.length === 0) {
+    body.innerHTML = '<div style="padding:24px;text-align:center;color:var(--foreground-dim);font-size:12px">All data within normal ranges</div>';
+    return;
+  }
+  body.innerHTML = alertsData.map(a => `
+    <div class="alert-item alert-severity-${a.severity}" onclick="${a.data ? `openAssetModal('${a.venue}', allData.find(d=>d.venue==='${a.venue}'&&d.coin==='${a.coin}'))` : ''}">
+      <span class="alert-icon">${a.icon}</span>
+      <div class="alert-text">
+        <div class="alert-title">${a.title}</div>
+        <div class="alert-detail">${a.detail}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+// Close alert panel when clicking outside
+document.addEventListener('click', e => {
+  const panel = document.getElementById('alertPanel');
+  const badge = document.getElementById('alertBadge');
+  if (panel && panel.classList.contains('open') && !panel.contains(e.target) && !badge.contains(e.target)) {
+    panel.classList.remove('open');
+  }
+});
 
 function renderCurrentView() {
   if (currentView === 'allvenues') {
@@ -3352,12 +3621,50 @@ function switchSubTab(sub, tabEl) {
 
 function renderOverview() { renderKPIs(); renderVenueCards(); renderCoverage(); renderDivergence(); renderRevenue(); renderTop30Volume(); }
 
+// ═══════════════════════════════════════════════
+// KPI TREND SNAPSHOTS (localStorage)
+// ═══════════════════════════════════════════════
+
+function saveKpiSnapshot(vol, oi) {
+  try {
+    const key = 'rwa_kpi_snapshots';
+    const snapshots = JSON.parse(localStorage.getItem(key) || '[]');
+    const now = Date.now();
+    // Only save if >5 min since last snapshot
+    if (snapshots.length > 0 && now - snapshots[snapshots.length - 1].t < 300000) return;
+    snapshots.push({ t: now, vol, oi });
+    // Keep last 48 snapshots (~4 hours at 5min intervals, or ~24h at 30min)
+    while (snapshots.length > 48) snapshots.shift();
+    localStorage.setItem(key, JSON.stringify(snapshots));
+  } catch (e) { /* localStorage may be full or unavailable */ }
+}
+
+function renderKpiSparkline(metric) {
+  try {
+    const snapshots = JSON.parse(localStorage.getItem('rwa_kpi_snapshots') || '[]');
+    if (snapshots.length < 3) return ''; // need at least 3 points
+    const vals = snapshots.map(s => metric === 'vol' ? s.vol : s.oi);
+    const min = Math.min(...vals);
+    const max = Math.max(...vals);
+    const range = max - min || 1;
+    const w = 120, h = 24, pad = 2;
+    const points = vals.map((v, i) => {
+      const x = pad + (i / (vals.length - 1)) * (w - pad * 2);
+      const y = h - pad - ((v - min) / range) * (h - pad * 2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    const color = vals[vals.length - 1] >= vals[0] ? 'var(--positive)' : 'var(--negative)';
+    return `<svg width="${w}" height="${h}" style="margin-top:6px;display:block"><polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  } catch (e) { return ''; }
+}
+
 function renderKPIs() {
   const strip = document.getElementById('kpiStrip');
-  const uniqueCoins = new Set(allData.map(d => d.coin));
-  const totalVolume = allData.reduce((s,d) => s+d.volume, 0);
-  const totalOI = allData.reduce((s,d) => s+d.oi, 0);
-  const venueCount = new Set(allData.map(d => d.venue)).size;
+  const data = getFilteredData();
+  const uniqueCoins = new Set(data.map(d => d.coin));
+  const totalVolume = data.reduce((s,d) => s+d.volume, 0);
+  const totalOI = data.reduce((s,d) => s+d.oi, 0);
+  const venueCount = new Set(data.map(d => d.venue)).size;
   const posRates = [], negRates = [];
   allData.forEach(d => {
     const ann = annualize(d.funding, d.venue);
@@ -3368,12 +3675,24 @@ function renderKPIs() {
   const avgPos = posRates.length > 0 ? posRates.reduce((a,b)=>a+b,0)/posRates.length : 0;
   const avgNeg = negRates.length > 0 ? negRates.reduce((a,b)=>a+b,0)/negRates.length : 0;
 
+  // Save snapshot for trend tracking
+  saveKpiSnapshot(totalVolume, totalOI);
+  const volSpark = renderKpiSparkline('vol');
+  const oiSpark = renderKpiSparkline('oi');
+
+  // Alert count for KPI
+  const alertCount = alertsData.length;
+  const highAlerts = alertsData.filter(a => a.severity === 'high').length;
+  const alertKpi = alertCount > 0
+    ? `<div class="kpi-card" style="cursor:pointer" onclick="toggleAlertPanel()"><div class="kpi-icon" style="color:${highAlerts > 0 ? 'var(--negative)' : 'var(--orange)'}">⚑</div><div class="kpi-label">Active Alerts</div><div class="kpi-value" style="color:${highAlerts > 0 ? 'var(--negative)' : 'var(--orange)'}">${alertCount}</div><div class="kpi-sub">${highAlerts} critical · ${alertCount - highAlerts} warnings</div></div>`
+    : `<div class="kpi-card"><div class="kpi-icon" style="color:var(--positive)">✓</div><div class="kpi-label">Data Health</div><div class="kpi-value" style="color:var(--positive);font-size:16px">All Normal</div><div class="kpi-sub">no anomalies detected</div></div>`;
+
   strip.innerHTML = `
     <div class="kpi-card"><div class="kpi-icon">◎</div><div class="kpi-label">Total RWA Assets</div><div class="kpi-value">${uniqueCoins.size}</div><div class="kpi-sub">across ${venueCount} venues · ${allData.length} listings</div></div>
-    <div class="kpi-card"><div class="kpi-icon">$</div><div class="kpi-label">Total 24h Volume</div><div class="kpi-value">${fmtVolume(totalVolume)}</div><div class="kpi-sub">all venues combined</div></div>
-    <div class="kpi-card"><div class="kpi-icon">⊡</div><div class="kpi-label">Total Open Interest</div><div class="kpi-value">${fmtVolume(totalOI)}</div><div class="kpi-sub">notional across all venues</div></div>
+    <div class="kpi-card"><div class="kpi-icon">$</div><div class="kpi-label">Total 24h Volume</div><div class="kpi-value">${fmtVolume(totalVolume)}</div><div class="kpi-sub">all venues combined</div>${volSpark}</div>
+    <div class="kpi-card"><div class="kpi-icon">⊡</div><div class="kpi-label">Total Open Interest</div><div class="kpi-value">${fmtVolume(totalOI)}</div><div class="kpi-sub">notional across all venues</div>${oiSpark}</div>
     <div class="kpi-card"><div class="kpi-icon">↑</div><div class="kpi-label">Avg Positive Funding</div><div class="kpi-value" style="color:var(--positive)">+${(avgPos*100).toFixed(2)}%</div><div class="kpi-sub">annualized · ${posRates.length} assets</div></div>
-    <div class="kpi-card"><div class="kpi-icon">↓</div><div class="kpi-label">Avg Negative Funding</div><div class="kpi-value" style="color:var(--negative)">${(avgNeg*100).toFixed(2)}%</div><div class="kpi-sub">annualized · ${negRates.length} assets</div></div>
+    ${alertKpi}
   `;
 }
 
@@ -3381,7 +3700,7 @@ function renderVenueCards() {
   const grid = document.getElementById('venueCardsGrid');
   grid.innerHTML = '';
   Object.entries(VENUES).forEach(([vKey, vInfo]) => {
-    const vData = allData.filter(d => d.venue === vKey);
+    const vData = getFilteredData().filter(d => d.venue === vKey);
     if (vData.length === 0) return;
     const totalVol = vData.reduce((s,d) => s+d.volume, 0);
     const catCounts = {};
@@ -3484,7 +3803,7 @@ function renderVenueCards() {
 function renderCoverage() {
   const section = document.getElementById('coverageSection');
   const grouped = {};
-  allData.forEach(d => { if (!grouped[d.coin]) grouped[d.coin]={coin:d.coin,venues:new Set()}; grouped[d.coin].venues.add(d.venue); });
+  getFilteredData().forEach(d => { if (!grouped[d.coin]) grouped[d.coin]={coin:d.coin,venues:new Set()}; grouped[d.coin].venues.add(d.venue); });
   const allCoins = Object.values(grouped);
 
   // Find max venue count dynamically, show top 3 tiers: N, N-1, N-2
@@ -3534,7 +3853,7 @@ function renderDivergence() {
 
   // Group all funding rates by asset, collecting every venue's annualized rate
   const grouped = {};
-  allData.forEach(d => {
+  getFilteredData().forEach(d => {
     if (d.funding === null) return;
     const ann = annualize(d.funding, d.venue);
     if (ann === null) return;
@@ -3877,17 +4196,27 @@ function renderRevenue() {
   }).join('');
 
   // ── Annual projection per venue + total (会计式 ledger) ──
+  // Liquidation estimate: based on OI × daily turnover ratio × liquidation fee rate
+  // Industry avg: ~0.3-0.5% of OI liquidated daily in volatile RWA markets, liq fee ~0.5%
   let projRows = '';
   let totalAnnBase = 0;
   let totalAnnEst = 0;
+  let totalAnnLiq = 0;
   Object.entries(VENUES).forEach(([vKey, vInfo]) => {
     const vr = venueRevenue[vKey];
     if (!vr || vr.daily === 0) return;
     const annBase = vr.daily * 365;
     const annEst = annBase * 1.10; // +10% growth
-    const estLiq = annBase * 0.02; // +2% liquidation
+
+    // OI-based liquidation estimate: (totalOI × 0.35% daily liq rate × liq fee 0.5%) × 365
+    const vOI = allData.filter(d => d.venue === vKey).reduce((s,d) => s+d.oi, 0);
+    const dailyLiqVol = vOI * 0.0035; // ~0.35% of OI liquidated daily
+    const liqFee = vKey === 'binance' ? 0.015 : vKey === 'bitget' ? 0.014 : 0.0075; // venue liq fee rates
+    const estLiq = dailyLiqVol * liqFee * 365;
+
     totalAnnBase += annBase;
-    totalAnnEst += annEst + estLiq;
+    totalAnnEst += annEst;
+    totalAnnLiq += estLiq;
     projRows += `
       <div style="margin-bottom:12px">
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:12px;font-weight:600;color:${vInfo.color}"><span class="venue-dot ${vKey}"></span>${vInfo.name}</div>
@@ -3900,7 +4229,7 @@ function renderRevenue() {
           <span class="rev-row-value" style="color:var(--foreground-sec)">$${fmtRevenue(annEst - annBase)}</span>
         </div>
         <div class="rev-row est">
-          <span class="rev-row-label">+ Liquidation Est. (~2%)</span>
+          <span class="rev-row-label">+ Liquidation Rev. (OI $${fmtVolume(vOI)} × 0.35%/d × ${(liqFee*100).toFixed(1)}%)</span>
           <span class="rev-row-value" style="color:var(--foreground-sec)">$${fmtRevenue(estLiq)}</span>
         </div>
       </div>`;
@@ -3948,9 +4277,13 @@ function renderRevenue() {
           <span style="color:var(--foreground-sec)">Total Base (Real Data Only)</span>
           <span style="color:var(--foreground);font-family:'JetBrains Mono',monospace">$${fmtRevenue(totalAnnBase)}</span>
         </div>
+        <div class="rev-total" style="background:var(--info-dim);margin-top:4px">
+          <span style="color:var(--info)">+ Liquidation Revenue (all venues)</span>
+          <span style="color:var(--info);font-family:'JetBrains Mono',monospace">$${fmtRevenue(totalAnnLiq)}</span>
+        </div>
         <div class="rev-total" style="background:var(--positive-dim);margin-top:4px">
           <span style="color:var(--positive)">Total With Estimates</span>
-          <span style="color:var(--positive);font-family:'JetBrains Mono',monospace">$${fmtRevenue(totalAnnEst)}</span>
+          <span style="color:var(--positive);font-family:'JetBrains Mono',monospace">$${fmtRevenue(totalAnnEst + totalAnnLiq)}</span>
         </div>
       </div>
     </div>
@@ -4353,7 +4686,7 @@ function renderVenueTable(venue) {
   const search = venueTableSearch[venue] || '';
   const hideInactive = document.getElementById(hideId)?.checked ?? true;
 
-  const allVenueData = allData.filter(d => d.venue === venue);
+  const allVenueData = getFilteredData().filter(d => d.venue === venue);
   const catCounts = { all: allVenueData.length, equity: 0, commodity: 0, index: 0, etf: 0, fx: 0 };
   allVenueData.forEach(d => { if (catCounts[d.category] !== undefined) catCounts[d.category]++; });
   Object.entries(catCounts).forEach(([cat, count]) => {
@@ -4460,7 +4793,7 @@ function renderAssetView() {
   const tbody = document.getElementById('assetTableBody');
   tbody.innerHTML = '';
   const grouped = {};
-  allData.forEach(d => {
+  getFilteredData().forEach(d => {
     if (!grouped[d.coin]) grouped[d.coin] = {coin:d.coin, fullName:d.fullName, category:d.category, venues:{}};
     grouped[d.coin].venues[d.venue] = d;
   });
@@ -4571,13 +4904,14 @@ function setHeatmapSort(venue, el) {
 function renderHeatmap() {
   const grid = document.getElementById('heatmapGrid');
   grid.innerHTML = '';
-  const venueKeys = Object.keys(VENUES).filter(v => allData.some(d => d.venue === v));
+  const fData = getFilteredData();
+  const venueKeys = Object.keys(VENUES).filter(v => fData.some(d => d.venue === v));
   grid.style.gridTemplateColumns = `180px repeat(${venueKeys.length}, 1fr)`;
   grid.innerHTML += `<div class="hm-header" style="visibility:hidden"></div>`;
   venueKeys.forEach(v => { grid.innerHTML += `<div class="hm-header"><span class="venue-dot ${v}"></span> ${VENUES[v].name}</div>`; });
 
   const grouped = {};
-  allData.forEach(d => {
+  fData.forEach(d => {
     if (!grouped[d.coin]) grouped[d.coin] = {coin:d.coin, fullName:d.fullName, category:d.category, venues:{}};
     grouped[d.coin].venues[d.venue] = d;
   });
