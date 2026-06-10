@@ -4387,6 +4387,8 @@ async function fetchReal30DayVolume() {
   // Only affects Top-30 volume table; does NOT touch arbitrage / reference pricing.
   const VOLUME_MERGE_GROUPS = {
     XAUT: 'XAU', PAXG: 'XAU', XAUM: 'XAU', KAU: 'XAU', PGOLD: 'XAU', GGBR: 'XAU',
+    SILVER: 'XAG',          // Silver token → XAG
+    BZ: 'BRENTOIL',         // Brent Crude (Binance/Bitget ticker) → BRENTOIL
   };
 
   // result: { COIN: { venues: { venueName: { vol30d, method } }, totalVol30d, components: Set } }
@@ -4584,6 +4586,8 @@ function renderTop30Volume() {
   // Re-read VOLUME_MERGE_GROUPS for OI/funding aggregation
   const VMG = {
     XAUT: 'XAU', PAXG: 'XAU', XAUM: 'XAU', KAU: 'XAU', PGOLD: 'XAU', GGBR: 'XAU',
+    SILVER: 'XAG',
+    BZ: 'BRENTOIL',
   };
 
   // Build name lookup from allData (also aggregate by merge group)
@@ -5108,6 +5112,8 @@ const YAHOO_SYMBOL_MAP = {
 const REFERENCE_SYMBOL_ALIASES = {
   // Gold tokenized → XAU
   XAUT: 'XAU', PAXG: 'XAU', XAUM: 'XAU', KAU: 'XAU', PGOLD: 'XAU', GGBR: 'XAU',
+  // Silver / Brent aliases
+  SILVER: 'XAG', BZ: 'BRENTOIL',
   // Backed Finance (X suffix) → underlying
   AAPLX: 'AAPL', TSLAX: 'TSLA', NVDAX: 'NVDA', GOOGLX: 'GOOGL', AMZNX: 'AMZN',
   METAX: 'META', MSFTX: 'MSFT', MSTRX: 'MSTR', MSTRx: 'MSTR', COINX: 'COIN', SPYx: 'SPY',
