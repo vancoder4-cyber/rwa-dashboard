@@ -1742,7 +1742,7 @@ const RWA_ASSETS = {
   SKHYNIX: { name: "SK Hynix", category: "equity" },
   SOFTBANK: { name: "SoftBank Group", category: "equity" },
   KIOXIA: { name: "Kioxia", category: "equity" },
-  SKHX: { name: "Skechers", category: "equity" },
+  SKHX: { name: "SK Hynix", category: "equity" },
   LITE: { name: "Lumentum", category: "equity" },
   CRWV: { name: "CoreWeave", category: "equity" },
   QQQ: { name: "Invesco QQQ Trust", category: "etf" },
@@ -4389,6 +4389,7 @@ async function fetchReal30DayVolume() {
     XAUT: 'XAU', PAXG: 'XAU', XAUM: 'XAU', KAU: 'XAU', PGOLD: 'XAU', GGBR: 'XAU',
     SILVER: 'XAG',          // Silver token → XAG
     BZ: 'BRENTOIL',         // Brent Crude (Binance/Bitget ticker) → BRENTOIL
+    SKHX: 'SKHYNIX',       // SKHX is alias for SK Hynix on Hyperliquid
   };
 
   // result: { COIN: { venues: { venueName: { vol30d, method } }, totalVol30d, components: Set } }
@@ -4588,6 +4589,7 @@ function renderTop30Volume() {
     XAUT: 'XAU', PAXG: 'XAU', XAUM: 'XAU', KAU: 'XAU', PGOLD: 'XAU', GGBR: 'XAU',
     SILVER: 'XAG',
     BZ: 'BRENTOIL',
+    SKHX: 'SKHYNIX',
   };
 
   // Build name lookup from allData (also aggregate by merge group)
@@ -5094,7 +5096,7 @@ const YAHOO_SYMBOL_MAP = {
   NDX: '^NDX', NQ100: '^NDX', NASDAQ: '^IXIC',
   // Korea / Japan
   SAMSUNG: '005930.KS', SMSN: '005930.KS', SKHYNIX: '000660.KS', HYUNDAI: '005380.KS',
-  SOFTBANK: '9984.T', KIOXIA: '285A.T', SKHX: 'SKX',
+  SOFTBANK: '9984.T', KIOXIA: '285A.T', SKHX: '000660.KS',
   // ETFs
   SPY: 'SPY', QQQ: 'QQQ', IWM: 'IWM', DIA: 'DIA', GLD: 'GLD', SLV: 'SLV', USO: 'USO', TLT: 'TLT',
   URA: 'URA', URNM: 'URNM', EWY: 'EWY', EWJ: 'EWJ', XLE: 'XLE', BOTZ: 'BOTZ', MAGS: 'MAGS',
@@ -5112,8 +5114,8 @@ const YAHOO_SYMBOL_MAP = {
 const REFERENCE_SYMBOL_ALIASES = {
   // Gold tokenized → XAU
   XAUT: 'XAU', PAXG: 'XAU', XAUM: 'XAU', KAU: 'XAU', PGOLD: 'XAU', GGBR: 'XAU',
-  // Silver / Brent aliases
-  SILVER: 'XAG', BZ: 'BRENTOIL',
+  // Silver / Brent / SK Hynix aliases
+  SILVER: 'XAG', BZ: 'BRENTOIL', SKHX: 'SKHYNIX',
   // Backed Finance (X suffix) → underlying
   AAPLX: 'AAPL', TSLAX: 'TSLA', NVDAX: 'NVDA', GOOGLX: 'GOOGL', AMZNX: 'AMZN',
   METAX: 'META', MSFTX: 'MSFT', MSTRX: 'MSTR', MSTRx: 'MSTR', COINX: 'COIN', SPYx: 'SPY',
