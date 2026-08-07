@@ -832,6 +832,17 @@ td:first-child { text-align: left; }
 .tag-fx       { background: var(--pink-dim); color: var(--pink); }
 .tag-etf      { background: var(--cyan-dim); color: var(--cyan); }
 .tag-pre-ipo  { background: var(--orange-dim); color: var(--orange); }
+.market-origin-tag {
+  display:inline-flex; align-items:center; margin-left:3px; padding:1px 5px; border-radius:4px;
+  font:700 9px/1.35 Inter,sans-serif; letter-spacing:.25px; white-space:nowrap;
+  color:var(--foreground-sec); background:rgba(120,120,128,.08); border:1px solid rgba(120,120,128,.14);
+}
+.market-origin-tag.market-adr { color:#0055CC; background:rgba(0,122,255,.08); border-color:rgba(0,122,255,.17); }
+.market-origin-tag.market-hk  { color:#A34A00; background:rgba(255,149,0,.08); border-color:rgba(255,149,0,.18); }
+.market-origin-tag.market-kr  { color:#5546A8; background:rgba(88,86,214,.08); border-color:rgba(88,86,214,.17); }
+.market-origin-tag.market-tw  { color:#248A3D; background:rgba(52,199,89,.08); border-color:rgba(52,199,89,.17); }
+.market-origin-tag.market-jp  { color:#B42318; background:rgba(255,59,48,.07); border-color:rgba(255,59,48,.15); }
+.market-origin-tag.market-cn  { color:#A31545; background:rgba(255,45,85,.07); border-color:rgba(255,45,85,.15); }
 
 .change-badge {
   display: inline-block; padding: 2px 8px;
@@ -1847,9 +1858,9 @@ const ETF_SYMBOLS = new Set([
 ]);
 ['EWT','DRAM','KORU','KSTR','LYTE','NCLD'].forEach(symbol => ETF_SYMBOLS.add(symbol));
 
-const PRE_IPO_SYMBOLS = new Set([
-  'ANTHROPIC','CBRS','CXMT','MINIMAX','OPENAI','SPACEX','SPCX','UNITREE','ZHIPU'
-]);
+// Audited 2026-08-07. Keep this list limited to companies that have not begun
+// public trading; it is a cross-venue fallback for generic `stock` metadata.
+const PRE_IPO_SYMBOLS = new Set(['ANTHROPIC','OPENAI','UNITREE']);
 
 function canonicalSymbol(symbol) {
   const normalized = String(symbol || '').trim().toUpperCase();
@@ -1898,7 +1909,7 @@ function categoryFromOfficial(type, symbol, name = '') {
   if (['COMMODITY','COMMODITIES','METAL','METALS','COMMOD'].includes(official)) return 'commodity';
   if (['INDEX','INDICES'].includes(official)) return 'index';
   if (official === 'FOREX' || official === 'FX') return 'fx';
-  if (['STOCK','STOCKS','EQUITY','EQUITIES','SHARE','SHARES'].includes(official)) {
+  if (/STOCK|EQUITY|SHARE/.test(official)) {
     if (PRE_IPO_SYMBOLS.has(raw)) return 'pre-ipo';
     return ETF_SYMBOLS.has(raw) ? 'etf' : 'equity';
   }
@@ -2081,12 +2092,15 @@ KNOWN_CATEGORIES['NDX100'] = 'index'; // NASDAQ 100 Index
 KNOWN_CATEGORIES['US100'] = 'index';  // US 100 (NASDAQ 100)
 KNOWN_CATEGORIES['US500'] = 'index';  // US 500 (S&P 500)
 KNOWN_CATEGORIES['IBOV'] = 'index';   // Bovespa Index (Brazil)
-// ── Pre-IPO fixes (were defaulting to equity) ──
-KNOWN_CATEGORIES['SPCX'] = 'pre-ipo';      // SpaceX pre-IPO synthetic
-KNOWN_CATEGORIES['SPACEX'] = 'pre-ipo';    // SpaceX (alt ticker)
+// ── Listing-status fixes (audited 2026-08-07) ──
+KNOWN_CATEGORIES['SPCX'] = 'equity';       // SpaceX began Nasdaq trading in June 2026
+KNOWN_CATEGORIES['SPACEX'] = 'equity';     // SpaceX alternate venue ticker
+KNOWN_CATEGORIES['CBRS'] = 'equity';       // Cerebras began Nasdaq trading in May 2026
+KNOWN_CATEGORIES['MINIMAX'] = 'equity';    // MiniMax HKEX 0100
+KNOWN_CATEGORIES['ZHIPU'] = 'equity';      // Z.ai / Zhipu HKEX 2513
+KNOWN_CATEGORIES['CXMT'] = 'equity';       // ChangXin Memory STAR Market
 KNOWN_CATEGORIES['OPENAI'] = 'pre-ipo';    // OpenAI pre-IPO synthetic
 KNOWN_CATEGORIES['ANTHROPIC'] = 'pre-ipo'; // Anthropic pre-IPO synthetic
-KNOWN_CATEGORIES['MINIMAX'] = 'pre-ipo';   // MiniMax AI pre-IPO synthetic
 KNOWN_NAMES['TTF'] = 'Dutch TTF Natural Gas';
 KNOWN_NAMES['BX'] = 'Blackstone';
 KNOWN_NAMES['RTY'] = 'Russell 2000 Index';
@@ -2104,16 +2118,73 @@ KNOWN_NAMES['EWH'] = 'iShares MSCI Hong Kong ETF';
 KNOWN_NAMES['EWZ'] = 'iShares MSCI Brazil ETF';
 KNOWN_NAMES['INDA'] = 'iShares MSCI India ETF';
 KNOWN_NAMES['GDX'] = 'VanEck Gold Miners ETF';
-KNOWN_NAMES['SPCX'] = 'SpaceX (Pre-IPO)';
-KNOWN_NAMES['SPACEX'] = 'SpaceX (Pre-IPO)';
+KNOWN_NAMES['SPCX'] = 'SpaceX';
+KNOWN_NAMES['SPACEX'] = 'SpaceX';
 KNOWN_NAMES['OPENAI'] = 'OpenAI (Pre-IPO)';
 KNOWN_NAMES['ANTHROPIC'] = 'Anthropic (Pre-IPO)';
-KNOWN_NAMES['MINIMAX'] = 'MiniMax AI (Pre-IPO)';
+KNOWN_NAMES['MINIMAX'] = 'MiniMax Group';
+KNOWN_NAMES['ZHIPU'] = 'Z.ai (Zhipu AI)';
+KNOWN_NAMES['CXMT'] = 'ChangXin Memory Technologies';
 KNOWN_NAMES['USAR'] = 'USA Rare Earth, Inc.';
 KNOWN_NAMES['COP'] = 'ConocoPhillips';
 KNOWN_NAMES['GEV'] = 'GE Vernova';
-KNOWN_NAMES['CBRS'] = 'Cerebras Systems (Pre-IPO)';
+KNOWN_NAMES['CBRS'] = 'Cerebras Systems';
 KNOWN_NAMES['SKHY'] = 'SK hynix ADR';
+
+// Market/origin tags are intentionally separate from asset category. Official
+// venue metadata wins; the static map fills gaps on venues that only say stock.
+const MARKET_TAG_DEFS = {
+  ADR: { title:'U.S.-listed depositary receipt/share' },
+  HK:  { title:'Hong Kong underlying or market exposure' },
+  KR:  { title:'Korean underlying or market exposure' },
+  TW:  { title:'Taiwanese underlying or market exposure' },
+  JP:  { title:'Japanese underlying or market exposure' },
+  CN:  { title:'Mainland China underlying or market exposure' },
+};
+const MARKET_TAG_ORDER = ['ADR','HK','KR','TW','JP','CN'];
+const SYMBOL_MARKET_TAGS = {
+  // Direct Hong Kong listings and venue aliases.
+  MINIMAX:['HK'], ZHIPU:['HK'], TENCENT:['HK'], HK0700:['HK'], TENCENTHKD:['HK'],
+  XIAOMI:['HK'], HK1810:['HK'], XIAOMIHKD:['HK'], POPMART:['HK'], GIGADEV:['HK'], EWH:['HK'],
+  // Korea-listed underlyings; SKHY is the U.S. ADR representation.
+  SAMSUNG:['KR'], SAMSUNGEM:['KR'], SMSN:['KR'], SKHYNIX:['KR'], SKHX:['KR'], HYUNDAI:['KR'],
+  KR200:['KR'], KRCOMP:['KR'], EWY:['KR'], KORU:['KR'],
+  SKHY:['ADR','KR'],
+  // ADR/ADS products, with home-market origin where it is useful context.
+  TSM:['ADR','TW'], EWT:['TW'], BABA:['ADR'], ARM:['ADR'], NVO:['ADR'], NOK:['ADR'],
+  SONY:['ADR','JP'],
+  // Other non-U.S. primary markets currently represented by venue catalogs.
+  SOFTBANK:['JP'], KIOXIA:['JP'], JP225:['JP'], EWJ:['JP'],
+  CXMT:['CN'], UNITREE:['CN'], FXI:['CN'], KWEB:['CN'], KSTR:['CN'],
+};
+
+function marketTagsForAsset(assetOrSymbol) {
+  if (Array.isArray(assetOrSymbol)) return MARKET_TAG_ORDER.filter(tag => assetOrSymbol.includes(tag));
+  const asset = typeof assetOrSymbol === 'object' && assetOrSymbol ? assetOrSymbol : {};
+  const raw = String(typeof assetOrSymbol === 'string' ? assetOrSymbol : (asset.underlyingSymbol || asset.coin || asset.symbol || '')).toUpperCase();
+  const officialType = String(asset.marketType || asset.officialType || '').toUpperCase();
+  const found = new Set();
+  if (/ADR|ADS|DEPOSITARY/.test(officialType)) found.add('ADR');
+  if (/HK|HONG.?KONG/.test(officialType)) found.add('HK');
+  if (/KR|KOREA/.test(officialType)) found.add('KR');
+  if (/TW|TAIWAN/.test(officialType)) found.add('TW');
+  if (/JP|JAPAN/.test(officialType)) found.add('JP');
+  if (/CN|CHINA/.test(officialType)) found.add('CN');
+
+  let underlying = raw;
+  try { underlying = _arbUnderlyingKey(raw) || raw; } catch { underlying = canonicalSymbol(raw); }
+  [raw, underlying, canonicalSymbol(raw)].forEach(key => {
+    (SYMBOL_MARKET_TAGS[key] || []).forEach(tag => found.add(tag));
+  });
+  return MARKET_TAG_ORDER.filter(tag => found.has(tag));
+}
+
+function renderMarketTags(assetOrTags) {
+  return marketTagsForAsset(assetOrTags).map(tag => {
+    const def = MARKET_TAG_DEFS[tag];
+    return `<span class="market-origin-tag market-${tag.toLowerCase()}" title="${def.title}">${tag}</span>`;
+  }).join('');
+}
 
 // ═══════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════
@@ -2407,7 +2478,7 @@ async function fetchTradeXyz() {
     const fullName = officialName || KNOWN_NAMES[coin] || coin;
 
     assets.push({
-      coin, symbol: rawName, venueSymbol: rawName, fullName, category: cat, venue: 'tradexyz',
+      coin, symbol: rawName, venueSymbol: rawName, fullName, category: cat, venue: 'tradexyz', marketType: officialType,
       markPx, indexPx: oraclePx, change, volume, oi: oiUsd, funding, predictedFunding, isActive,
       fundingIntervalHours: 1,
       makerFee: VENUES.tradexyz.makerFee, takerFee: VENUES.tradexyz.takerFee
@@ -2497,7 +2568,7 @@ async function fetchBitget() {
 
     const contractInterval = parseFloat(fundingRow?.fundingRateInterval || contract.fundInterval);
     assets.push({
-      coin: base, symbol, venueSymbol: symbol, fullName, category: cat, venue: 'bitget',
+      coin: base, symbol, venueSymbol: symbol, fullName, category: cat, venue: 'bitget', marketType: contract.symbolType,
       markPx, indexPx, change: change24h * 100, volume, oi, funding,
       // current-fund-rate is the current settlement rate, not a next-period
       // prediction. Keep the prediction field unavailable unless an official
@@ -2672,8 +2743,8 @@ const BINANCE_API_BASE = 'https://fapi.binance.com/fapi/v1';
 // always preferred; this prevents a temporary Binance block from deleting the
 // venue. Duplicate canonical names preserve separately listed contracts.
 const BINANCE_TRADIFI_SNAPSHOT_GROUPS = {
-  EQUITY: ['AAOI','AAPL','ADBE','ALAB','AMAT','AMD','AMZN','APP','ARM','ASML','ASTS','AVGO','AXTI','BABA','BB','BE','BMNR','BNC','BOT','BRK-B','BSP','BX','CAT','CIEN','COHR','COIN','COST','CRCL','CRDO','CRM','CRWD','CRWV','CSCO','DELL','DIS','DKNG','EBAY','FLEX','FLNC','FWDI','GEV','GIGADEV','GLW','GME','GOOGL','GS','HD','HIMS','HOOD','HPE','HYUNDAI','IBM','INTC','INTW','IREN','JPM','KLAC','KO','LITE','LLY','LRCX','META','MRVL','MSFT','MSTR','MU','MUU','MVLL','NBIS','NFLX','NOK','NOW','NVDA','NVO','ONDS','ORCL','PANW','PAYP','PENG','PLTR','POPMART','PYPL','QCOM','QNTX','RDDT','RIVN','RKLB','SAMSUNG','SHAZ','SKHY','SKHYNIX','SMCI','SNDK','SNOW','SOFI','SONY','STRC','STXX','TBT','TENCENT','TENCENT','TER','TMF','TSLA','TSM','TTWO','TXN','UBER','USAR','V','VRT','WDC','WEN','WMT','XBI','XIAOMI','ZM'],
-  'PRE-IPO': ['ANTHROPIC','CBRS','MINIMAX','OPENAI','SPCX','SPCX','ZHIPU'],
+  EQUITY: ['AAOI','AAPL','ADBE','ALAB','AMAT','AMD','AMZN','APP','ARM','ASML','ASTS','AVGO','AXTI','BABA','BB','BE','BMNR','BNC','BOT','BRK-B','BSP','BX','CAT','CBRS','CIEN','COHR','COIN','COST','CRCL','CRDO','CRM','CRWD','CRWV','CSCO','DELL','DIS','DKNG','EBAY','FLEX','FLNC','FWDI','GEV','GIGADEV','GLW','GME','GOOGL','GS','HD','HIMS','HOOD','HPE','HYUNDAI','IBM','INTC','INTW','IREN','JPM','KLAC','KO','LITE','LLY','LRCX','META','MINIMAX','MRVL','MSFT','MSTR','MU','MUU','MVLL','NBIS','NFLX','NOK','NOW','NVDA','NVO','ONDS','ORCL','PANW','PAYP','PENG','PLTR','POPMART','PYPL','QCOM','QNTX','RDDT','RIVN','RKLB','SAMSUNG','SHAZ','SKHY','SKHYNIX','SMCI','SNDK','SNOW','SOFI','SONY','SPCX','SPCX','STRC','STXX','TBT','TENCENT','TENCENT','TER','TMF','TSLA','TSM','TTWO','TXN','UBER','USAR','V','VRT','WDC','WEN','WMT','XBI','XIAOMI','ZHIPU','ZM'],
+  'PRE-IPO': ['ANTHROPIC','OPENAI'],
   ETF: ['BITO','DRAM','EWJ','EWT','EWY','EWZ','IWM','KORU','KSTR','QQQ','SMH','SNXX','SOXL','SOXS','SPY','SQQQ','TQQQ','TZA','URNM','UVXY','XLE'],
   COMMODITY: ['BRENTOIL','NATGAS','PAXG','WTI','XAG','XAU','XAUT','XCU','XPD','XPT']
 };
@@ -2709,6 +2780,16 @@ async function fetchBinancePublic(path, optional = false) {
   throw new Error(`Binance ${path} unavailable after retries: ${lastError?.message || 'unknown error'}`);
 }
 
+async function parseOptionalJson(response, fallback, label) {
+  if (!response) return fallback;
+  try {
+    return await response.json();
+  } catch (error) {
+    console.warn(`${label} response body unavailable; using fallback`, error);
+    return fallback;
+  }
+}
+
 async function fetchBinance() {
   logLoad('Fetching Binance data...');
 
@@ -2720,12 +2801,13 @@ async function fetchBinance() {
     fetchBinancePublic('/ticker/24hr', true),
     fetchBinancePublic('/fundingInfo', true)
   ]);
-  const liveInfo = infoRes ? await infoRes.json() : null;
-  const info = Array.isArray(liveInfo?.symbols) && liveInfo.symbols.length
+  const liveInfo = await parseOptionalJson(infoRes, null, 'Binance exchangeInfo');
+  const hasLiveInfo = Array.isArray(liveInfo?.symbols) && liveInfo.symbols.length;
+  const info = hasLiveInfo
     ? liveInfo
     : { symbols: BINANCE_TRADIFI_SNAPSHOT };
-  if (!infoRes) logLoad(`Binance: live catalog unavailable · using ${BINANCE_TRADIFI_SNAPSHOT.length}-contract official snapshot`);
-  const premiumData = premiumRes ? await premiumRes.json() : [];
+  if (!hasLiveInfo) logLoad(`Binance: live catalog unavailable · using ${BINANCE_TRADIFI_SNAPSHOT.length}-contract official snapshot`);
+  const premiumData = await parseOptionalJson(premiumRes, [], 'Binance premiumIndex');
 
   // Build fee map from exchangeInfo
   const feeMap = {};
@@ -2797,7 +2879,7 @@ async function fetchBinance() {
 
     const cf = feeMap[symbol] || {};
     assets.push({
-      coin: base, symbol, venueSymbol: symbol, fullName, category: cat, venue: 'binance',
+      coin: base, symbol, venueSymbol: symbol, fullName, category: cat, venue: 'binance', marketType: meta.underlyingType,
       markPx, indexPx, change, volume, oi, funding, predictedFunding: null, isActive,
       isListed: true, isPriced: markPx > 0,
       fieldStatus: {
@@ -5337,7 +5419,7 @@ function renderVenueTable(venue) {
     tr.style.cursor = 'pointer';
     tr.onclick = () => openAssetModal(venue, d);
     tr.innerHTML = `
-      <td><div class="asset-cell"><div class="asset-icon" style="background:${catColor}12;color:${catColor};border:1px solid ${catColor}25">${d.coin.slice(0,2)}</div><div class="asset-info"><div class="asset-name">${d.coin} <span class="asset-tag tag-${d.category}">${d.category.toUpperCase()}</span></div><div class="asset-type">${d.fullName}</div>${marketStateHTML}</div></div></td>
+      <td><div class="asset-cell"><div class="asset-icon" style="background:${catColor}12;color:${catColor};border:1px solid ${catColor}25">${d.coin.slice(0,2)}</div><div class="asset-info"><div class="asset-name">${d.coin} <span class="asset-tag tag-${d.category}">${d.category.toUpperCase()}</span>${renderMarketTags(d)}</div><div class="asset-type">${d.fullName}</div>${marketStateHTML}</div></div></td>
       <td class="mono" style="font-weight:600">${fieldValueWithStatus(markHTML, fs.markPx, 'Official mark price coverage')}</td>
       <td class="mono" style="color:var(--foreground-sec)">${fieldValueWithStatus(indexHTML, fs.indexPx, 'Official index/oracle coverage')}</td>
       <td>${fieldValueWithStatus(changeHTML, fs.change, '24h change coverage')}</td>
@@ -5454,7 +5536,7 @@ function renderAssetView() {
     tr.style.cssText = rowOp + 'cursor:pointer;';
     tr.onclick = () => { expandedAsset = expandedAsset===a.coin?null:a.coin; renderAssetView(); };
     const chgHTML = hasAvgChg ? `<span class="change-badge ${isUp?'up':'down'}">${isUp?'+':''}${avgChg.toFixed(2)}%</span>` : `<span style="color:var(--foreground-dim)">—</span>`;
-    tr.innerHTML = `<td><div class="asset-cell"><div class="asset-icon" style="background:${catColor}12;color:${catColor};border:1px solid ${catColor}25">${a.coin.slice(0,2)}</div><div class="asset-info"><div class="asset-name">${a.coin} <span class="asset-tag tag-${a.category}">${a.category.toUpperCase()}</span>${inactiveTag}</div><div class="asset-type">${a.fullName}</div></div></div></td><td>${dots} <span style="font-size:12px;color:var(--foreground-sec)">${vCount}</span></td><td class="mono" style="font-weight:600">$${fmtPrice(bestPx)}</td><td>${chgHTML}</td><td class="mono">${fmtVolume(totVol)}</td><td class="mono">${fmtVolume(totOI)}</td><td class="mono" ${fsc}>${fs}</td>`;
+    tr.innerHTML = `<td><div class="asset-cell"><div class="asset-icon" style="background:${catColor}12;color:${catColor};border:1px solid ${catColor}25">${a.coin.slice(0,2)}</div><div class="asset-info"><div class="asset-name">${a.coin} <span class="asset-tag tag-${a.category}">${a.category.toUpperCase()}</span>${renderMarketTags(Object.values(a.venues)[0] || a)}${inactiveTag}</div><div class="asset-type">${a.fullName}</div></div></div></td><td>${dots} <span style="font-size:12px;color:var(--foreground-sec)">${vCount}</span></td><td class="mono" style="font-weight:600">$${fmtPrice(bestPx)}</td><td>${chgHTML}</td><td class="mono">${fmtVolume(totVol)}</td><td class="mono">${fmtVolume(totOI)}</td><td class="mono" ${fsc}>${fs}</td>`;
     tbody.appendChild(tr);
 
     if (expandedAsset === a.coin) {
@@ -6267,7 +6349,7 @@ async function fetchSpotRwaBitget() {
       bid: parseFloat(t.bid1Price) || 0,
       ask: parseFloat(t.ask1Price) || 0,
       depth2: null,
-      reality: true, isListed: true, isActive: true, isPriced: last > 0,
+      reality: true, marketType: instrument.symbolType, isListed: true, isActive: true, isPriced: last > 0,
     });
   }
 
@@ -6326,11 +6408,11 @@ async function fetchSpotRwaBinance() {
     fetchBinanceSpotPublic('/ticker/24hr', true),
     fetchBinancePublic('/exchangeInfo', true)
   ]);
-  const liveInfoJson = infoRes ? await infoRes.json() : null;
+  const liveInfoJson = await parseOptionalJson(infoRes, null, 'Binance spot exchangeInfo');
   const infoJson = Array.isArray(liveInfoJson?.symbols) && liveInfoJson.symbols.length
     ? liveInfoJson
     : { symbols: [...BINANCE_BSTOCK_SNAPSHOT, 'PAXG', 'XAUT'].map(baseAsset => ({ symbol:`${baseAsset}USDT`, baseAsset, quoteAsset:'USDT', status:'TRADING', snapshot:true })) };
-  const tickers = tickerRes ? await tickerRes.json() : [];
+  const tickers = await parseOptionalJson(tickerRes, [], 'Binance spot ticker');
   const symbolInfo = {};
   (infoJson.symbols || []).forEach(s => { symbolInfo[String(s.symbol || '').toUpperCase()] = s; });
   const tickerMap = {};
@@ -6377,7 +6459,7 @@ async function fetchSpotRwaBinance() {
       lo: parseFloat(t.lowPrice) || 0,
       bid: parseFloat(t.bidPrice) || 0,
       ask: parseFloat(t.askPrice) || 0,
-      bstock: isBStock,
+      bstock: isBStock, marketType: bStockMeta?.underlyingType,
       isListed: true, isActive: info.status === 'TRADING', isPriced: last > 0,
     });
   }
@@ -6963,7 +7045,7 @@ function renderSpotVenueTable(venue) {
     const spotState = '<div class="market-state-row"><span class="market-badge">Listed</span><span class="market-badge '+(a.isActive?'active':'inactive')+'">'+(a.isActive?'Active':'Inactive')+'</span><span class="market-badge '+(a.isPriced?'priced':'unpriced')+'">'+(a.isPriced?'Priced':'Unpriced')+'</span></div>';
     const lastH = a.isPriced ? spotFP(a.last) : '<span class="dim">—</span>';
     const hiLoH = a.isPriced && a.hi > 0 && a.lo > 0 ? spotFP(a.hi)+' / '+spotFP(a.lo) : '<span class="dim">—</span>';
-    h += '<tr><td style="text-align:left;font-family:Inter,sans-serif;font-weight:600">'+a.coin+spotState+'</td><td>'+fieldValueWithStatus(lastH,a.fieldStatus.last,'Official last-price coverage')+'</td><td>'+refH+'</td><td>'+devH+'</td><td>'+markH+'</td><td>'+basisH+'</td>';
+    h += '<tr><td style="text-align:left;font-family:Inter,sans-serif;font-weight:600">'+a.coin+renderMarketTags(a)+spotState+'</td><td>'+fieldValueWithStatus(lastH,a.fieldStatus.last,'Official last-price coverage')+'</td><td>'+refH+'</td><td>'+devH+'</td><td>'+markH+'</td><td>'+basisH+'</td>';
     h += '<td class="'+cc+'">'+(a.isPriced?cs+a.chg.toFixed(2)+'%':'<span class="dim">—</span>')+'</td><td>$'+spotFV(a.vol)+'</td>';
     h += '<td style="font-size:11px;color:var(--foreground-sec)">'+hiLoH+'</td>';
     h += '<td>'+spBps+(spBps==='—'?'':' bps')+'</td><td class="'+depthCls+'">'+fieldValueWithStatus(depthH,a.fieldStatus.depth2,'Partial = up to 50 order-book levels; Unavailable = not fetched or unsupported')+'</td><td>'+fundH+'</td><td>'+arbH+'</td></tr>';
@@ -7213,7 +7295,7 @@ function renderSpotArbRank() {
         const netFund = grossFundAPR - costAnn;
         const ref = getRefPrice(a.coin);
         rows.push({
-          coin: a.coin, sVenue, pVenue,
+          coin: a.coin, sVenue, pVenue, marketTags: marketTagsForAsset(a),
           spot: a.last, mark: comparableMark, basis, fAnn, costAnn, netFund, dir, ref,
           refSrc: getRefSource(a.coin),
           depthSpot: a.depth2 || null, depthPerp: p.depth2 || null
@@ -7268,7 +7350,7 @@ function renderSpotArbRank() {
     const devH = dev !== null ? '<span class="'+(Math.abs(dev)>0.005?'neg':'dim')+'">'+(dev>=0?'+':'')+(dev*100).toFixed(2)+'%</span>' : '<span class="dim">—</span>';
     h += '<tr>'
        + '<td style="text-align:left;color:var(--foreground-dim);font-size:11px">'+(i+1)+'</td>'
-       + '<td style="text-align:left;font-family:Inter,sans-serif;font-weight:600">'+r.coin+'</td>'
+       + '<td style="text-align:left;font-family:Inter,sans-serif;font-weight:600">'+r.coin+renderMarketTags(r.marketTags)+'</td>'
        + '<td style="text-align:left">'+routeH+'</td>'
        + '<td>'+spotFP(r.spot)+'</td>'
        + '<td>'+spotFP(r.mark)+'</td>'
@@ -7457,7 +7539,7 @@ function renderSpotAllAssets() {
     // Level 1: Underlying
     h += '<tr class="spot-row-parent" onclick="spotToggleL1(\''+uid+'\')">';
     h += '<td>▸</td>';
-    h += '<td style="font-weight:700;font-size:14px">'+underlying+'</td>';
+    h += '<td style="font-weight:700;font-size:14px">'+underlying+renderMarketTags(allCoinEntries[0] || underlying)+'</td>';
     h += '<td style="font-family:Inter,sans-serif;font-size:12px;color:var(--foreground-sec)">'+tickerStr+'</td>';
     h += '<td><div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">'+issuerBadges+'</div></td>';
     h += '<td><span class="cat-chip" style="background:'+catColor+'15;color:'+catColor+'"><span class="cat-dot-s" style="background:'+catColor+'"></span>'+CAT_LABELS[group.category]+'</span></td>';
@@ -7497,7 +7579,7 @@ function renderSpotAllAssets() {
 
       h += '<tr class="spot-row-mid hidden-row" data-parent="'+uid+'" data-mid-id="'+midId+'"'+(hasMultiVenue?' onclick="spotToggleL2(\''+midId+'\')" style="cursor:pointer"':'')+'>';
       h += '<td>'+(hasMultiVenue?'▸':'')+'</td>';
-      h += '<td style="font-weight:600;font-size:13px;padding-left:20px">'+coin+'</td>';
+      h += '<td style="font-weight:600;font-size:13px;padding-left:20px">'+coin+renderMarketTags(coinEntries[0] || coin)+'</td>';
       h += '<td></td>';
       h += '<td><span class="issuer-badge" style="background:'+is.bg+';color:'+is.color+';border-color:'+is.border+'">'+issuerShort(meta.issuer)+'</span></td>';
       h += '<td></td>';
