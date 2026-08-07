@@ -1285,10 +1285,10 @@ input[type="checkbox"] {
     <div class="summary-page">
       <div class="kpi-strip" id="kpiStrip"></div>
       <div class="venue-cards-grid" id="venueCardsGrid"></div>
+      <div class="section-card" id="top30VolSection" style="margin-top:16px"></div>
       <div class="section-card" id="coverageSection"></div>
       <div class="section-card" id="divSection"></div>
       <div class="section-card" id="revenueSection"></div>
-      <div class="section-card" id="top30VolSection" style="margin-top:16px"></div>
     </div>
   </div>
 
@@ -4336,7 +4336,7 @@ function switchSubTab(sub, tabEl) {
 // VIEW 1: ALL VENUES OVERVIEW
 // ═══════════════════════════════════════════════
 
-function renderOverview() { renderKPIs(); renderVenueCards(); renderCoverage(); renderDivergence(); renderRevenue(); renderTop30Volume(); }
+function renderOverview() { renderKPIs(); renderVenueCards(); renderTop30Volume(); renderCoverage(); renderDivergence(); renderRevenue(); }
 
 // ═══════════════════════════════════════════════
 // KPI TREND SNAPSHOTS (localStorage)
@@ -5045,8 +5045,8 @@ let _top30Loading = false;
 let _top30InFlight = null;
 const TOP30_CACHE_TTL = 5 * 60 * 1000; // 5 min cache
 
-function fetchReal30DayVolume() {
-  if (_top30Cache && Date.now() - _top30Cache.ts < TOP30_CACHE_TTL) return Promise.resolve(_top30Cache.data);
+function fetchReal30DayVolume(force = false) {
+  if (!force && _top30Cache && Date.now() - _top30Cache.ts < TOP30_CACHE_TTL) return Promise.resolve(_top30Cache.data);
   if (_top30InFlight) return _top30InFlight;
   _top30Loading = true;
   _top30InFlight = _fetchReal30DayVolumeImpl().finally(() => {
@@ -5054,6 +5054,25 @@ function fetchReal30DayVolume() {
     _top30InFlight = null;
   });
   return _top30InFlight;
+}
+
+function refreshTop30Volume() {
+  if (_top30InFlight) return;
+  fetchReal30DayVolume(true)
+    .then(() => renderTop30Volume())
+    .catch(error => {
+      console.error('Top30 volume refresh error:', error);
+      renderTop30Volume();
+    });
+  renderTop30Volume();
+}
+
+function top30AgeLabel(timestamp) {
+  const ageSeconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+  if (ageSeconds < 60) return `${ageSeconds}s ago`;
+  const ageMinutes = Math.floor(ageSeconds / 60);
+  if (ageMinutes < 60) return `${ageMinutes}m ago`;
+  return `${Math.floor(ageMinutes / 60)}h ago`;
 }
 
 async function _fetchReal30DayVolumeImpl() {
@@ -5090,19 +5109,35 @@ async function _fetchReal30DayVolumeImpl() {
     if (method === 'real') merged[mergeKey].venues[vKey].method = 'real';
   }
 
-  // ── Binance: /klines?interval=1d&limit=30 ──
-  const bnKlineTasks = allData.filter(d => d.venue === 'binance').sort((a,b)=>b.volume-a.volume).slice(0,80).map(asset => async () => {
-    try {
-      const sym = asset.symbol || (asset.coin + 'USDT');
-      const res = await fetch(`${BINANCE_API_BASE}/klines?symbol=${sym}&interval=1d&limit=30`);
-      if (!res.ok) return;
-      const klines = await res.json();
-      if (!Array.isArray(klines)) return;
-      let totalVol = 0;
-      klines.forEach(k => { totalVol += parseFloat(k[7] || 0); }); // index 7 = quoteAssetVolume
-      if (totalVol > 0) addVol(asset.coin, 'binance', totalVol, 'real', asset.category);
-    } catch {}
-  });
+  // ── Binance: server-side Singapore bulk proxy avoids client-region blocks ──
+  const binanceAssets = allData.filter(d => d.venue === 'binance').sort((a,b)=>b.volume-a.volume).slice(0,80);
+  const bnKlineTasks = [async () => {
+    if (!binanceAssets.length) return;
+    if (!_isDev) {
+      try {
+        const symbols = binanceAssets.map(asset => asset.symbol || (asset.coin + 'USDT'));
+        const res = await fetch(`/api/binance-public?endpoint=klines&symbols=${encodeURIComponent(symbols.join(','))}`);
+        if (!res.ok) return;
+        const totals = await res.json();
+        binanceAssets.forEach(asset => {
+          const symbol = asset.symbol || (asset.coin + 'USDT');
+          const volume30d = Number(totals[symbol]?.volume30d) || 0;
+          if (volume30d > 0) addVol(asset.coin, 'binance', volume30d, 'real', asset.category);
+        });
+        return;
+      } catch { return; }
+    }
+    for (const asset of binanceAssets) {
+      try {
+        const symbol = asset.symbol || (asset.coin + 'USDT');
+        const res = await fetch(`${BINANCE_API_BASE}/klines?symbol=${symbol}&interval=1d&limit=30`);
+        if (!res.ok) continue;
+        const rows = await res.json();
+        const volume30d = Array.isArray(rows) ? rows.reduce((sum, row) => sum + (Number(row?.[7]) || 0), 0) : 0;
+        if (volume30d > 0) addVol(asset.coin, 'binance', volume30d, 'real', asset.category);
+      } catch {}
+    }
+  }];
 
   // ── Bitget: /candles?granularity=1Dutc&limit=30 ──
   const bgKlineTasks = allData.filter(d => d.venue === 'bitget').sort((a,b)=>b.volume-a.volume).slice(0,80).map(asset => async () => {
@@ -5159,46 +5194,38 @@ async function _fetchReal30DayVolumeImpl() {
     }
   }];
 
-  // ── trade.xyz (Hyperliquid): candleSnapshot with xyz: prefix + 1h interval ──
-  // Note: trade.xyz RWA perps require xyz: prefix and only support 1h interval (not 1d)
-  const xyzKlineTasks = allData.filter(d => d.venue === 'tradexyz').sort((a,b)=>b.volume-a.volume).slice(0,80).map(asset => async () => {
-    try {
-      const res = await fetch('https://api.hyperliquid.xyz/info', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'candleSnapshot',
-          req: { coin: asset.symbol || `xyz:${asset.coin}`, interval: '1h', startTime: thirtyDaysAgo, endTime: now }
-        })
-      });
-      if (!res.ok) return;
-      const candles = await res.json();
-      if (!Array.isArray(candles) || candles.length < 10) return;
-      let totalVol = 0;
-      candles.forEach(c => {
-        const vol = parseFloat(c.v || 0);
-        const px = parseFloat(c.c || asset.markPx || 0);
-        totalVol += vol * px;
-      });
-      if (totalVol > 0) addVol(asset.coin, 'tradexyz', totalVol, 'real', asset.category);
-    } catch {}
-  });
-
-  // ── Coinbase INTX: /market/products/{id}/candles ──
-  const cbiKlineTasks = allData.filter(d => d.venue === 'cbintx').sort((a,b)=>b.volume-a.volume).slice(0,80).map(asset => async () => {
-    try {
-      const now = Math.floor(Date.now() / 1000);
-      const thirtyDaysAgo = now - 30 * 86400;
-      const res = await fetch(`${CBINTX_API_BASE}/market/products/${encodeURIComponent(asset.symbol)}/candles?start=${thirtyDaysAgo}&end=${now}&granularity=ONE_DAY`);
-      if (!res.ok) return;
-      const json = await res.json();
-      const candles = json.candles || json || [];
-      if (!Array.isArray(candles)) return;
-      let totalVol = 0;
-      candles.forEach(c => { totalVol += (parseFloat(c.volume) || 0) * (parseFloat(c.close) || parseFloat(c.open) || 0); });
-      if (totalVol > 0) addVol(asset.coin, 'cbintx', totalVol, 'real', asset.category);
-    } catch {}
-  });
+  // ── trade.xyz: aggregate 1h HIP-3 candles server-side and return totals only ──
+  const xyzAssets = allData.filter(d => d.venue === 'tradexyz').sort((a,b)=>b.volume-a.volume).slice(0,80);
+  const xyzKlineTasks = [async () => {
+    if (!xyzAssets.length) return;
+    if (!_isDev) {
+      try {
+        const symbols = xyzAssets.map(asset => asset.symbol || `xyz:${asset.coin}`);
+        const url = `/api/hyperliquid-klines?symbols=${encodeURIComponent(symbols.join(','))}&startTime=${thirtyDaysAgo}&endTime=${now}`;
+        const res = await fetch(url);
+        if (!res.ok) return;
+        const totals = await res.json();
+        xyzAssets.forEach(asset => {
+          const symbol = asset.symbol || `xyz:${asset.coin}`;
+          const volume30d = Number(totals[symbol]?.volume30d) || 0;
+          if (volume30d > 0) addVol(asset.coin, 'tradexyz', volume30d, 'real', asset.category);
+        });
+        return;
+      } catch { return; }
+    }
+    for (const asset of xyzAssets) {
+      try {
+        const res = await fetch('https://api.hyperliquid.xyz/info', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'candleSnapshot', req: { coin: asset.symbol || `xyz:${asset.coin}`, interval: '1h', startTime: thirtyDaysAgo, endTime: now } })
+        });
+        if (!res.ok) continue;
+        const rows = await res.json();
+        const volume30d = Array.isArray(rows) ? rows.reduce((sum, row) => sum + (Number(row?.v) || 0) * (Number(row?.c) || asset.markPx || 0), 0) : 0;
+        if (volume30d > 0) addVol(asset.coin, 'tradexyz', volume30d, 'real', asset.category);
+      } catch {}
+    }
+  }];
 
   // ── Run all kline fetches in parallel batches ──
   await Promise.all([
@@ -5206,13 +5233,7 @@ async function _fetchReal30DayVolumeImpl() {
     batchFetch(bgKlineTasks, 5),
     batchFetch(gateKlineTasks, 5),
     batchFetch(xyzKlineTasks, 5),
-    batchFetch(cbiKlineTasks, 5),
   ]);
-
-  // ── Lighter & Vest: no kline API, fall back to 24h × 30 (tagged as estimate) ──
-  allData.filter(d => d.venue === 'lighter' || d.venue === 'vest').forEach(d => {
-    if (d.volume > 0) addVol(d.coin, d.venue, d.volume * 30, 'est', d.category);
-  });
 
   // ── Also add estimate fallback for any venue where kline fetch failed ──
   allData.forEach(d => {
@@ -5244,11 +5265,20 @@ function renderTop30Volume() {
   const section = document.getElementById('top30VolSection');
   if (!section) return;
 
+  // Keep the last good table visible while refreshing in the background. The
+  // previous implementation declared a TTL but never re-entered the fetch path
+  // after the first successful load.
+  if (_top30Cache && Date.now() - _top30Cache.ts >= TOP30_CACHE_TTL && !_top30InFlight) {
+    fetchReal30DayVolume(true)
+      .then(() => renderTop30Volume())
+      .catch(error => console.error('Top30 background refresh error:', error));
+  }
+
   // Initial render with loading state
   if (!_top30Cache) {
     section.innerHTML = `
-      <div class="section-title">Top 30 RWA Perps by Estimated 30-Day Volume</div>
-      <div class="section-subtitle">Fetching klines for the highest-current-volume candidates; remaining listings use 24h×30 estimates…</div>
+      <div class="section-title">Top 30 RWA Perps by 30-Day Volume</div>
+      <div class="section-subtitle">Building a rolling 30-day view from exchange klines; any missing venue history is explicitly labeled Estimated.</div>
       <div style="text-align:center;padding:40px;color:var(--foreground-dim)">
         <div class="spin" style="display:inline-block;width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite"></div>
         <div style="margin-top:12px;font-size:12px">Loading 30-day kline data from Binance, Bitget, Gate.io, and trade.xyz…</div>
@@ -5305,9 +5335,17 @@ function renderTop30Volume() {
 
   const maxVol = ranked.length > 0 ? ranked[0].totalVol30d : 1;
 
-  // Count how many have real data vs all estimated
-  const realCount = ranked.filter(r => r.hasReal).length;
-  const estCount = ranked.length - realCount;
+  function volumeDataStatus(row) {
+    const entries = Object.values(row.venues).filter(venue => venue.vol30d > 0);
+    const real = entries.filter(venue => venue.method === 'real').length;
+    if (!entries.length) return { status:'unavailable', title:'No 30-day volume source available', real:0, total:0 };
+    if (real === entries.length) return { status:'full', title:`All ${entries.length} venue contribution(s) use exchange klines`, real, total:entries.length };
+    if (real > 0) return { status:'partial', title:`${real}/${entries.length} venue contribution(s) use exchange klines; the rest use 24h×30`, real, total:entries.length };
+    return { status:'estimated', title:'All venue contributions use 24h×30 estimates', real:0, total:entries.length };
+  }
+
+  const statusCounts = { full:0, partial:0, estimated:0, unavailable:0 };
+  ranked.forEach(row => { statusCounts[volumeDataStatus(row).status]++; });
 
   let rows = '';
   ranked.forEach((r, i) => {
@@ -5345,7 +5383,8 @@ function renderTop30Volume() {
       return `<span class="venue-dot ${realVenue}" title="${vName}${symLabel}: ${fmtVolume(v.vol30d)}${tag}" style="cursor:help"></span>`;
     }).join(' ');
 
-    const methodTag = r.hasReal ? '' : '<span style="color:var(--foreground-dim);font-size:9px;margin-left:4px" title="No kline API; estimated from 24h×30">est</span>';
+    const rowStatus = volumeDataStatus(r);
+    const statusBadge = dataStatusBadge(rowStatus.status, rowStatus.title);
 
     const fStr = funding !== undefined && funding !== null
       ? `<span style="color:${funding >= 0 ? 'var(--positive)' : 'var(--negative)'}">${(funding * 100).toFixed(1)}%</span>`
@@ -5370,7 +5409,7 @@ function renderTop30Volume() {
     rows += `<tr>
       <td style="text-align:center;color:var(--foreground-dim);font-size:11px;width:30px">${i + 1}</td>
       <td style="text-align:left">
-        <div style="font-weight:600;font-size:13px">${r.coin}${isMerged ? '<span style="color:var(--accent);font-size:9px;margin-left:4px;vertical-align:middle" title="Combined: ' + comps.join(' + ') + '">MERGED</span>' : ''}${methodTag}</div>
+        <div style="font-weight:600;font-size:13px">${r.coin}${isMerged ? '<span style="color:var(--accent);font-size:9px;margin-left:4px;vertical-align:middle" title="Combined: ' + comps.join(' + ') + '">MERGED</span>' : ''}</div>
         <div style="font-size:10px;color:var(--foreground-dim)">${name} · <span style="color:${catColor}">${cat}</span></div>
         ${compLine}
       </td>
@@ -5383,6 +5422,7 @@ function renderTop30Volume() {
       <td class="mono">${fmtVolume(oi)}</td>
       <td class="mono">${fStr}</td>
       <td>${venueDots}</td>
+      <td>${statusBadge}</td>
     </tr>`;
   });
 
@@ -5391,10 +5431,10 @@ function renderTop30Volume() {
   section.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
       <div>
-        <div class="section-title">Top 30 RWA Perps by Estimated 30-Day Volume</div>
-        <div class="section-subtitle">Klines for top current-volume candidates · ${realCount} rows include real history · ${estCount > 0 ? estCount + ' rows include 24h×30 estimates · ' : ''}Total: ${fmtVolume(totalVol30d)} · Updated ${new Date(_top30Cache.ts).toLocaleTimeString()}</div>
+        <div class="section-title">Top 30 RWA Perps by 30-Day Volume</div>
+        <div class="section-subtitle">Rolling window · auto-refresh every 5 min · ${statusCounts.full} Full · ${statusCounts.partial} Partial · ${statusCounts.estimated} Estimated · Total: ${fmtVolume(totalVol30d)} · Updated ${new Date(_top30Cache.ts).toLocaleTimeString()} (${top30AgeLabel(_top30Cache.ts)})${_top30Loading ? ' · Refreshing…' : ''}</div>
       </div>
-      <button class="sr-btn" onclick="_top30Cache=null;renderTop30Volume()" style="font-size:11px">⟳ Refresh</button>
+      <button class="sr-btn" onclick="refreshTop30Volume()" style="font-size:11px" ${_top30Loading ? 'disabled' : ''}>${_top30Loading ? '⟳ Refreshing' : '⟳ Refresh'}</button>
     </div>
     <div class="table-wrap" style="margin-top:12px">
       <table>
@@ -5406,6 +5446,7 @@ function renderTop30Volume() {
           <th>OI</th>
           <th>Median Funding APR</th>
           <th>Venues</th>
+          <th>Data Status</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
