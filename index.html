@@ -1886,6 +1886,7 @@ const RWA_ASSETS = {
   SKHX: { name: "SK Hynix", category: "equity" },
   LITE: { name: "Lumentum", category: "equity" },
   CRWV: { name: "CoreWeave", category: "equity" },
+  QNT: { name: "Quantinuum Inc.", category: "equity" },
   QQQ: { name: "Invesco QQQ Trust", category: "etf" },
   SPY: { name: "SPDR S&P 500 ETF Trust", category: "etf" },
   IWM: { name: "iShares Russell 2000 ETF", category: "etf" },
@@ -1908,6 +1909,7 @@ const RWA_ASSETS = {
   JP225: { name: "Nikkei 225 Index", category: "index" },
   VIX: { name: "CBOE Volatility Index", category: "index" },
   DXY: { name: "U.S. Dollar Index", category: "index" },
+  H100: { name: "NVIDIA H100 Compute", category: "commodity" },
   USAR: { name: "USA Rare Earth, Inc.", category: "equity" }
 };
 
@@ -1939,7 +1941,11 @@ const INDEX_SYMBOL_ALIASES = {
 };
 const EQUITY_SYMBOL_ALIASES = {
   SAMSUNGUSD:'SAMSUNG', SKHYNIXUSD:'SKHYNIX', HYUNDAIUSD:'HYUNDAI',
-  BBX:'BB', BRKB:'BRK-B', HK0700:'TENCENT', HK1810:'XIAOMI'
+  BBX:'BB', BRKB:'BRK-B', HK0700:'TENCENT', HK1810:'XIAOMI',
+  // Quantinuum listed on Nasdaq as QNT in June 2026. Venue-specific security
+  // tickers must only be collapsed after an official stock/equity type is known;
+  // the plain QNT crypto perpetual remains excluded by each venue's identity gate.
+  QNTX:'QNT', QNTSTOCK:'QNT'
 };
 const AMBIGUOUS_SHORT_SYMBOLS = new Set(['GOLD','SILVER','GC','SI','HG','NG','CL','BZ','PL','PALL']);
 
@@ -1962,7 +1968,18 @@ const ETF_SYMBOLS = new Set([
   'TZA','UNG','UPRO','URA','URNM','USFR','USO','UVXY','VGT','VNQ','VOO','VTI','VTV','VXUS','XLK',
   'XLE','XLU','XLV','YANG','YINN'
 ]);
-['EWT','DRAM','KORU','KSTR','LYTE','NCLD'].forEach(symbol => ETF_SYMBOLS.add(symbol));
+['EWT','DRAM','KORU','KSTR','LYTE','NCLD','EWH','DFEN'].forEach(symbol => ETF_SYMBOLS.add(symbol));
+
+// Venue wrapper tickers whose underlying is an ETF even when the venue's broad
+// product class says stock or metal.
+const TOKENIZED_ETF_WRAPPERS = Object.freeze({
+  QQQX:'QQQ', SPYX:'SPY', TQQQX:'TQQQ', SLVON:'SLV'
+});
+
+// Audited public listings override stale venue pre-market flags.
+const PUBLIC_LISTED_EQUITIES = new Set([
+  'SPCX','SPACEX','CBRS','MINIMAX','ZHIPU','CXMT','QNT','QNTX','QNTSTOCK'
+]);
 
 // Audited 2026-08-07. Keep this list limited to companies that have not begun
 // public trading; it is a cross-venue fallback for generic `stock` metadata.
@@ -2010,6 +2027,8 @@ function inferCategory(symbol, name = '') {
 function categoryFromOfficial(type, symbol, name = '') {
   const official = String(type || '').toUpperCase();
   const raw = String(symbol || '').trim().toUpperCase();
+  if (PUBLIC_LISTED_EQUITIES.has(raw)) return 'equity';
+  if (TOKENIZED_ETF_WRAPPERS[raw]) return 'etf';
   if (official.includes('PRE')) return 'pre-ipo';
   if (official.includes('ETF')) return 'etf';
   if (['COMMODITY','COMMODITIES','METAL','METALS','COMMOD'].includes(official)) return 'commodity';
@@ -2207,6 +2226,11 @@ KNOWN_CATEGORIES['ZHIPU'] = 'equity';      // Z.ai / Zhipu HKEX 2513
 KNOWN_CATEGORIES['CXMT'] = 'equity';       // ChangXin Memory STAR Market
 KNOWN_CATEGORIES['OPENAI'] = 'pre-ipo';    // OpenAI pre-IPO synthetic
 KNOWN_CATEGORIES['ANTHROPIC'] = 'pre-ipo'; // Anthropic pre-IPO synthetic
+KNOWN_CATEGORIES['KUAISHOU'] = 'equity';
+KNOWN_CATEGORIES['QQQX'] = 'etf';
+KNOWN_CATEGORIES['SPYX'] = 'etf';
+KNOWN_CATEGORIES['TQQQX'] = 'etf';
+KNOWN_CATEGORIES['SLVON'] = 'etf';
 KNOWN_NAMES['TTF'] = 'Dutch TTF Natural Gas';
 KNOWN_NAMES['BX'] = 'Blackstone';
 KNOWN_NAMES['RTY'] = 'Russell 2000 Index';
@@ -2231,6 +2255,11 @@ KNOWN_NAMES['ANTHROPIC'] = 'Anthropic (Pre-IPO)';
 KNOWN_NAMES['MINIMAX'] = 'MiniMax Group';
 KNOWN_NAMES['ZHIPU'] = 'Z.ai (Zhipu AI)';
 KNOWN_NAMES['CXMT'] = 'ChangXin Memory Technologies';
+KNOWN_NAMES['KUAISHOU'] = 'Kuaishou Technology';
+KNOWN_NAMES['QQQX'] = 'Invesco QQQ Trust (tokenized)';
+KNOWN_NAMES['SPYX'] = 'SPDR S&P 500 ETF Trust (tokenized)';
+KNOWN_NAMES['TQQQX'] = 'ProShares UltraPro QQQ (tokenized)';
+KNOWN_NAMES['SLVON'] = 'iShares Silver Trust (tokenized)';
 KNOWN_NAMES['USAR'] = 'USA Rare Earth, Inc.';
 KNOWN_NAMES['COP'] = 'ConocoPhillips';
 KNOWN_NAMES['GEV'] = 'GE Vernova';
@@ -2251,17 +2280,18 @@ const MARKET_TAG_ORDER = ['ADR','HK','KR','TW','JP','CN'];
 const SYMBOL_MARKET_TAGS = {
   // Direct Hong Kong listings and venue aliases.
   MINIMAX:['HK'], ZHIPU:['HK'], TENCENT:['HK'], HK0700:['HK'], TENCENTHKD:['HK'],
-  XIAOMI:['HK'], HK1810:['HK'], XIAOMIHKD:['HK'], POPMART:['HK'], GIGADEV:['HK'], EWH:['HK'],
+  XIAOMI:['HK'], HK1810:['HK'], XIAOMIHKD:['HK'], POPMART:['HK'], KUAISHOU:['HK'], EWH:['HK'],
   // Korea-listed underlyings; SKHY is the U.S. ADR representation.
   SAMSUNG:['KR'], SAMSUNGEM:['KR'], SMSN:['KR'], SKHYNIX:['KR'], SKHX:['KR'], HYUNDAI:['KR'],
   KR200:['KR'], KRCOMP:['KR'], EWY:['KR'], KORU:['KR'],
   SKHY:['ADR','KR'],
   // ADR/ADS products, with home-market origin where it is useful context.
-  TSM:['ADR','TW'], EWT:['TW'], BABA:['ADR'], ARM:['ADR'], NVO:['ADR'], NOK:['ADR'],
+  TSM:['ADR','TW'], EWT:['TW'], BABA:['ADR','CN'], JD:['ADR','CN'], PDD:['ADR','CN'],
+  NIO:['ADR','CN'], FUTU:['ADR','HK'], ASML:['ADR'], ARM:['ADR'], NVO:['ADR'], NOK:['ADR'],
   SONY:['ADR','JP'],
   // Other non-U.S. primary markets currently represented by venue catalogs.
-  SOFTBANK:['JP'], KIOXIA:['JP'], JP225:['JP'], EWJ:['JP'],
-  CXMT:['CN'], UNITREE:['CN'], FXI:['CN'], KWEB:['CN'], KSTR:['CN'],
+  SOFTBANK:['JP'], KIOXIA:['JP'], IBIDEN:['JP'], JP225:['JP'], EWJ:['JP'],
+  CXMT:['CN'], GIGADEV:['HK','CN'], UNITREE:['CN'], FXI:['CN'], KWEB:['CN'], KSTR:['CN'],
 };
 
 function marketTagsForAsset(assetOrSymbol) {
@@ -2431,12 +2461,16 @@ function logLoad(msg) {
 
 const TRADE_XYZ_COMMODITY_SYMBOLS = new Set([
   'GOLD','SILVER','CL','COPPER','NATGAS','URANIUM','ALUMINIUM','PLATINUM',
-  'PALLADIUM','BRENTOIL','CORN','WHEAT','TTF'
+  'PALLADIUM','BRENTOIL','CORN','WHEAT','TTF','H100'
 ]);
 const TRADE_XYZ_INDEX_SYMBOLS = new Set([
-  'SP500','XYZ100','VIX','KR200','JP225','NIFTY','IBOV','H100','VOL'
+  'SP500','XYZ100','VIX','KR200','JP225','NIFTY','IBOV','VOL'
 ]);
 const TRADE_XYZ_FX_SYMBOLS = new Set(['DXY','EUR','JPY','GBP','KRW']);
+const TRADE_XYZ_ALLOWED_RWA_TYPES = new Set([
+  'stock','stocks','equity','equities','etf','commodity','commodities',
+  'index','indices','fx','forex','preipo','pre-ipo'
+]);
 // Fail-closed snapshot of the current official xyz DEX universe. New markets
 // are accepted dynamically when perpCategories identifies them as non-crypto;
 // if that identity endpoint is unavailable, only this audited RWA set is used.
@@ -2556,7 +2590,10 @@ async function fetchTradeXyz() {
     let rawName = u.name || '';
     const venueCoin = (rawName.includes(':') ? rawName.split(':')[1] : rawName).toUpperCase();
     const officialType = officialCategoryByCoin[String(rawName).toLowerCase()] || officialCategoryByCoin[`xyz:${venueCoin}`.toLowerCase()] || '';
-    if (officialType.toLowerCase() === 'crypto') continue;
+    // Fail closed: only explicit real-world product classes are accepted.
+    // This is stronger than merely excluding the current `crypto` label and
+    // protects against future unrelated category names leaking into the DEX.
+    if (officialType && !TRADE_XYZ_ALLOWED_RWA_TYPES.has(officialType.toLowerCase())) continue;
     if (!officialType && !TRADE_XYZ_KNOWN_RWA_SYMBOLS.has(venueCoin)) continue;
     const cat = tradeXyzCategory(venueCoin, u.fullName || '', officialType);
     const coin = canonicalSymbolForCategory(venueCoin, cat);
@@ -2599,6 +2636,14 @@ async function fetchTradeXyz() {
 // API: Bitget
 // ═══════════════════════════════════════════════
 
+const BITGET_ALLOWED_RWA_TYPES = new Set(['stock','metal','commodity']);
+const BITGET_RWA_TYPE_EXCEPTIONS = Object.freeze({
+  // Bitget currently flags this official RWA contract as `crypto`, while the
+  // instrument is Kuaishou Technology (HKEX 1024). Keep the exception exact
+  // and reject any future crypto-typed rows by default.
+  KUAISHOU: { name:'Kuaishou Technology', category:'equity' }
+});
+
 async function fetchBitget() {
   const API_BASE = 'https://api.bitget.com';
   const PRODUCT_TYPE = 'USDT-FUTURES';
@@ -2626,9 +2671,12 @@ async function fetchBitget() {
     fundingMap[row.symbol] = row;
   });
 
-  const rwaContracts = (Array.isArray(contractsRaw) ? contractsRaw : []).filter(c =>
-    String(c.isRwa || '').toLowerCase() === 'yes' && c.status === 'online'
-  );
+  const rwaContracts = (Array.isArray(contractsRaw) ? contractsRaw : []).filter(c => {
+    const venueBase = String(c.baseCoin || '').toUpperCase();
+    const officialType = String(c.symbolType || '').toLowerCase();
+    return String(c.isRwa || '').toLowerCase() === 'yes' && c.status === 'online' &&
+      (BITGET_ALLOWED_RWA_TYPES.has(officialType) || Boolean(BITGET_RWA_TYPE_EXCEPTIONS[venueBase]));
+  });
   logLoad(`Bitget: ${rwaContracts.length} RWA contracts`);
 
   // Index tickers by symbol
@@ -2640,7 +2688,10 @@ async function fetchBitget() {
   for (const contract of rwaContracts) {
     const symbol = contract.symbol;
     const venueBase = (contract.baseCoin || symbol.replace(/USDT$/i, '')).toUpperCase();
-    const normalized = normalizeOfficialRwaSymbol(venueBase, contract.symbolType, contract.symbolName || '');
+    const identityException = BITGET_RWA_TYPE_EXCEPTIONS[venueBase];
+    const normalized = identityException
+      ? { symbol: canonicalSymbolForCategory(venueBase, identityException.category), category: identityException.category }
+      : normalizeOfficialRwaSymbol(venueBase, contract.symbolType, contract.symbolName || '');
     const base = normalized.symbol;
     if (EXCLUDED_SYMBOLS.has(base)) continue;
     const t = tickerMap[symbol] || {};
@@ -2664,8 +2715,9 @@ async function fetchBitget() {
     }
 
     const cat = normalized.category;
-    registerRwaAsset(base, contract.symbolName || '', cat);
-    const fullName = KNOWN_NAMES[base] || (contract.symbolName || base);
+    const officialName = identityException?.name || contract.symbolName || '';
+    registerRwaAsset(base, officialName, cat);
+    const fullName = KNOWN_NAMES[base] || officialName || base;
 
     const cMaker = parseFloat(contract.makerFeeRate);
     const cTaker = parseFloat(contract.takerFeeRate);
@@ -5866,7 +5918,17 @@ function _isRwaSpotBase(base, venue = '') {
   let suffixUnderlying = '';
   if (up.length >= 5 && up.endsWith('ON')) suffixUnderlying = up.slice(0, -2);
   else if (up.length >= 5 && up.endsWith('X')) suffixUnderlying = up.slice(0, -1);
-  if (suffixUnderlying && isTradableRwaSymbol(suffixUnderlying)) return true;
+  if (suffixUnderlying && isTradableRwaSymbol(suffixUnderlying)) {
+    // Generic suffix matching is not sufficient proof: an unrelated crypto
+    // token can also end in X/ON. Gate has no asset-class field on spot pairs,
+    // so require an exact audited wrapper or an underlying independently
+    // confirmed by an authoritative tokenized-asset catalog.
+    if (venue === 'gate') {
+      const canonicalUnderlying = canonicalSymbol(suffixUnderlying);
+      return GATE_SPOT_VERIFIED_WRAPPERS.has(up) || OFFICIAL_TOKENIZED_UNDERLYINGS.has(canonicalUnderlying);
+    }
+    return false;
+  }
 
   // 3. WHITELIST of commodity/FX tokens known to be genuine on spot exchanges.
   //    Generic commodity tickers (CORN, BRN, OIL, WHEAT…) are crypto tokens
@@ -6658,12 +6720,28 @@ const ASSET_META = {
 // venue catalogs add dynamic entries to ASSET_META.
 const STATIC_SPOT_ASSET_KEYS = new Set(Object.keys(ASSET_META));
 
+// Exact Gate spot wrappers audited against Bitget Reality and Kraken xStocks
+// on 2026-08-07. The dynamic underlying set below permits newly cross-verified
+// listings while keeping unknown suffix collisions fail-closed.
+const GATE_SPOT_VERIFIED_WRAPPERS = new Set([
+  'SPCXX','CRCLX','HOODON','SLVON','NVDAX','COINON','ACNON','PLTRON','SPYX','MSFTON',
+  'AMDON','TSLAON','AMZNON','SKHYON','TSLAX','CRCLON','SPCXON','MSTRON','METAON','SPYON',
+  'GOOGLX','AAPLON','AVGOON','QQQON','MSTRX','COINX','GOOGLON','BABAON','IAUON','IEFAON',
+  'NFLXON','AGGON','CSCOON','JPMON','UNHON','LLYON','AAPLX','PEPON','NVDAON','MCDON',
+  'CVXON','HOODX','LMTON','SBUXON','ABTON','NFLXX','AVGOX','TQQQX','TLTON','CSCOX',
+  'CRWDX','ABBVX','AMZNX','METAX','CMCSAX','SBETON','DFDVX','BTGOON'
+]);
+const OFFICIAL_TOKENIZED_UNDERLYINGS = new Set([
+  'AAPL','TSLA','NVDA','GOOGL','AMZN','META','MSFT','SPY','MSTR','COIN','XAU'
+]);
+
 function registerSpotAssetMeta(token, underlyingSymbol, issuer, category, venue = '') {
   const tokenKey = String(token || '').toUpperCase();
   const rawUnderlying = String(underlyingSymbol || '').toUpperCase();
   const resolvedCategory = category || (ETF_SYMBOLS.has(rawUnderlying) ? 'etf' : (PRE_IPO_SYMBOLS.has(rawUnderlying) ? 'pre-ipo' : 'equity'));
   const underlying = canonicalSymbolForCategory(rawUnderlying, resolvedCategory);
   if (!tokenKey || !underlying) return;
+  if (['bitget','kraken','binance'].includes(venue)) OFFICIAL_TOKENIZED_UNDERLYINGS.add(underlying);
   const isAmbiguousSecurity = _assetCategoryFamily(resolvedCategory) === 'security' && AMBIGUOUS_SHORT_SYMBOLS.has(underlying);
   const underlyingName = isAmbiguousSecurity ? '' : KNOWN_NAMES[underlying];
   const priorVenues = Array.isArray(ASSET_META[tokenKey]?.venues) ? ASSET_META[tokenKey].venues : [];
