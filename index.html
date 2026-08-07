@@ -884,37 +884,147 @@ td:first-child { text-align: left; }
 /* ═══════════════════════════════════════════════════
    HEATMAP
    ═══════════════════════════════════════════════════ */
-.heatmap-wrap { padding: 20px 24px; }
-.heatmap-grid { display: grid; gap: 2px; }
+.heatmap-wrap { padding: 20px 24px 28px; }
+.heatmap-heading-row {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 24px; margin-bottom: 14px;
+}
+.heatmap-kicker {
+  font-size: 10px; font-weight: 800; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--accent); margin-bottom: 5px;
+}
+.heatmap-summary {
+  display: grid; grid-template-columns: repeat(4, minmax(112px, 1fr));
+  gap: 8px; min-width: min(100%, 520px);
+}
+.hm-stat {
+  padding: 9px 11px; border: 1px solid var(--border); border-radius: 10px;
+  background: rgba(255,255,255,.58); min-width: 0;
+}
+.hm-stat-label {
+  color: var(--foreground-dim); font-size: 9px; font-weight: 700;
+  letter-spacing: .04em; text-transform: uppercase; white-space: nowrap;
+}
+.hm-stat-value {
+  margin-top: 3px; font: 700 14px/1.2 'JetBrains Mono', monospace;
+  color: var(--foreground);
+}
+.hm-stat-value.positive { color: #248A3D; }
+.hm-stat-value.negative { color: #D70015; }
+.heatmap-reading-guide {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 10px 12px; margin-bottom: 10px; border-radius: 10px;
+  background: rgba(0,122,255,.045); border: 1px solid rgba(0,122,255,.10);
+  color: var(--foreground-sec); font-size: 11px;
+}
+.hm-guide-title { font-weight: 750; color: var(--foreground); }
+.hm-guide-example {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: 'JetBrains Mono', monospace; font-weight: 650;
+}
+.hm-guide-example.positive { color: #248A3D; }
+.hm-guide-example.negative { color: #D70015; }
+.heatmap-controls {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.hm-search {
+  width: 220px; height: 34px; padding: 0 11px; border: 1px solid var(--border);
+  border-radius: 9px; background: rgba(255,255,255,.72); color: var(--foreground);
+  outline: none; font: 500 12px/1.2 inherit;
+}
+.hm-search:focus { border-color: rgba(0,122,255,.35); box-shadow: 0 0 0 3px rgba(0,122,255,.07); }
+.hm-mode-group {
+  display: inline-flex; padding: 3px; border: 1px solid var(--border);
+  border-radius: 9px; background: rgba(120,120,128,.055);
+}
+.hm-mode-btn {
+  border: 0; background: transparent; color: var(--foreground-sec);
+  border-radius: 6px; padding: 6px 10px; cursor: pointer;
+  font-size: 11px; font-weight: 650;
+}
+.hm-mode-btn.active {
+  color: var(--foreground); background: #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+}
+.hm-sort-select {
+  height: 34px; padding: 0 30px 0 10px; border: 1px solid var(--border);
+  border-radius: 9px; background: rgba(255,255,255,.72); color: var(--foreground-sec);
+  font-size: 11px; font-weight: 600; outline: none;
+}
+.hm-result-count { margin-left: auto; color: var(--foreground-dim); font-size: 11px; }
+.heatmap-table-scroll {
+  overflow: auto; max-height: min(68vh, 760px); border: 1px solid var(--border);
+  border-radius: 12px; background: rgba(255,255,255,.34);
+}
+.heatmap-grid { display: grid; gap: 4px 6px; padding: 6px; min-width: 1040px; }
 .hm-header {
-  font-size: 11px; font-weight: 700; color: var(--foreground-sec);
-  padding: 8px 6px; text-align: center;
-  background: rgba(120,120,128,0.04); border-radius: var(--radius-sm);
-  border: 1px solid rgba(0,0,0,0.04);
+  position: sticky; top: 0; z-index: 4;
+  font-size: 10px; font-weight: 750; color: var(--foreground-sec);
+  padding: 9px 7px; text-align: center;
+  background: rgba(248,249,251,.96); border-radius: 7px;
+  border: 1px solid rgba(0,0,0,0.055); backdrop-filter: blur(12px);
+}
+.hm-header:first-child { left: 0; z-index: 6; text-align: left; padding-left: 12px; }
+.hm-header.sortable { cursor: pointer; }
+.hm-header.sortable:hover, .hm-header.sort-active { color: var(--accent); border-color: rgba(0,122,255,.18); }
+.hm-header-hint { display: block; margin-top: 2px; color: var(--foreground-dim); font-size: 8px; font-weight: 500; }
+.hm-row-index {
+  width: 20px; color: var(--foreground-dim); font: 600 9px/1 'JetBrains Mono', monospace;
+  flex: 0 0 auto;
 }
 .hm-asset-label {
-  font-size: 12px; font-weight: 600; padding: 8px 10px;
-  display: flex; align-items: center; gap: 6px;
-  background: rgba(120,120,128,0.04); border-radius: var(--radius-sm);
-  border: 1px solid rgba(0,0,0,0.04);
+  position: sticky; left: 0; z-index: 2;
+  font-size: 12px; font-weight: 600; padding: 7px 10px;
+  display: flex; align-items: center; gap: 7px; min-width: 0;
+  background: rgba(248,249,251,.98); border-radius: 8px;
+  border: 1px solid rgba(0,0,0,.055);
+}
+.hm-asset-copy { min-width: 0; flex: 1; }
+.hm-asset-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.hm-asset-name {
+  margin-top: 2px; color: var(--foreground-dim); font-size: 9px; font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.hm-coverage {
+  color: var(--foreground-dim); font: 600 9px/1 'JetBrains Mono', monospace;
+  white-space: nowrap;
 }
 .hm-cell {
-  padding: 8px 6px; text-align: center; border-radius: 6px;
-  font-size: 12px; font-weight: 600;
-  cursor: pointer; transition: transform 0.15s ease-out, box-shadow 0.15s ease-out;
+  min-height: 48px; padding: 7px 6px; text-align: center; border-radius: 8px;
+  font-size: 12px; font-weight: 600; display: flex; flex-direction: column;
+  justify-content: center; cursor: pointer;
+  transition: transform 0.12s ease-out, box-shadow 0.12s ease-out;
   position: relative;
-  border: 1px solid transparent;
+  border: 1px solid rgba(0,0,0,.035);
 }
-.hm-cell:hover { transform: scale(1.05); box-shadow: 0 4px 16px rgba(0,0,0,0.10); z-index: 2; border-color: rgba(0,0,0,0.12); }
-.hm-val { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; }
-.hm-ann { font-size: 10px; opacity: 0.6; margin-top: 1px; }
-.hm-cell.na { background: rgba(120,120,128,0.04); color: var(--foreground-dim); }
+.hm-cell:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(0,0,0,.09); z-index: 3; border-color: rgba(0,0,0,.13); }
+.hm-val { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 750; }
+.hm-ann { font-size: 9px; opacity: .72; margin-top: 2px; font-weight: 650; }
+.hm-cell.na { background: rgba(120,120,128,.035); color: var(--foreground-dim); cursor: default; }
+.hm-cell.na:hover { transform: none; box-shadow: none; border-color: rgba(0,0,0,.035); }
+.hm-spread-cell {
+  min-height: 48px; padding: 7px 8px; border-radius: 8px; display: flex;
+  flex-direction: column; justify-content: center; text-align: right;
+  background: rgba(120,120,128,.04); border: 1px solid rgba(0,0,0,.04);
+}
+.hm-spread-value { font: 700 12px/1.2 'JetBrains Mono', monospace; color: var(--foreground); }
+.hm-spread-label { margin-top: 2px; color: var(--foreground-dim); font-size: 8px; }
+.hm-empty {
+  grid-column: 1 / -1; padding: 42px 20px; text-align: center;
+  color: var(--foreground-dim); font-size: 12px;
+}
+.hm-load-more {
+  display: block; margin: 12px auto 0; padding: 8px 16px; border-radius: 9px;
+  border: 1px solid var(--border); background: rgba(255,255,255,.68);
+  color: var(--foreground-sec); font-size: 11px; font-weight: 650; cursor: pointer;
+}
+.hm-load-more:hover { color: var(--foreground); border-color: rgba(0,122,255,.2); }
 
 /* Heatmap legend */
 .heatmap-legend {
-  display: flex; align-items: center; gap: 16px;
-  margin-top: 16px; padding-top: 12px;
-  border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  margin-top: 12px;
   font-size: 11px; color: var(--foreground-dim);
 }
 .legend-item { display: flex; align-items: center; gap: 5px; }
@@ -1082,6 +1192,8 @@ input[type="checkbox"] {
   .venue-cards-grid { grid-template-columns: 1fr; }
   .vc-metrics { grid-template-columns: repeat(2, 1fr); }
   .modal-grid { grid-template-columns: 1fr; }
+  .heatmap-heading-row { flex-direction: column; gap: 12px; }
+  .heatmap-summary { width: 100%; min-width: 0; }
 }
 @media (max-width: 640px) {
   .kpi-strip { grid-template-columns: 1fr; }
@@ -1089,6 +1201,12 @@ input[type="checkbox"] {
   .header { padding: 0 16px; }
   .summary-page, .table-wrap, .heatmap-wrap { padding-left: 16px; padding-right: 16px; }
   .filter-bar { padding: 8px 16px; }
+  .heatmap-summary { grid-template-columns: repeat(2, 1fr); }
+  .hm-search { width: 100%; }
+  .hm-mode-group { width: 100%; }
+  .hm-mode-btn { flex: 1; }
+  .hm-sort-select { flex: 1; }
+  .hm-result-count { margin-left: 0; }
 }
 </style>
 </head>
@@ -1444,22 +1562,46 @@ input[type="checkbox"] {
 <!-- ══ HEATMAP ══ -->
 <div class="view-container" id="view-heatmap">
   <div class="heatmap-wrap">
-    <div class="section-title">Funding Rate Heatmap</div>
-    <div class="section-subtitle">Current funding rates across venues — Green = longs pay shorts · Red = shorts pay longs · Blue = near-zero · Gray = no data</div>
-    <div style="display:flex;align-items:center;gap:8px;margin:12px 0 14px">
-      <span style="font-size:11px;color:var(--foreground-dim);font-weight:600">Sort by</span>
-      <div class="chip" onclick="setHeatmapSort('tradexyz',this)"><span class="venue-dot tradexyz" style="margin-right:4px"></span>trade.xyz</div>
-      <div class="chip" onclick="setHeatmapSort('bitget',this)"><span class="venue-dot bitget" style="margin-right:4px"></span>Bitget</div>
-      <div class="chip" onclick="setHeatmapSort('gate',this)"><span class="venue-dot gate" style="margin-right:4px"></span>Gate.io</div>
-      <div class="chip" onclick="setHeatmapSort('binance',this)"><span class="venue-dot binance" style="margin-right:4px"></span>Binance</div>
+    <div class="heatmap-heading-row">
+      <div>
+        <div class="heatmap-kicker">Funding scanner</div>
+        <div class="section-title">Funding Opportunity Matrix</div>
+        <div class="section-subtitle">Annualized snapshot across venues. Click a rate for contract details and funding interval.</div>
+      </div>
+      <div class="heatmap-summary" id="heatmapStats"></div>
     </div>
-    <div class="heatmap-grid" id="heatmapGrid"></div>
+    <div class="heatmap-reading-guide">
+      <span class="hm-guide-title">How to read</span>
+      <span class="hm-guide-example positive">+26.6% APR → short receives</span>
+      <span class="hm-guide-example negative">−26.6% APR → long receives</span>
+      <span>Color intensity is capped robustly so one extreme contract does not flatten the rest.</span>
+    </div>
+    <div class="heatmap-controls">
+      <input class="hm-search" id="heatmapSearch" placeholder="Search ticker or name…" aria-label="Search heatmap assets" oninput="setHeatmapSearch(this.value)">
+      <div class="hm-mode-group" aria-label="Heatmap view">
+        <button class="hm-mode-btn active" data-hm-mode="opportunities" onclick="setHeatmapMode('opportunities',this)">Top opportunities</button>
+        <button class="hm-mode-btn" data-hm-mode="multivenue" onclick="setHeatmapMode('multivenue',this)">Multi-venue</button>
+        <button class="hm-mode-btn" data-hm-mode="all" onclick="setHeatmapMode('all',this)">All assets</button>
+      </div>
+      <select class="hm-sort-select" id="heatmapSort" aria-label="Sort heatmap" onchange="setHeatmapSort(this.value)">
+        <option value="opportunity">Sort: largest |APR|</option>
+        <option value="spread">Sort: widest venue spread</option>
+        <option value="volume">Sort: highest 24h volume</option>
+        <option value="venue:tradexyz">Sort: trade.xyz |APR|</option>
+        <option value="venue:bitget">Sort: Bitget |APR|</option>
+        <option value="venue:gate">Sort: Gate.io |APR|</option>
+        <option value="venue:binance">Sort: Binance |APR|</option>
+      </select>
+      <span class="hm-result-count" id="heatmapResultCount"></span>
+    </div>
+    <div class="heatmap-table-scroll"><div class="heatmap-grid" id="heatmapGrid"></div></div>
+    <button class="hm-load-more" id="heatmapLoadMore" onclick="showMoreHeatmap()" style="display:none"></button>
     <div class="heatmap-legend">
-      <div class="legend-item"><div class="legend-swatch" style="background:rgba(52,199,89,0.35)"></div>Positive (longs pay)</div>
-      <div class="legend-item"><div class="legend-swatch" style="background:rgba(255,59,48,0.35)"></div>Negative (shorts pay)</div>
-      <div class="legend-item"><div class="legend-swatch" style="background:rgba(59,130,246,0.3)"></div>Near-zero</div>
-      <div class="legend-item"><div class="legend-swatch" style="background:rgba(92,97,112,0.2)"></div>No data</div>
-      <div style="margin-left:auto;font-size:11px;color:var(--foreground-dim)">Deeper color = higher |APR|</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:rgba(52,199,89,.28)"></div>Positive funding · short side receives</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:rgba(255,59,48,.28)"></div>Negative funding · long side receives</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:rgba(0,122,255,.08)"></div>Near zero</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:rgba(92,97,112,.08)"></div>Unavailable</div>
+      <div style="margin-left:auto;font-size:10px">APR annualizes the current funding period; it is not a return forecast.</div>
     </div>
   </div>
 </div>
@@ -5541,24 +5683,54 @@ function renderAssetView() {
 // HEATMAP
 // ═══════════════════════════════════════════════════
 
-let heatmapSortVenue = null; // null = default volume sort
-function setHeatmapSort(venue, el) {
-  // Toggle: click again to deselect
-  if (heatmapSortVenue === venue) { heatmapSortVenue = null; }
-  else { heatmapSortVenue = venue; }
-  el.parentElement.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
-  if (heatmapSortVenue) el.classList.add('active');
+let heatmapSort = 'opportunity';
+let heatmapMode = 'opportunities';
+let heatmapSearchQuery = '';
+let heatmapLimit = 40;
+
+function setHeatmapSort(sort) {
+  heatmapSort = sort || 'opportunity';
+  heatmapLimit = 40;
+  const select = document.getElementById('heatmapSort');
+  if (select && [...select.options].some(o => o.value === heatmapSort)) select.value = heatmapSort;
   renderHeatmap();
+}
+
+function setHeatmapMode(mode, el) {
+  heatmapMode = mode;
+  heatmapLimit = 40;
+  document.querySelectorAll('.hm-mode-btn').forEach(b => b.classList.toggle('active', b.dataset.hmMode === mode));
+  if (el) el.classList.add('active');
+  renderHeatmap();
+}
+
+function setHeatmapSearch(value) {
+  heatmapSearchQuery = String(value || '').trim().toLowerCase();
+  heatmapLimit = 40;
+  renderHeatmap();
+}
+
+function showMoreHeatmap() {
+  heatmapLimit += 40;
+  renderHeatmap();
+}
+
+function fmtHeatmapApr(rate) {
+  if (!Number.isFinite(rate)) return 'Unavailable';
+  const pct = rate * 100;
+  const digits = Math.abs(pct) >= 100 ? 0 : Math.abs(pct) >= 10 ? 1 : 2;
+  return `${pct > 0 ? '+' : pct < 0 ? '−' : ''}${Math.abs(pct).toFixed(digits)}%`;
 }
 
 function renderHeatmap() {
   const grid = document.getElementById('heatmapGrid');
+  const stats = document.getElementById('heatmapStats');
+  const resultCount = document.getElementById('heatmapResultCount');
+  const loadMore = document.getElementById('heatmapLoadMore');
+  if (!grid) return;
   grid.innerHTML = '';
   const fData = getFilteredData();
   const venueKeys = Object.keys(VENUES).filter(v => fData.some(d => d.venue === v));
-  grid.style.gridTemplateColumns = `180px repeat(${venueKeys.length}, 1fr)`;
-  grid.innerHTML += `<div class="hm-header" style="visibility:hidden"></div>`;
-  venueKeys.forEach(v => { grid.innerHTML += `<div class="hm-header"><span class="venue-dot ${v}"></span> ${VENUES[v].name}</div>`; });
 
   const grouped = {};
   fData.forEach(d => {
@@ -5566,56 +5738,126 @@ function renderHeatmap() {
     grouped[d.coin].venues[d.venue] = d;
   });
 
-  const assetList = Object.values(grouped);
+  const allAssets = Object.values(grouped).map(a => {
+    const rates = venueKeys.map(v => {
+      const d = a.venues[v];
+      if (!d || d.funding === null) return null;
+      const apr = annualize(d.funding, v, d);
+      return Number.isFinite(apr) ? {venue:v, apr, data:d} : null;
+    }).filter(Boolean);
+    const aprs = rates.map(r => r.apr);
+    a.rateRows = rates;
+    a.coverage = rates.length;
+    a.maxAbsApr = aprs.length ? Math.max(...aprs.map(Math.abs)) : -1;
+    a.spreadApr = aprs.length >= 2 ? Math.max(...aprs) - Math.min(...aprs) : null;
+    a.totalVolume = Object.values(a.venues).reduce((sum, d) => sum + (Number(d.volume) || 0), 0);
+    return a;
+  });
 
-  // Sort: by selected venue's |APR| desc, or default volume
-  if (heatmapSortVenue && VENUES[heatmapSortVenue]) {
-    const sv = heatmapSortVenue;
-    assetList.sort((a, b) => {
-      const aR = a.venues[sv] && a.venues[sv].funding !== null ? Math.abs(annualize(a.venues[sv].funding, sv, a.venues[sv]) || 0) : -1;
-      const bR = b.venues[sv] && b.venues[sv].funding !== null ? Math.abs(annualize(b.venues[sv].funding, sv, b.venues[sv]) || 0) : -1;
-      return bR - aR;
-    });
-  } else {
-    assetList.sort((a, b) => {
-      const aV = Object.values(a.venues).reduce((s,v)=>s+v.volume,0);
-      const bV = Object.values(b.venues).reduce((s,v)=>s+v.volume,0);
-      return bV - aV;
-    });
+  const allRates = allAssets.flatMap(a => a.rateRows.map(r => r.apr));
+  const positiveRates = allRates.filter(r => r > 0);
+  const negativeRates = allRates.filter(r => r < 0);
+  const multiVenueCount = allAssets.filter(a => a.coverage >= 2).length;
+  const possibleCells = allAssets.length * Math.max(venueKeys.length, 1);
+  const coveragePct = possibleCells ? (allRates.length / possibleCells * 100) : 0;
+  const maxPositive = positiveRates.length ? Math.max(...positiveRates) : null;
+  const minNegative = negativeRates.length ? Math.min(...negativeRates) : null;
+  if (stats) {
+    stats.innerHTML = `
+      <div class="hm-stat"><div class="hm-stat-label">Short receives</div><div class="hm-stat-value positive">${fmtHeatmapApr(maxPositive)}</div></div>
+      <div class="hm-stat"><div class="hm-stat-label">Long receives</div><div class="hm-stat-value negative">${fmtHeatmapApr(minNegative)}</div></div>
+      <div class="hm-stat"><div class="hm-stat-label">Multi-venue</div><div class="hm-stat-value">${multiVenueCount}</div></div>
+      <div class="hm-stat"><div class="hm-stat-label">Data coverage</div><div class="hm-stat-value">${coveragePct.toFixed(0)}%</div></div>`;
   }
 
-  const maxRate = Math.max(...allData.filter(d=>d.funding!==null).map(d=>Math.abs(d.funding)),0.0001);
+  let assetList = allAssets.filter(a => {
+    const matchesSearch = !heatmapSearchQuery || `${a.coin} ${a.fullName}`.toLowerCase().includes(heatmapSearchQuery);
+    if (!matchesSearch) return false;
+    if (heatmapSearchQuery) return true;
+    if (heatmapMode === 'opportunities') return a.maxAbsApr >= 0.25;
+    if (heatmapMode === 'multivenue') return a.coverage >= 2;
+    return true;
+  });
 
-  assetList.forEach(a => {
+  assetList.sort((a, b) => {
+    if (heatmapSort === 'spread') return (b.spreadApr ?? -1) - (a.spreadApr ?? -1) || b.maxAbsApr - a.maxAbsApr;
+    if (heatmapSort === 'volume') return b.totalVolume - a.totalVolume;
+    if (heatmapSort.startsWith('venue:')) {
+      const venue = heatmapSort.slice(6);
+      const aRow = a.rateRows.find(r => r.venue === venue);
+      const bRow = b.rateRows.find(r => r.venue === venue);
+      return (bRow ? Math.abs(bRow.apr) : -1) - (aRow ? Math.abs(aRow.apr) : -1);
+    }
+    return b.maxAbsApr - a.maxAbsApr || b.totalVolume - a.totalVolume;
+  });
+
+  const absRates = allRates.map(Math.abs).filter(Number.isFinite).sort((a,b) => a-b);
+  const robustIndex = Math.max(0, Math.floor((absRates.length - 1) * 0.90));
+  const colorCap = Math.max(0.25, absRates[robustIndex] || 0.25);
+  const visibleAssets = assetList.slice(0, heatmapLimit);
+
+  grid.style.gridTemplateColumns = `240px repeat(${venueKeys.length}, minmax(150px, 1fr)) 120px`;
+  grid.innerHTML += `<div class="hm-header">Asset <span class="hm-header-hint">ticker · coverage</span></div>`;
+  venueKeys.forEach(v => {
+    const sortKey = `venue:${v}`;
+    grid.innerHTML += `<div class="hm-header sortable ${heatmapSort===sortKey?'sort-active':''}" onclick="setHeatmapSort('${sortKey}')"><span class="venue-dot ${v}"></span> ${VENUES[v].name}<span class="hm-header-hint">APR · click to sort</span></div>`;
+  });
+  grid.innerHTML += `<div class="hm-header sortable ${heatmapSort==='spread'?'sort-active':''}" onclick="setHeatmapSort('spread')">Venue spread<span class="hm-header-hint">max − min APR</span></div>`;
+
+  if (!visibleAssets.length) {
+    grid.innerHTML += `<div class="hm-empty">No matching funding opportunities. Try All assets or a different search.</div>`;
+  }
+
+  visibleAssets.forEach((a, index) => {
     const cc = CAT_COLORS[a.category];
-    grid.innerHTML += `<div class="hm-asset-label"><span style="color:${cc};font-weight:700">${a.coin}</span><span style="font-size:10px;color:var(--foreground-dim)">${a.fullName}</span></div>`;
+    grid.innerHTML += `<div class="hm-asset-label"><span class="hm-row-index">${index+1}</span><div class="hm-asset-copy"><div class="hm-asset-top"><span style="color:${cc};font-weight:750">${a.coin}</span><span class="asset-tag tag-${a.category}">${String(a.category || '').toUpperCase()}</span></div><div class="hm-asset-name" title="${escapeHtml(a.fullName)}">${a.fullName}</div></div><span class="hm-coverage">${a.coverage}/${venueKeys.length}</span></div>`;
 
     venueKeys.forEach(v => {
       const d = a.venues[v];
-      if (!d) { grid.innerHTML += `<div class="hm-cell na">N/A</div>`; return; }
+      if (!d) { grid.innerHTML += `<div class="hm-cell na"><div class="hm-val">—</div><div class="hm-ann">Not listed</div></div>`; return; }
       const r = d.funding;
       if (r === null) {
-        grid.innerHTML += `<div class="hm-cell" style="background:rgba(120,120,128,0.04);color:var(--foreground-dim);font-style:italic"><div class="hm-val">N/A</div><div class="hm-ann">No data</div></div>`;
+        grid.innerHTML += `<div class="hm-cell na"><div class="hm-val">—</div><div class="hm-ann">Unavailable</div></div>`;
         return;
       }
-      const int = Math.min(Math.abs(r)/maxRate, 1);
       const annVal = annualize(r, v, d);
-      const isNearZero = annVal !== null && Math.abs(annVal) < 0.005;
+      if (!Number.isFinite(annVal)) {
+        grid.innerHTML += `<div class="hm-cell na"><div class="hm-val">—</div><div class="hm-ann">Unavailable</div></div>`;
+        return;
+      }
+      const intensity = Math.sqrt(Math.min(Math.abs(annVal) / colorCap, 1));
+      const isNearZero = Math.abs(annVal) < 0.01;
 
       let bg, col;
       if (isNearZero) {
-        bg='rgba(0,122,255,0.06)'; col='#007AFF';
-      } else if (r > 0) {
-        const opac = 0.04 + int * 0.35;
-        bg=`rgba(52,199,89,${opac.toFixed(2)})`; col=int>0.45?'#fff':'#248A3D';
+        bg='rgba(0,122,255,.055)'; col='#007AFF';
+      } else if (annVal > 0) {
+        const opacity = 0.06 + intensity * 0.34;
+        bg=`rgba(52,199,89,${opacity.toFixed(2)})`; col=intensity>.68?'#fff':'#248A3D';
       } else {
-        const opac = 0.04 + int * 0.35;
-        bg=`rgba(255,59,48,${opac.toFixed(2)})`; col=int>0.45?'#fff':'#D70015';
+        const opacity = 0.06 + intensity * 0.34;
+        bg=`rgba(255,59,48,${opacity.toFixed(2)})`; col=intensity>.68?'#fff':'#D70015';
       }
 
-      grid.innerHTML += `<div class="hm-cell" style="background:${bg};color:${col}" onclick="openHeatmapModal('${a.coin}','${v}')"><div class="hm-val">${fmtFunding(r)}</div><div class="hm-ann">${fmtAnnual(r,v,d)} APR</div></div>`;
+      const direction = isNearZero ? 'Near zero' : annVal > 0 ? 'Short receives' : 'Long receives';
+      const interval = fundingIntervalHours(v, d);
+      const title = `${VENUES[v].name}: ${fmtFunding(r)} per ${interval}h · ${fmtHeatmapApr(annVal)} APR`;
+      grid.innerHTML += `<div class="hm-cell" title="${escapeHtml(title)}" style="background:${bg};color:${col}" onclick="openHeatmapModal('${a.coin}','${v}')"><div class="hm-val">${fmtHeatmapApr(annVal)}</div><div class="hm-ann">${direction}</div></div>`;
     });
+
+    if (a.spreadApr === null) {
+      grid.innerHTML += `<div class="hm-spread-cell"><div class="hm-spread-value">—</div><div class="hm-spread-label">Need 2 venues</div></div>`;
+    } else {
+      grid.innerHTML += `<div class="hm-spread-cell"><div class="hm-spread-value">${(a.spreadApr*100).toFixed(a.spreadApr>=1?0:1)} pp</div><div class="hm-spread-label">${a.coverage} venues priced</div></div>`;
+    }
   });
+
+  if (resultCount) resultCount.textContent = `Showing ${visibleAssets.length} of ${assetList.length}${assetList.length !== allAssets.length ? ` · ${allAssets.length} total` : ''}`;
+  if (loadMore) {
+    const remaining = assetList.length - visibleAssets.length;
+    loadMore.style.display = remaining > 0 ? 'block' : 'none';
+    loadMore.textContent = remaining > 0 ? `Show ${Math.min(40, remaining)} more · ${remaining} remaining` : '';
+  }
 }
 
 // ═══════════════════════════════════════════════
