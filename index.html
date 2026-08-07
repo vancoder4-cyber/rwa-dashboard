@@ -807,6 +807,20 @@ td:first-child { text-align: left; }
 .asset-name { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .asset-type { font-size: 11px; color: var(--foreground-dim); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+.market-state-row { display:flex; align-items:center; gap:4px; margin-top:3px; flex-wrap:wrap; }
+.market-state-summary { margin-left:auto; display:inline-flex; align-items:center; gap:5px; font-size:10px; color:var(--foreground-dim); white-space:nowrap; }
+.market-state-summary strong { color:var(--foreground-sec); font-family:'JetBrains Mono',monospace; font-weight:700; }
+.data-status { display:inline-flex; align-items:center; justify-content:center; margin-top:3px; padding:1px 5px; border-radius:4px; font:600 9px/1.35 Inter,sans-serif; letter-spacing:.01em; border:1px solid transparent; white-space:nowrap; }
+.data-status.full { color:#248A3D; background:rgba(52,199,89,.09); border-color:rgba(52,199,89,.16); }
+.data-status.partial { color:#9A6700; background:rgba(255,184,0,.10); border-color:rgba(255,184,0,.20); }
+.data-status.estimated { color:#0055CC; background:rgba(0,122,255,.09); border-color:rgba(0,122,255,.17); }
+.data-status.unavailable { color:var(--foreground-dim); background:rgba(120,120,128,.08); border-color:rgba(120,120,128,.13); }
+.market-badge { display:inline-flex; align-items:center; padding:1px 5px; border-radius:4px; font:600 9px/1.35 Inter,sans-serif; background:rgba(120,120,128,.08); color:var(--foreground-dim); border:1px solid rgba(120,120,128,.12); }
+.market-badge.active, .market-badge.priced { color:#248A3D; background:rgba(52,199,89,.08); border-color:rgba(52,199,89,.15); }
+.market-badge.inactive, .market-badge.unpriced { color:#9A6700; background:rgba(255,184,0,.08); border-color:rgba(255,184,0,.17); }
+.field-value { display:flex; flex-direction:column; align-items:flex-end; }
+.field-status-legend { display:inline-flex; align-items:center; gap:5px; flex-wrap:wrap; }
+
 .asset-tag {
   display: inline-block; font-size: 9px;
   padding: 1px 6px; border-radius: 4px;
@@ -817,6 +831,7 @@ td:first-child { text-align: left; }
 .tag-index    { background: var(--info-dim); color: var(--info); }
 .tag-fx       { background: var(--pink-dim); color: var(--pink); }
 .tag-etf      { background: var(--cyan-dim); color: var(--cyan); }
+.tag-pre-ipo  { background: var(--orange-dim); color: var(--orange); }
 
 .change-badge {
   display: inline-block; padding: 2px 8px;
@@ -1159,13 +1174,14 @@ input[type="checkbox"] {
       <div class="chip" onclick="setVenueFilter('tradexyz','commodity',this)">Commodities <span class="count" id="xyzCountCommodity"></span></div>
       <div class="chip" onclick="setVenueFilter('tradexyz','index',this)">Indices <span class="count" id="xyzCountIndex"></span></div>
       <div class="chip" onclick="setVenueFilter('tradexyz','etf',this)">ETFs <span class="count" id="xyzCountEtf"></span></div>
+      <div class="chip" onclick="setVenueFilter('tradexyz','pre-ipo',this)">Pre-IPO <span class="count" id="xyzCountPreIpo"></span></div>
       <div class="chip" onclick="setVenueFilter('tradexyz','fx',this)">FX <span class="count" id="xyzCountFx"></span></div>
       <label style="display:flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;color:var(--foreground-sec);cursor:pointer;user-select:none">
-        <input type="checkbox" id="xyzHideInactive" checked onchange="renderVenueTable('tradexyz')"> Hide inactive
+        <input type="checkbox" id="xyzHideInactive" onchange="renderVenueTable('tradexyz')"> Active only
       </label>
       <input class="search-box" placeholder="Search asset..." oninput="venueTableSearch.tradexyz=this.value.toLowerCase();renderVenueTable('tradexyz')">
     </div>
-    <div class="info-bar"><span>trade.xyz (Hyperliquid HIP-3 DEX) · Funding settles every 1h · Maker 0.01% / Taker 0.035%</span><span>Auto-refresh: 30s</span></div>
+    <div class="info-bar"><span>trade.xyz (Hyperliquid HIP-3 DEX) · Funding settles every 1h · Standard Maker 0.03% / Taker 0.09% (Growth Mode may be lower)</span><span>Auto-refresh: 60s</span></div>
     <div class="table-wrap">
       <table><thead><tr>
         <th style="text-align:left" data-sort="name" onclick="setVenueSort('tradexyz','name')">Asset <span class="arrow"></span></th>
@@ -1192,13 +1208,14 @@ input[type="checkbox"] {
       <div class="chip" onclick="setVenueFilter('bitget','commodity',this)">Commodities <span class="count" id="bgCountCommodity"></span></div>
       <div class="chip" onclick="setVenueFilter('bitget','index',this)">Indices <span class="count" id="bgCountIndex"></span></div>
       <div class="chip" onclick="setVenueFilter('bitget','etf',this)">ETFs <span class="count" id="bgCountEtf"></span></div>
+      <div class="chip" onclick="setVenueFilter('bitget','pre-ipo',this)">Pre-IPO <span class="count" id="bgCountPreIpo"></span></div>
       <div class="chip" onclick="setVenueFilter('bitget','fx',this)">FX <span class="count" id="bgCountFx"></span></div>
       <label style="display:flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;color:var(--foreground-sec);cursor:pointer;user-select:none">
-        <input type="checkbox" id="bgHideInactive" checked onchange="renderVenueTable('bitget')"> Hide inactive
+        <input type="checkbox" id="bgHideInactive" checked onchange="renderVenueTable('bitget')"> Active only
       </label>
       <input class="search-box" placeholder="Search asset..." oninput="venueTableSearch.bitget=this.value.toLowerCase();renderVenueTable('bitget')">
     </div>
-    <div class="info-bar"><span>Bitget (USDT-FUTURES) · Funding settles every 8h · Fees vary per contract (default Maker 0.02% / Taker 0.06%)</span><span>Auto-refresh: 30s</span></div>
+    <div class="info-bar"><span>Bitget (USDT-FUTURES) · Funding settles per contract · Fees vary per contract (default Maker 0.02% / Taker 0.06%)</span><span>Auto-refresh: 60s</span></div>
     <div class="table-wrap">
       <table><thead><tr>
         <th style="text-align:left" data-sort="name" onclick="setVenueSort('bitget','name')">Asset <span class="arrow"></span></th>
@@ -1224,13 +1241,14 @@ input[type="checkbox"] {
       <div class="chip" onclick="setVenueFilter('gate','commodity',this)">Commodities <span class="count" id="gateCountCommodity"></span></div>
       <div class="chip" onclick="setVenueFilter('gate','index',this)">Indices <span class="count" id="gateCountIndex"></span></div>
       <div class="chip" onclick="setVenueFilter('gate','etf',this)">ETFs <span class="count" id="gateCountEtf"></span></div>
+      <div class="chip" onclick="setVenueFilter('gate','pre-ipo',this)">Pre-IPO <span class="count" id="gateCountPreIpo"></span></div>
       <div class="chip" onclick="setVenueFilter('gate','fx',this)">FX <span class="count" id="gateCountFx"></span></div>
       <label style="display:flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;color:var(--foreground-sec);cursor:pointer;user-select:none">
-        <input type="checkbox" id="gateHideInactive" checked onchange="renderVenueTable('gate')"> Hide inactive
+        <input type="checkbox" id="gateHideInactive" checked onchange="renderVenueTable('gate')"> Active only
       </label>
       <input class="search-box" placeholder="Search asset..." oninput="venueTableSearch.gate=this.value.toLowerCase();renderVenueTable('gate')">
     </div>
-    <div class="info-bar"><span>Gate.io (USDT Perpetual) · Funding settles every 8h · Fees vary per contract (default Maker 0.015% / Taker 0.05%)</span><span>Auto-refresh: 30s</span></div>
+    <div class="info-bar"><span>Gate.io (USDT Perpetual) · Funding interval varies by contract · Fees vary per contract (default Maker 0.015% / Taker 0.05%)</span><span>Auto-refresh: 60s</span></div>
     <div class="table-wrap">
       <table><thead><tr>
         <th style="text-align:left" data-sort="name" onclick="setVenueSort('gate','name')">Asset <span class="arrow"></span></th>
@@ -1257,13 +1275,14 @@ input[type="checkbox"] {
       <div class="chip" onclick="setVenueFilter('binance','commodity',this)">Commodities <span class="count" id="bnCountCommodity"></span></div>
       <div class="chip" onclick="setVenueFilter('binance','index',this)">Indices <span class="count" id="bnCountIndex"></span></div>
       <div class="chip" onclick="setVenueFilter('binance','etf',this)">ETFs <span class="count" id="bnCountEtf"></span></div>
+      <div class="chip" onclick="setVenueFilter('binance','pre-ipo',this)">Pre-IPO <span class="count" id="bnCountPreIpo"></span></div>
       <div class="chip" onclick="setVenueFilter('binance','fx',this)">FX <span class="count" id="bnCountFx"></span></div>
       <label style="display:flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;color:var(--foreground-sec);cursor:pointer;user-select:none">
-        <input type="checkbox" id="bnHideInactive" checked onchange="renderVenueTable('binance')"> Hide inactive
+        <input type="checkbox" id="bnHideInactive" checked onchange="renderVenueTable('binance')"> Active only
       </label>
       <input class="search-box" placeholder="Search asset..." oninput="venueTableSearch.binance=this.value.toLowerCase();renderVenueTable('binance')">
     </div>
-    <div class="info-bar"><span>Binance (USDT-M Perpetual) · Funding settles every 8h · Fees vary per contract (default Maker 0.02% / Taker 0.05%)</span><span>Auto-refresh: 30s</span></div>
+    <div class="info-bar"><span>Binance (USDT-M Perpetual) · Funding settles every 8h · Fees vary per contract (default Maker 0.02% / Taker 0.05%)</span><span>Auto-refresh: 60s</span></div>
     <div class="table-wrap">
       <table><thead><tr>
         <th style="text-align:left" data-sort="name" onclick="setVenueSort('binance','name')">Asset <span class="arrow"></span></th>
@@ -1290,13 +1309,14 @@ input[type="checkbox"] {
       <div class="chip" onclick="setVenueFilter('lighter','commodity',this)">Commodities <span class="count" id="ltCountCommodity"></span></div>
       <div class="chip" onclick="setVenueFilter('lighter','index',this)">Indices <span class="count" id="ltCountIndex"></span></div>
       <div class="chip" onclick="setVenueFilter('lighter','etf',this)">ETFs <span class="count" id="ltCountEtf"></span></div>
+      <div class="chip" onclick="setVenueFilter('lighter','pre-ipo',this)">Pre-IPO <span class="count" id="ltCountPreIpo"></span></div>
       <div class="chip" onclick="setVenueFilter('lighter','fx',this)">FX <span class="count" id="ltCountFx"></span></div>
       <label style="display:flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;color:var(--foreground-sec);cursor:pointer;user-select:none">
-        <input type="checkbox" id="ltHideInactive" checked onchange="renderVenueTable('lighter')"> Hide inactive
+        <input type="checkbox" id="ltHideInactive" checked onchange="renderVenueTable('lighter')"> Active only
       </label>
       <input class="search-box" placeholder="Search asset..." oninput="venueTableSearch.lighter=this.value.toLowerCase();renderVenueTable('lighter')">
     </div>
-    <div class="info-bar"><span>Lighter (zkLighter Perps) · Funding settles every 8h · Off-chain order matching</span><span>Auto-refresh: 30s</span></div>
+    <div class="info-bar"><span>Lighter (zkLighter Perps) · Funding settles every 1h · Premium base fees Maker 0.004% / Taker 0.028% (Standard 0%)</span><span>Auto-refresh: 60s</span></div>
     <div class="table-wrap">
       <table><thead><tr>
         <th style="text-align:left" data-sort="name" onclick="setVenueSort('lighter','name')">Asset <span class="arrow"></span></th>
@@ -1323,13 +1343,14 @@ input[type="checkbox"] {
       <div class="chip" onclick="setVenueFilter('vest','commodity',this)">Commodities <span class="count" id="vstCountCommodity"></span></div>
       <div class="chip" onclick="setVenueFilter('vest','index',this)">Indices <span class="count" id="vstCountIndex"></span></div>
       <div class="chip" onclick="setVenueFilter('vest','etf',this)">ETFs <span class="count" id="vstCountEtf"></span></div>
+      <div class="chip" onclick="setVenueFilter('vest','pre-ipo',this)">Pre-IPO <span class="count" id="vstCountPreIpo"></span></div>
       <div class="chip" onclick="setVenueFilter('vest','fx',this)">FX <span class="count" id="vstCountFx"></span></div>
       <label style="display:flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;color:var(--foreground-sec);cursor:pointer;user-select:none">
-        <input type="checkbox" id="vstHideInactive" checked onchange="renderVenueTable('vest')"> Hide inactive
+        <input type="checkbox" id="vstHideInactive" checked onchange="renderVenueTable('vest')"> Active only
       </label>
       <input class="search-box" placeholder="Search asset..." oninput="venueTableSearch.vest=this.value.toLowerCase();renderVenueTable('vest')">
     </div>
-    <div class="info-bar"><span>Vest Exchange (Stock Perps) · Funding settles every 1h · Maker 0.02% / Taker 0.06%</span><span>Auto-refresh: 30s</span></div>
+    <div class="info-bar"><span>Vest Exchange (Stock Perps) · Funding settles every 1h · Maker 0.02% / Taker 0.06%</span><span>Auto-refresh: 60s</span></div>
     <div class="table-wrap">
       <table><thead><tr>
         <th style="text-align:left" data-sort="name" onclick="setVenueSort('vest','name')">Asset <span class="arrow"></span></th>
@@ -1356,13 +1377,14 @@ input[type="checkbox"] {
       <div class="chip" onclick="setVenueFilter('cbintx','commodity',this)">Commodities <span class="count" id="cbiCountCommodity"></span></div>
       <div class="chip" onclick="setVenueFilter('cbintx','index',this)">Indices <span class="count" id="cbiCountIndex"></span></div>
       <div class="chip" onclick="setVenueFilter('cbintx','etf',this)">ETFs <span class="count" id="cbiCountEtf"></span></div>
+      <div class="chip" onclick="setVenueFilter('cbintx','pre-ipo',this)">Pre-IPO <span class="count" id="cbiCountPreIpo"></span></div>
       <div class="chip" onclick="setVenueFilter('cbintx','fx',this)">FX <span class="count" id="cbiCountFx"></span></div>
       <label style="display:flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;color:var(--foreground-sec);cursor:pointer;user-select:none">
-        <input type="checkbox" id="cbiHideInactive" checked onchange="renderVenueTable('cbintx')"> Hide inactive
+        <input type="checkbox" id="cbiHideInactive" checked onchange="renderVenueTable('cbintx')"> Active only
       </label>
       <input class="search-box" placeholder="Search asset..." oninput="venueTableSearch.cbintx=this.value.toLowerCase();renderVenueTable('cbintx')">
     </div>
-    <div class="info-bar"><span>Coinbase International Exchange (Stock & Commodity Perps) · USDC-settled · Funding settles every 1h · Maker 0.04% / Taker 0.08%</span><span>Auto-refresh: 30s</span></div>
+    <div class="info-bar"><span>Coinbase International Exchange (Stock & Commodity Perps) · USDC-settled · Funding interval varies by contract · Maker 0.04% / Taker 0.08%</span><span>Auto-refresh: 60s</span></div>
     <div class="table-wrap">
       <table><thead><tr>
         <th style="text-align:left" data-sort="name" onclick="setVenueSort('cbintx','name')">Asset <span class="arrow"></span></th>
@@ -1390,13 +1412,14 @@ input[type="checkbox"] {
     <div class="chip" onclick="setAssetCat('commodity',this)">Commodities <span class="count" id="aCountCommodity"></span></div>
     <div class="chip" onclick="setAssetCat('index',this)">Indices <span class="count" id="aCountIndex"></span></div>
     <div class="chip" onclick="setAssetCat('etf',this)">ETFs <span class="count" id="aCountEtf"></span></div>
+    <div class="chip" onclick="setAssetCat('pre-ipo',this)">Pre-IPO <span class="count" id="aCountPreIpo"></span></div>
     <div class="chip" onclick="setAssetCat('fx',this)">FX <span class="count" id="aCountFx"></span></div>
     <label style="display:flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;color:var(--foreground-sec);cursor:pointer;user-select:none">
-      <input type="checkbox" id="assetHideInactive" onchange="renderAssetView()"> Hide inactive
+      <input type="checkbox" id="assetHideInactive" onchange="renderAssetView()"> Active only
     </label>
     <input class="search-box" placeholder="Search asset..." oninput="assetSearch=this.value.toLowerCase();renderAssetView()">
   </div>
-  <div class="info-bar"><span>Click an asset row to expand · Click a venue row for details</span><span>Auto-refresh: 30s</span></div>
+  <div class="info-bar"><span>Click an asset row to expand · Click a venue row for details</span><span>Auto-refresh: 60s</span></div>
   <div class="table-wrap">
     <table><thead><tr>
       <th style="text-align:left" data-sort="name" onclick="setAssetSort('name')">Asset <span class="arrow"></span></th>
@@ -1457,7 +1480,7 @@ input[type="checkbox"] {
       <div class="spot-kpi"><div class="spot-kpi-label">Spot Pairs Tracked</div><div class="spot-kpi-val" style="color:var(--accent)" id="spotKpiPairs">—</div><div class="spot-kpi-sub" id="spotKpiExchanges">loading…</div></div>
       <div class="spot-kpi"><div class="spot-kpi-label">Total 24h Volume</div><div class="spot-kpi-val" id="spotKpiVol">—</div><div class="spot-kpi-sub">All RWA spot</div></div>
       <div class="spot-kpi"><div class="spot-kpi-label">Avg Bid-Ask Spread</div><div class="spot-kpi-val" style="color:var(--positive)" id="spotKpiSpread">—</div><div class="spot-kpi-sub">Liquidity indicator</div></div>
-      <div class="spot-kpi"><div class="spot-kpi-label">Best Funding Arb</div><div class="spot-kpi-val" style="color:var(--positive)" id="spotKpiBestArb">—</div><div class="spot-kpi-sub" id="spotKpiBestArbSub">—</div></div>
+      <div class="spot-kpi"><div class="spot-kpi-label">Peak Funding APR*</div><div class="spot-kpi-val" style="color:var(--positive)" id="spotKpiBestArb">—</div><div class="spot-kpi-sub" id="spotKpiBestArbSub">—</div></div>
     </div>
 
     <div class="section-card">
@@ -1526,6 +1549,7 @@ input[type="checkbox"] {
         Net APR (Funding) = |Funding Ann.| − (SpotFee×2 + PerpFee×2 + Spread) × 365/Hold &nbsp;·&nbsp;
         Basis = (Perp Mark − Spot) / Spot，仅作为 entry-edge 信号，不年化加到 APR（永续合约的收敛已经在 funding 中表达，避免双重计数）&nbsp;·&nbsp;
         Hold = No Fees 时 Net APR 显示毛年化 &nbsp;·&nbsp;
+        * Funding Ann./APR 仅把当前一期 funding rate 瞬时年化，不是未来收益预测；极端值需结合深度、basis 与后续 funding 校验 &nbsp;·&nbsp;
         匹配 key 用 underlying（AAPLX/AAPLon 都对 AAPL perp）&nbsp;·&nbsp;
         跨所组合未扣减提币/资金占用成本。
       </div>
@@ -1675,17 +1699,17 @@ input[type="checkbox"] {
 // ═══════════════════════════════════════════════════
 
 const VENUES = {
-  tradexyz: { name: 'trade.xyz', color: '#A06830', fundingInterval: 1, makerFee: 0.0001, takerFee: 0.00035 },
+  tradexyz: { name: 'trade.xyz', color: '#A06830', fundingInterval: 1, makerFee: 0.0003, takerFee: 0.0009 },
   bitget:   { name: 'Bitget',    color: '#00B74F', fundingInterval: 8, makerFee: 0.0002, takerFee: 0.0006 },
   gate:     { name: 'Gate.io',   color: '#2B5FE0', fundingInterval: 8, makerFee: 0.00015, takerFee: 0.0005 },
   binance:  { name: 'Binance',   color: '#C99400', fundingInterval: 8, makerFee: 0.0002, takerFee: 0.0005 },
-  lighter:  { name: 'Lighter',   color: '#00B74F', fundingInterval: 8, makerFee: 0.0002, takerFee: 0.0005 },
+  lighter:  { name: 'Lighter',   color: '#00B74F', fundingInterval: 1, makerFee: 0.00004, takerFee: 0.00028 },
   vest:     { name: 'Vest',      color: '#E0246A', fundingInterval: 1, makerFee: 0.0002, takerFee: 0.0006 },
   cbintx:   { name: 'Coinbase INTX', color: '#0052FF', fundingInterval: 1, makerFee: 0.0004, takerFee: 0.0008 },
 };
 
-const CAT_COLORS = { index:'#007AFF', equity:'#AF52DE', commodity:'#C7942A', etf:'#32ADE6', fx:'#FF2D55', other:'#98989D' };
-const CAT_LABELS = { index:'Index', equity:'Equity', commodity:'Commodity', etf:'ETF', fx:'FX', other:'Other' };
+const CAT_COLORS = { index:'#007AFF', equity:'#AF52DE', commodity:'#C7942A', etf:'#32ADE6', 'pre-ipo':'#FF9500', fx:'#FF2D55', other:'#98989D' };
+const CAT_LABELS = { index:'Index', equity:'Equity', commodity:'Commodity', etf:'ETF', 'pre-ipo':'Pre-IPO', fx:'FX', other:'Other' };
 
 // ═══════════════════════════════════════════════════
 // UNIFIED RWA ASSET SYSTEM (ported from rwa-cli)
@@ -1767,30 +1791,80 @@ const RWA_ASSETS = {
   JP225: { name: "Nikkei 225 Index", category: "index" },
   VIX: { name: "CBOE Volatility Index", category: "index" },
   DXY: { name: "U.S. Dollar Index", category: "index" },
-  USAR: { name: "U.S. Aerospace & Defense", category: "equity" }
+  USAR: { name: "USA Rare Earth, Inc.", category: "equity" }
 };
 
 const SYMBOL_ALIASES = {
-  GOLD: "XAU",
-  SILVER: "XAG",
-  COPPER: "XCU",
-  PLATINUM: "XPT",
-  PALLADIUM: "XPD",
-  CL: "WTI",
-  BZ: "BRENTOIL",
-  SP500: "SPX"
+  // Only aliases that are safe without knowing the asset class belong here.
+  // Commodity and index aliases live in their category-specific maps below.
+  SAMSUNGUSD: "SAMSUNG",
+  SKHYNIXUSD: "SKHYNIX",
+  HYUNDAIUSD: "HYUNDAI",
+  BBX: "BB",
+  BRKB: "BRK-B",
+  HK0700: "TENCENT",
+  HK1810: "XIAOMI"
 };
 
+// Short exchange symbols are not globally unique: CL/BZ/NG/PL/HG/GC can be
+// valid stock tickers as well as commodity futures codes.  Apply these aliases
+// only after an authoritative venue category is known; otherwise an equity
+// such as CL (Colgate-Palmolive) can be paired with WTI crude by mistake.
+const COMMODITY_SYMBOL_ALIASES = {
+  GOLD:'XAU', SILVER:'XAG', COPPER:'XCU', PLATINUM:'XPT', PALLADIUM:'XPD',
+  GC:'XAU', SI:'XAG', HG:'XCU', NG:'NATGAS', CL:'WTI', BZ:'BRENTOIL',
+  PL:'XPT', XAL:'ALUMINIUM', WTIOIL:'WTI'
+};
+const INDEX_SYMBOL_ALIASES = {
+  SP500:'SPX', SPX500:'SPX', US500:'SPX', NAS100:'NDX', NQ100:'NDX',
+  NDX100:'NDX', US100:'NDX', JPN225:'JP225', US2000:'RTY', US30:'DJI',
+  GER40:'DAX', UK100:'FTSE'
+};
+const EQUITY_SYMBOL_ALIASES = {
+  SAMSUNGUSD:'SAMSUNG', SKHYNIXUSD:'SKHYNIX', HYUNDAIUSD:'HYUNDAI',
+  BBX:'BB', BRKB:'BRK-B', HK0700:'TENCENT', HK1810:'XIAOMI'
+};
+const AMBIGUOUS_SHORT_SYMBOLS = new Set(['GOLD','SILVER','GC','SI','HG','NG','CL','BZ','PL','PALL']);
+
 const EXCLUDED_SYMBOLS = new Set([
-  "XYZ100", "STABLE", "SOLV", "EUR", "JPY", "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "USDCAD", "AUDUSD", "NZDUSD", "USDKRW",
-  // Crypto tokens that share tickers with stocks/indices — price confirms they are NOT the real asset
-  "BR", "MET", "AI", "ON", "IR", "T", "A", "ALL",
-  "SPX" // SPX6900 meme token (~$0.37), not S&P 500 Index
+  // Exclude only products that are explicitly outside the dashboard's RWA
+  // scope. XYZ100 is an official TradeXYZ equity index (not a crypto index),
+  // and venue-authoritative FX products are valid real-world markets.
+  "STABLE"
+]);
+
+// Official venue metadata does not consistently distinguish ETFs from stocks.
+// Keep one canonical override set for the instruments commonly listed as stock.
+const ETF_SYMBOLS = new Set([
+  'AGG','ARKK','BINC','BITI','BITO','BOTZ','CIBR','CLOA','CLOI','COPX','DBC','DIA','DGRW',
+  'ECH','EEM','EFA','ETHA','EWJ','EWY','EWZ','FAZ','FAS','FGDL','FLHY','FLQL','FSOL','FTGC',
+  'FXI','GDX','GLD','GLTR','HYG','IAU','IBB','IBIT','ICLN','IEF','IEMG','IEFA','IGV','IJH',
+  'INDA','ITOT','ITA','IVV','IWF','IWM','IWN','JAAA','JEPQ','KWEB','LABD','LABU','LIT','MAGS',
+  'NVDL','OIH','PALL','PDBC','PPLT','PSQ','QQQ','QQQI','QQQM','REMX','SCHD','SGOV','SHY','SLV',
+  'SMH','SNXX','SOXL','SOXS','SOXX','SPMO','SPY','SPXU','SQQQ','TAN','TIP','TLT','TNA','TQQQ',
+  'TZA','UNG','UPRO','URA','URNM','USFR','USO','UVXY','VGT','VNQ','VOO','VTI','VTV','VXUS','XLK',
+  'XLE','XLU','XLV','YANG','YINN'
+]);
+['EWT','DRAM','KORU','KSTR','LYTE','NCLD'].forEach(symbol => ETF_SYMBOLS.add(symbol));
+
+const PRE_IPO_SYMBOLS = new Set([
+  'ANTHROPIC','CBRS','CXMT','MINIMAX','OPENAI','SPACEX','SPCX','UNITREE','ZHIPU'
 ]);
 
 function canonicalSymbol(symbol) {
   const normalized = String(symbol || '').trim().toUpperCase();
   return SYMBOL_ALIASES[normalized] ?? normalized;
+}
+
+function canonicalSymbolForCategory(symbol, category) {
+  const normalized = String(symbol || '').trim().toUpperCase();
+  if (!normalized) return normalized;
+  if (category === 'commodity') return COMMODITY_SYMBOL_ALIASES[normalized] ?? normalized;
+  if (category === 'index') return INDEX_SYMBOL_ALIASES[normalized] ?? normalized;
+  if (category === 'equity' || category === 'etf' || category === 'pre-ipo') {
+    return EQUITY_SYMBOL_ALIASES[normalized] ?? normalized;
+  }
+  return canonicalSymbol(normalized);
 }
 
 function inferCategory(symbol, name = '') {
@@ -1801,6 +1875,8 @@ function inferCategory(symbol, name = '') {
   if (KNOWN_CATEGORIES[canonical]) return KNOWN_CATEGORIES[canonical];
   const upperName = name.toUpperCase();
   const upperSym = canonical.toUpperCase();
+  if (PRE_IPO_SYMBOLS.has(canonical) || /PRE[ -]?IPO|PREMARKET/.test(upperName)) return 'pre-ipo';
+  if (ETF_SYMBOLS.has(canonical)) return 'etf';
   // FX pairs
   if (canonical.endsWith('USD') && canonical.length >= 6) return 'fx';
   // Commodities by name
@@ -1814,6 +1890,28 @@ function inferCategory(symbol, name = '') {
   return 'equity';
 }
 
+function categoryFromOfficial(type, symbol, name = '') {
+  const official = String(type || '').toUpperCase();
+  const raw = String(symbol || '').trim().toUpperCase();
+  if (official.includes('PRE')) return 'pre-ipo';
+  if (official.includes('ETF')) return 'etf';
+  if (['COMMODITY','COMMODITIES','METAL','METALS','COMMOD'].includes(official)) return 'commodity';
+  if (['INDEX','INDICES'].includes(official)) return 'index';
+  if (official === 'FOREX' || official === 'FX') return 'fx';
+  if (['STOCK','STOCKS','EQUITY','EQUITIES','SHARE','SHARES'].includes(official)) {
+    if (PRE_IPO_SYMBOLS.has(raw)) return 'pre-ipo';
+    return ETF_SYMBOLS.has(raw) ? 'etf' : 'equity';
+  }
+  if (PRE_IPO_SYMBOLS.has(raw)) return 'pre-ipo';
+  if (ETF_SYMBOLS.has(raw)) return 'etf';
+  return inferCategory(raw, name);
+}
+
+function normalizeOfficialRwaSymbol(symbol, officialType, name = '') {
+  const category = categoryFromOfficial(officialType, symbol, name);
+  return { symbol: canonicalSymbolForCategory(symbol, category), category };
+}
+
 function isTradableRwaSymbol(symbol, name) {
   const canonical = canonicalSymbol(symbol);
   if (!canonical || EXCLUDED_SYMBOLS.has(canonical)) return false;
@@ -1822,13 +1920,18 @@ function isTradableRwaSymbol(symbol, name) {
   const inManual = !!RWA_ASSETS[canonical];
   const inKnown = !!KNOWN_CATEGORIES[canonical];
   if (!inManual && !inKnown) return false;
-  const category = inferCategory(canonical, name);
-  return category !== 'fx';
+  return true;
 }
 
 function resolveAssetName(symbol, name) {
   const canonical = canonicalSymbol(symbol);
   return name || RWA_ASSETS[canonical]?.name || canonical;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, ch => ({
+    '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;'
+  })[ch]);
 }
 
 const KNOWN_CATEGORIES = {};
@@ -1843,6 +1946,23 @@ for (const [alias, canonical] of Object.entries(SYMBOL_ALIASES)) {
     KNOWN_CATEGORIES[alias] = RWA_ASSETS[canonical].category;
     KNOWN_NAMES[alias] = RWA_ASSETS[canonical].name;
   }
+}
+
+function registerRwaAsset(symbol, name = '', category = '') {
+  const canonical = category
+    ? canonicalSymbolForCategory(symbol, category)
+    : canonicalSymbol(symbol);
+  if (!canonical) return canonical;
+  const resolvedCategory = category || inferCategory(canonical, name);
+  const priorCategory = KNOWN_CATEGORIES[canonical];
+  if (AMBIGUOUS_SHORT_SYMBOLS.has(canonical) && priorCategory && resolvedCategory !== priorCategory) {
+    // Drop the name copied from the opposite alias family (e.g. PL=platinum)
+    // when the official venue says this is the PL equity (Planet Labs).
+    delete KNOWN_NAMES[canonical];
+  }
+  if (resolvedCategory) KNOWN_CATEGORIES[canonical] = resolvedCategory;
+  if (name && name !== symbol && !KNOWN_NAMES[canonical]) KNOWN_NAMES[canonical] = escapeHtml(name);
+  return canonical;
 }
 // Dashboard-specific extras (not in rwa-cli's RWA_ASSETS)
 KNOWN_CATEGORIES['ABBV'] = 'equity';
@@ -1862,7 +1982,7 @@ KNOWN_CATEGORIES['BRN'] = 'commodity';
 KNOWN_CATEGORIES['CAT'] = 'equity';
 KNOWN_CATEGORIES['CNY'] = 'fx';
 KNOWN_CATEGORIES['COFFEE'] = 'commodity';
-KNOWN_CATEGORIES['COP'] = 'commodity';
+KNOWN_CATEGORIES['COP'] = 'equity';
 KNOWN_CATEGORIES['COTTON'] = 'commodity';
 KNOWN_CATEGORIES['CRM'] = 'equity';
 KNOWN_CATEGORIES['CRWD'] = 'equity';
@@ -1884,7 +2004,7 @@ KNOWN_CATEGORIES['GILD'] = 'equity';
 KNOWN_CATEGORIES['GLD'] = 'etf';
 KNOWN_CATEGORIES['GS'] = 'equity';
 KNOWN_CATEGORIES['HD'] = 'equity';
-KNOWN_CATEGORIES['HG'] = 'commodity';
+KNOWN_CATEGORIES['HG'] = 'equity';
 KNOWN_CATEGORIES['IBM'] = 'equity';
 KNOWN_CATEGORIES['JD'] = 'equity';
 KNOWN_CATEGORIES['JNJ'] = 'equity';
@@ -1909,7 +2029,7 @@ KNOWN_CATEGORIES['NQ100'] = 'index';
 KNOWN_CATEGORIES['OIL'] = 'commodity';
 KNOWN_CATEGORIES['ON'] = 'equity';
 KNOWN_CATEGORIES['OXY'] = 'equity';
-KNOWN_CATEGORIES['PALL'] = 'commodity';
+KNOWN_CATEGORIES['PALL'] = 'etf';
 KNOWN_CATEGORIES['PANW'] = 'equity';
 KNOWN_CATEGORIES['PDD'] = 'equity';
 KNOWN_CATEGORIES['PEP'] = 'equity';
@@ -1939,6 +2059,12 @@ KNOWN_CATEGORIES['XYZ100'] = 'index';
 KNOWN_CATEGORIES['ZS'] = 'equity';
 KNOWN_CATEGORIES['TTF'] = 'commodity';
 KNOWN_CATEGORIES['BX'] = 'equity';
+KNOWN_CATEGORIES['RTY'] = 'index';
+KNOWN_CATEGORIES['XNI'] = 'commodity';
+KNOWN_CATEGORIES['XPB'] = 'commodity';
+KNOWN_CATEGORIES['NOK'] = 'equity';
+KNOWN_CATEGORIES['TENCENT'] = 'equity';
+KNOWN_CATEGORIES['XIAOMI'] = 'equity';
 // ── ETF fixes (were defaulting to equity) ──
 KNOWN_CATEGORIES['SOXL'] = 'etf';   // Direxion Daily Semiconductor Bull 3X Shares ETF
 KNOWN_CATEGORIES['SOXS'] = 'etf';   // Direxion Daily Semiconductor Bear 3X Shares ETF
@@ -1963,6 +2089,12 @@ KNOWN_CATEGORIES['ANTHROPIC'] = 'pre-ipo'; // Anthropic pre-IPO synthetic
 KNOWN_CATEGORIES['MINIMAX'] = 'pre-ipo';   // MiniMax AI pre-IPO synthetic
 KNOWN_NAMES['TTF'] = 'Dutch TTF Natural Gas';
 KNOWN_NAMES['BX'] = 'Blackstone';
+KNOWN_NAMES['RTY'] = 'Russell 2000 Index';
+KNOWN_NAMES['XNI'] = 'Nickel';
+KNOWN_NAMES['XPB'] = 'Lead';
+KNOWN_NAMES['NOK'] = 'Nokia';
+KNOWN_NAMES['TENCENT'] = 'Tencent';
+KNOWN_NAMES['XIAOMI'] = 'Xiaomi';
 KNOWN_NAMES['SOXL'] = 'Direxion 3x Semiconductor Bull ETF';
 KNOWN_NAMES['SOXS'] = 'Direxion 3x Semiconductor Bear ETF';
 KNOWN_NAMES['SOXX'] = 'iShares Semiconductor ETF';
@@ -1977,6 +2109,11 @@ KNOWN_NAMES['SPACEX'] = 'SpaceX (Pre-IPO)';
 KNOWN_NAMES['OPENAI'] = 'OpenAI (Pre-IPO)';
 KNOWN_NAMES['ANTHROPIC'] = 'Anthropic (Pre-IPO)';
 KNOWN_NAMES['MINIMAX'] = 'MiniMax AI (Pre-IPO)';
+KNOWN_NAMES['USAR'] = 'USA Rare Earth, Inc.';
+KNOWN_NAMES['COP'] = 'ConocoPhillips';
+KNOWN_NAMES['GEV'] = 'GE Vernova';
+KNOWN_NAMES['CBRS'] = 'Cerebras Systems (Pre-IPO)';
+KNOWN_NAMES['SKHY'] = 'SK hynix ADR';
 
 // ═══════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════
@@ -1990,13 +2127,17 @@ let volumeGrowthData = { tradexyz: {}, bitget: {}, gate: {}, binance: {}, lighte
 const VENUES_WITH_GROWTH = new Set(['tradexyz', 'bitget', 'gate']); // Only these venues have volume growth fetchers
 let lastGrowthFetch = 0;
 const GROWTH_FETCH_INTERVAL = 300000; // re-fetch every 5 min
-const REFRESH_INTERVAL = 30000; // auto-refresh every 30s
+const REFRESH_INTERVAL = 60000; // auto-refresh every 60s; full catalog refresh is request-heavy
+const SPOT_REFRESH_INTERVAL = 300000; // spot catalogs and references refresh every 5 min
 let currentView = 'allvenues';
 let currentSubTab = 'aggregator';
 let assetCatFilter = 'all';
 let assetSearch = '';
 let expandedAsset = null;
 let refreshTimer = null;
+let spotRefreshTimer = null;
+let refreshInFlight = false;
+const lastVenueData = {};
 let globalSearchTerm = '';
 let alertsData = [];
 
@@ -2007,7 +2148,7 @@ let venueTableSort = { tradexyz: { key: 'volume', dir: -1 }, bitget: { key: 'vol
 let assetSort = { key: 'volume', dir: -1 };
 
 // Sparkline state
-let sparkHours = { tradexyz: 24, bitget: 24, gate: 24, binance: 24, lighter: 24, vest: 24 };
+let sparkHours = { tradexyz: 24, bitget: 24, gate: 24, binance: 24, lighter: 24, vest: 24, cbintx: 24 };
 let divHoldDays = 0; // 0 = no fee deduction
 let fundingCache = {}; // key: "venue:coin" → { hours, data }
 
@@ -2033,21 +2174,69 @@ function fmtFunding(r) {
   if (r === 0) return '0.0000%';
   return (r >= 0 ? '+' : '') + (r * 100).toFixed(4) + '%';
 }
-function annualize(r, venue) {
+
+const DATA_STATUS_LABELS = {
+  full: 'Full', partial: 'Partial', estimated: 'Estimated', unavailable: 'Unavailable'
+};
+
+function dataStatusBadge(status, title = '') {
+  const safe = DATA_STATUS_LABELS[status] ? status : 'unavailable';
+  return `<span class="data-status ${safe}"${title ? ` title="${escapeHtml(title)}"` : ''}>${DATA_STATUS_LABELS[safe]}</span>`;
+}
+
+function fieldValueWithStatus(valueHtml, status, title = '') {
+  return `<span class="field-value">${valueHtml}${dataStatusBadge(status, title)}</span>`;
+}
+
+function normalizePerpDataState(asset) {
+  const d = asset || {};
+  d.isListed = d.isListed !== false;
+  d.isPriced = Number(d.markPx) > 0;
+  d.isActive = Boolean(d.isActive);
+  d.fieldStatus = d.fieldStatus || {};
+  const hasNumber = (v) => v !== null && v !== undefined && Number.isFinite(Number(v));
+  if (!d.fieldStatus.markPx) d.fieldStatus.markPx = d.isPriced ? 'full' : 'unavailable';
+  if (!d.fieldStatus.indexPx) d.fieldStatus.indexPx = Number(d.indexPx) > 0 ? 'full' : 'unavailable';
+  if (!d.fieldStatus.change) d.fieldStatus.change = hasNumber(d.change) ? 'full' : 'unavailable';
+  if (!d.fieldStatus.volume) d.fieldStatus.volume = hasNumber(d.volume) ? 'full' : 'unavailable';
+  if (!d.fieldStatus.oi) d.fieldStatus.oi = d.venue === 'binance' ? 'unavailable' : (hasNumber(d.oi) ? 'full' : 'unavailable');
+  if (!d.fieldStatus.depth2) d.fieldStatus.depth2 = d.depth2 !== null && d.depth2 !== undefined ? 'partial' : 'unavailable';
+  if (!d.fieldStatus.funding) d.fieldStatus.funding = d.funding !== null && d.funding !== undefined ? 'full' : 'unavailable';
+  if (!d.fieldStatus.predictedFunding) d.fieldStatus.predictedFunding = d.predictedFunding !== null && d.predictedFunding !== undefined ? 'full' : 'unavailable';
+  return d;
+}
+
+function normalizeSpotDataState(asset) {
+  const a = asset || {};
+  a.isListed = a.isListed !== false;
+  a.isPriced = Number(a.last) > 0;
+  a.isActive = a.isActive !== undefined ? Boolean(a.isActive) : Boolean(a.isPriced || Number(a.vol) > 0);
+  a.fieldStatus = a.fieldStatus || {};
+  if (!a.fieldStatus.last) a.fieldStatus.last = a.isPriced ? 'full' : 'unavailable';
+  if (!a.fieldStatus.depth2) a.fieldStatus.depth2 = a.depth2 !== null && a.depth2 !== undefined ? 'partial' : 'unavailable';
+  return a;
+}
+function fundingIntervalHours(venue, assetOrHours) {
+  const explicit = typeof assetOrHours === 'number'
+    ? assetOrHours
+    : Number(assetOrHours?.fundingIntervalHours);
+  return explicit > 0 ? explicit : (VENUES[venue]?.fundingInterval || 8);
+}
+function annualize(r, venue, assetOrHours) {
   if (r === null) return null;
-  const interval = VENUES[venue].fundingInterval;
+  const interval = fundingIntervalHours(venue, assetOrHours);
   return r * (24 / interval) * 365;
 }
-function fmtAnnual(r, venue) {
-  const ann = annualize(r, venue);
+function fmtAnnual(r, venue, assetOrHours) {
+  const ann = annualize(r, venue, assetOrHours);
   if (ann === null) return 'N/A';
   return (ann * 100).toFixed(2) + '%';
 }
 // near-zero: annualized absolute value < 0.5%
-function fundingClass(r, venue) {
+function fundingClass(r, venue, assetOrHours) {
   if (r === null) return 'nodata';
   if (r === 0) return 'nearzero';
-  const ann = venue ? Math.abs(annualize(r, venue)) : Math.abs(r);
+  const ann = venue ? Math.abs(annualize(r, venue, assetOrHours)) : Math.abs(r);
   if (ann < 0.005) return 'nearzero';
   return r > 0 ? 'pos' : 'neg';
 }
@@ -2062,9 +2251,59 @@ function logLoad(msg) {
 // API: trade.xyz (Hyperliquid HIP-3)
 // ═══════════════════════════════════════════════
 
+const TRADE_XYZ_COMMODITY_SYMBOLS = new Set([
+  'GOLD','SILVER','CL','COPPER','NATGAS','URANIUM','ALUMINIUM','PLATINUM',
+  'PALLADIUM','BRENTOIL','CORN','WHEAT','TTF'
+]);
+const TRADE_XYZ_INDEX_SYMBOLS = new Set([
+  'SP500','XYZ100','VIX','KR200','JP225','NIFTY','IBOV','H100','VOL'
+]);
+const TRADE_XYZ_FX_SYMBOLS = new Set(['DXY','EUR','JPY','GBP','KRW']);
+// Fail-closed snapshot of the current official xyz DEX universe. New markets
+// are accepted dynamically when perpCategories identifies them as non-crypto;
+// if that identity endpoint is unavailable, only this audited RWA set is used.
+const TRADE_XYZ_KNOWN_RWA_SYMBOLS = new Set([
+  'XYZ100','TSLA','NVDA','GOLD','HOOD','INTC','PLTR','COIN','META','AAPL','MSFT','ORCL','GOOGL','AMZN','AMD','MU','SNDK','MSTR','CRCL','NFLX','COST','LLY','SKHX','TSM','JPY','EUR','SILVER','RIVN','BABA','CL','COPPER','NATGAS','URANIUM','ALUMINIUM','SMSN','PLATINUM','USAR','CRWV','URNM','PALLADIUM','DXY','GME','KR200','SOFTBANK','JP225','HYUNDAI','KIOXIA','EWY','EWJ','BRENTOIL','VIX','HIMS','SP500','DKNG','LITE','CORN','XLE','WHEAT','TTF','BX','PURRDAT','MRVL','RKLB','BIRD','VOL','DRAM','CBRS','EWZ','KRW','ZM','EBAY','H100','NIFTY','ARM','EWT','GBP','SPCX','IBOV','ASML','MINIMAX','BB','QNT','DELL','IBM','AVGO','NOW','NBIS','WDC','NOK','SMH','BE','ZHIPU','QCOM','STRC','BOT','AMAT','IBIDEN','GIGADEV','SHAZ','SKHY','KSTR','CXMT','GEV','KORU','UNITREE','LYTE','NCLD','SOXL'
+]);
+// Official underlyings for symbols that are especially easy to confuse with
+// unrelated crypto tickers. Category metadata prevents false inclusion; these
+// names make the distinction explicit in the UI as well.
+const TRADE_XYZ_OFFICIAL_NAMES = {
+  QNT: 'Quantinuum Inc.',
+  BIRD: 'NewBird AI (formerly Allbirds)',
+  BOT: 'RoboStrategy, Inc.',
+  STRC: 'Strategy Preferred Stock (STRC)',
+  PURRDAT: 'Hyperliquid Strategies Inc.',
+  KSTR: 'KraneShares China Tech & Semiconductor ETF',
+  VOL: 'U.S. Equity Volatility Index',
+  XYZ100: 'XYZ 100 Equity Index',
+  COIN: 'Coinbase Global, Inc.'
+};
+
+function tradeXyzCategory(symbol, name = '', officialType = '') {
+  const raw = String(symbol || '').toUpperCase();
+  if (officialType) return categoryFromOfficial(officialType, raw, name);
+  if (TRADE_XYZ_FX_SYMBOLS.has(raw)) return 'fx';
+  if (TRADE_XYZ_COMMODITY_SYMBOLS.has(raw)) return 'commodity';
+  if (TRADE_XYZ_INDEX_SYMBOLS.has(raw)) return 'index';
+  if (ETF_SYMBOLS.has(raw)) return 'etf';
+  if (PRE_IPO_SYMBOLS.has(raw)) return 'pre-ipo';
+  return inferCategory(raw, name);
+}
+
 async function fetchTradeXyz() {
   const API_URL = 'https://api.hyperliquid.xyz/info';
   logLoad('Fetching trade.xyz data...');
+
+  // Hyperliquid publishes category metadata for builder-deployed perps. Use it
+  // as the authoritative identity layer so a security such as xyz:QNT is not
+  // confused with the unrelated Quant crypto token. Keep the local sets only
+  // as a fallback for the few new markets not yet present in this endpoint.
+  const categoryPromise = fetch(API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type: 'perpCategories' })
+  }).then(res => res.ok ? res.json() : []).catch(() => []);
 
   // Try dex param first, then fallback to all perps
   let meta, ctxs, source;
@@ -2077,9 +2316,9 @@ async function fetchTradeXyz() {
       });
       if (!res.ok) continue;
       const data = await res.json();
-      if (!Array.isArray(data) || data.length !== 2) continue;
+      if (!Array.isArray(data) || data.length !== 2 || !data[0] || !Array.isArray(data[1])) continue;
       const universe = data[0].universe || data[0];
-      if (universe.length > 0) {
+      if (Array.isArray(universe) && universe.length > 0) {
         meta = data[0]; ctxs = data[1]; source = 'dex_param';
         logLoad(`trade.xyz: ${universe.length} assets via dex="${dexName}"`);
         break;
@@ -2095,21 +2334,43 @@ async function fetchTradeXyz() {
       body: JSON.stringify({ type: 'metaAndAssetCtxs' })
     });
     const data = await res.json();
+    if (!Array.isArray(data) || data.length !== 2 || !data[0] || !Array.isArray(data[1])) {
+      throw new Error('trade.xyz returned incomplete market context');
+    }
     meta = data[0]; ctxs = data[1]; source = 'all_perps';
-    logLoad(`trade.xyz: ${(meta.universe || meta).length} total perps (filtering by known RWA)`);
+    const fallbackUniverse = meta.universe || meta;
+    if (!Array.isArray(fallbackUniverse)) throw new Error('trade.xyz returned invalid market metadata');
+    logLoad(`trade.xyz: ${fallbackUniverse.length} total perps (filtering by known RWA)`);
   }
 
   const universe = meta.universe || meta;
+  if (!Array.isArray(universe) || !Array.isArray(ctxs)) throw new Error('trade.xyz market data unavailable');
+  const categoryRows = await categoryPromise;
+  const officialCategoryByCoin = {};
+  if (Array.isArray(categoryRows)) {
+    categoryRows.forEach(row => {
+      if (Array.isArray(row) && row.length >= 2) officialCategoryByCoin[String(row[0] || '').toLowerCase()] = String(row[1] || '');
+    });
+  }
   const assets = [];
 
   for (let i = 0; i < universe.length; i++) {
     const u = universe[i];
     const c = ctxs[i];
+    if (!c) continue;
     let rawName = u.name || '';
-    let coin = rawName.includes(':') ? rawName.split(':')[1] : rawName;
+    const venueCoin = (rawName.includes(':') ? rawName.split(':')[1] : rawName).toUpperCase();
+    const officialType = officialCategoryByCoin[String(rawName).toLowerCase()] || officialCategoryByCoin[`xyz:${venueCoin}`.toLowerCase()] || '';
+    if (officialType.toLowerCase() === 'crypto') continue;
+    if (!officialType && !TRADE_XYZ_KNOWN_RWA_SYMBOLS.has(venueCoin)) continue;
+    const cat = tradeXyzCategory(venueCoin, u.fullName || '', officialType);
+    const coin = canonicalSymbolForCategory(venueCoin, cat);
 
-    if (source === 'all_perps' && !KNOWN_CATEGORIES[coin]) continue;
-    if (EXCLUDED_SYMBOLS.has(coin)) continue;
+    if (source === 'all_perps' && !KNOWN_CATEGORIES[coin] && !TRADE_XYZ_COMMODITY_SYMBOLS.has(venueCoin) && !TRADE_XYZ_INDEX_SYMBOLS.has(venueCoin)) continue;
+    if (EXCLUDED_SYMBOLS.has(venueCoin.toUpperCase()) || EXCLUDED_SYMBOLS.has(coin)) continue;
+    const officialName = TRADE_XYZ_OFFICIAL_NAMES[venueCoin] || u.fullName || '';
+    registerRwaAsset(coin, officialName, cat);
+    if (officialName) KNOWN_NAMES[coin] = escapeHtml(officialName);
 
     const markPx = parseFloat(c.markPx) || 0;
     const oraclePx = parseFloat(c.oraclePx) || 0;
@@ -2119,18 +2380,18 @@ async function fetchTradeXyz() {
     const oiUsd = oiCoins * markPx; // openInterest is in base asset units, convert to USD notional
     const rawFunding = parseFloat(c.funding);
     const funding = isNaN(rawFunding) ? null : rawFunding;
-    const rawPremium = parseFloat(c.premium);
-    const predictedFunding = isNaN(rawPremium) ? null : rawPremium;
+    // Hyperliquid's `premium` is the current premium index, not a forecast of
+    // the next funding settlement. Do not present it as predicted funding.
+    const predictedFunding = null;
     const change = prevDayPx ? ((markPx - prevDayPx) / prevDayPx) * 100 : 0;
     const isActive = volume > 0 || oiUsd > 0 || (funding !== null && funding !== 0);
 
-    const cat = KNOWN_CATEGORIES[coin] || inferCategory(coin, u.fullName || '');
-    if (!KNOWN_CATEGORIES[coin]) { KNOWN_CATEGORIES[coin] = cat; console.info(`[RWA] Auto-categorized trade.xyz: ${coin} → ${cat}`); }
-    const fullName = KNOWN_NAMES[coin] || (u.fullName || coin);
+    const fullName = officialName || KNOWN_NAMES[coin] || coin;
 
     assets.push({
-      coin, fullName, category: cat, venue: 'tradexyz',
+      coin, symbol: rawName, venueSymbol: rawName, fullName, category: cat, venue: 'tradexyz',
       markPx, indexPx: oraclePx, change, volume, oi: oiUsd, funding, predictedFunding, isActive,
+      fundingIntervalHours: 1,
       makerFee: VENUES.tradexyz.makerFee, takerFee: VENUES.tradexyz.takerFee
     });
   }
@@ -2156,30 +2417,23 @@ async function fetchBitget() {
     return json.data;
   }
 
-  // Fetch contracts + tickers in parallel
-  const [contractsRaw, tickersRaw] = await Promise.all([
-    apiGet(`/api/v2/mix/market/contracts?productType=${PRODUCT_TYPE}`),
-    apiGet(`/api/v2/mix/market/tickers?productType=${PRODUCT_TYPE}`)
+  // Instruments are the authoritative RWA allowlist. Funding is available in
+  // one bulk request, avoiding hundreds of per-symbol calls every refresh.
+  const [contractsRaw, tickersRaw, fundingRaw] = await Promise.all([
+    apiGet(`/api/v3/market/instruments?category=${PRODUCT_TYPE}`),
+    apiGet(`/api/v2/mix/market/tickers?productType=${PRODUCT_TYPE}`),
+    apiGet(`/api/v2/mix/market/current-fund-rate?productType=${PRODUCT_TYPE}`)
   ]);
 
-  // Build a funding rate map from tickers first
+  // Build a funding rate map from the official bulk endpoint.
   const fundingMap = {};
-  tickersRaw.forEach(t => {
-    const r = parseFloat(t.fundingRate);
-    if (r && r !== 0) fundingMap[t.symbol] = r;
+  (Array.isArray(fundingRaw) ? fundingRaw : []).forEach(row => {
+    fundingMap[row.symbol] = row;
   });
 
-  // Filter RWA contracts
-  let rwaContracts = contractsRaw.filter(c =>
-    c.isRwa === 'YES' || c.isRwa === 'yes' || c.isRwa === 'Yes'
+  const rwaContracts = (Array.isArray(contractsRaw) ? contractsRaw : []).filter(c =>
+    String(c.isRwa || '').toLowerCase() === 'yes' && c.status === 'online'
   );
-  if (rwaContracts.length === 0) {
-    const knownKeys = Object.keys(KNOWN_CATEGORIES);
-    rwaContracts = contractsRaw.filter(c => {
-      const base = (c.baseCoin || c.symbol || '').replace(/USDT$/i,'').toUpperCase();
-      return knownKeys.includes(base);
-    });
-  }
   logLoad(`Bitget: ${rwaContracts.length} RWA contracts`);
 
   // Index tickers by symbol
@@ -2187,14 +2441,14 @@ async function fetchBitget() {
   tickersRaw.forEach(t => { tickerMap[t.symbol] = t; });
 
   const assets = [];
-  const needFunding = []; // symbols where tickers had no funding data
 
   for (const contract of rwaContracts) {
     const symbol = contract.symbol;
-    const base = (contract.baseCoin || symbol.replace(/USDT$/i, '')).toUpperCase();
+    const venueBase = (contract.baseCoin || symbol.replace(/USDT$/i, '')).toUpperCase();
+    const normalized = normalizeOfficialRwaSymbol(venueBase, contract.symbolType, contract.symbolName || '');
+    const base = normalized.symbol;
     if (EXCLUDED_SYMBOLS.has(base)) continue;
-    const t = tickerMap[symbol];
-    if (!t) continue;
+    const t = tickerMap[symbol] || {};
 
     const markPx = parseFloat(t.markPrice) || parseFloat(t.lastPr) || 0;
     const indexPx = parseFloat(t.indexPrice) || markPx;
@@ -2203,17 +2457,19 @@ async function fetchBitget() {
     const holdingQty = parseFloat(t.holdingAmount) || 0;
     const oi = holdingQty * (markPx || 1);
 
-    // Parse funding: use null for "no data", keep 0 if API explicitly returned "0"
+    // Parse funding: preserve null for missing data and explicit zero when returned.
     let funding = null;
-    if (fundingMap[symbol] !== undefined) {
-      funding = fundingMap[symbol];
+    const fundingRow = fundingMap[symbol];
+    if (fundingRow?.fundingRate !== undefined && fundingRow.fundingRate !== '') {
+      funding = parseFloat(fundingRow.fundingRate);
+      if (isNaN(funding)) funding = null;
     } else if (t.fundingRate !== undefined && t.fundingRate !== null && t.fundingRate !== '') {
       funding = parseFloat(t.fundingRate);
       if (isNaN(funding)) funding = null;
     }
 
-    const cat = KNOWN_CATEGORIES[base] || inferCategory(base, contract.symbolName || '');
-    if (!KNOWN_CATEGORIES[base]) { KNOWN_CATEGORIES[base] = cat; console.info(`[RWA] Auto-categorized Bitget: ${base} → ${cat}`); }
+    const cat = normalized.category;
+    registerRwaAsset(base, contract.symbolName || '', cat);
     const fullName = KNOWN_NAMES[base] || (contract.symbolName || base);
 
     const cMaker = parseFloat(contract.makerFeeRate);
@@ -2221,33 +2477,17 @@ async function fetchBitget() {
     const makerFee = isNaN(cMaker) ? VENUES.bitget.makerFee : cMaker;
     const takerFee = isNaN(cTaker) ? VENUES.bitget.takerFee : cTaker;
 
-    const idx = assets.length;
+    const contractInterval = parseFloat(fundingRow?.fundingRateInterval || contract.fundInterval);
     assets.push({
-      coin: base, symbol, fullName, category: cat, venue: 'bitget',
-      markPx, indexPx, change: change24h * 100, volume, oi, funding, predictedFunding: null, isActive: false,
+      coin: base, symbol, venueSymbol: symbol, fullName, category: cat, venue: 'bitget',
+      markPx, indexPx, change: change24h * 100, volume, oi, funding,
+      // current-fund-rate is the current settlement rate, not a next-period
+      // prediction. Keep the prediction field unavailable unless an official
+      // forecast endpoint is added.
+      predictedFunding: null, isActive: false,
+      fundingIntervalHours: contractInterval > 0 ? contractInterval : VENUES.bitget.fundingInterval,
       makerFee, takerFee
     });
-
-    if (funding === null) needFunding.push({ symbol, idx });
-  }
-
-  // Fetch individual funding rates for ALL assets (bulk ticker often returns 0 as placeholder)
-  {
-    const fetchTargets = assets.map((a, idx) => ({ symbol: a.symbol, idx }));
-    logLoad(`Bitget: fetching funding details for ${fetchTargets.length} assets...`);
-    const tasks = fetchTargets.map(({ symbol, idx }) => async () => {
-      try {
-        const data = await apiGet(`/api/v2/mix/market/current-fund-rate?symbol=${symbol}&productType=${PRODUCT_TYPE}`);
-        if (data && data.fundingRate !== undefined && data.fundingRate !== null && data.fundingRate !== '') {
-          const r = parseFloat(data.fundingRate);
-          if (!isNaN(r)) {
-            assets[idx].funding = r; // always prefer individual endpoint over bulk ticker
-            assets[idx].predictedFunding = r; // current-fund-rate returns upcoming settlement rate
-          }
-        }
-      } catch (e) { /* funding stays as-is from ticker */ }
-    });
-    await batchFetch(tasks, 5);
   }
 
   // Update isActive after all funding rates are set
@@ -2256,15 +2496,18 @@ async function fetchBitget() {
   });
 
   // Fetch orderbook depth for ±2% liquidity
-  const depthTasksBitget = assets.map(a => async () => {
+  const depthAssets = [...assets].sort((a, b) => b.volume - a.volume).slice(0, 80);
+  const depthTasksBitget = depthAssets.map(a => async () => {
     try {
       const data = await apiGet(`/api/v2/mix/market/depth?symbol=${a.symbol}&productType=USDT-FUTURES&limit=50`);
-      if (data) a.depth2 = liquidityWithinPct({ bids: (data.bids||[]), asks: (data.asks||[]) });
+      if (data) {
+        a.depth2 = liquidityWithinPct({ bids: (data.bids||[]), asks: (data.asks||[]) });
+        a.fieldStatus = a.fieldStatus || {};
+        a.fieldStatus.depth2 = 'partial';
+      }
     } catch {}
   });
-  for (let i = 0; i < depthTasksBitget.length; i += 5) {
-    await Promise.allSettled(depthTasksBitget.slice(i, i + 5).map(fn => fn()));
-  }
+  runEnhancementTasks(depthTasksBitget, 5, 'Bitget depth');
 
   logLoad(`Bitget: ${assets.length} RWA assets processed`);
   return assets;
@@ -2290,30 +2533,39 @@ async function fetchGate() {
   if (!tickersRes.ok) throw new Error(`Gate HTTP ${tickersRes.status}`);
   const tickers = await tickersRes.json();
 
-  // Build fee map from contracts
+  // Contract metadata is the authoritative allowlist and also carries contract
+  // multipliers/funding intervals needed for notional calculations.
   const feeMap = {};
+  const contractMap = {};
   if (contractsRes && contractsRes.ok) {
     try {
       const contracts = await contractsRes.json();
       contracts.forEach(c => {
+        contractMap[c.name] = c;
         feeMap[c.name] = {
           maker: parseFloat(c.maker_fee_rate) || VENUES.gate.makerFee,
-          taker: parseFloat(c.taker_fee_rate) || VENUES.gate.takerFee
+          taker: parseFloat(c.taker_fee_rate) || VENUES.gate.takerFee,
+          quantoMultiplier: parseFloat(c.quanto_multiplier) || 1,
+          fundingIntervalHours: (parseFloat(c.funding_interval) || 0) / 3600,
+          contractType: c.contract_type || ''
         };
       });
       logLoad(`Gate.io: fee data for ${Object.keys(feeMap).length} contracts`);
     } catch(e) { /* use defaults */ }
   }
 
-  const knownKeys = Object.keys(KNOWN_CATEGORIES);
+  const allowedTypes = new Set(['stocks', 'metals', 'commodities', 'indices']);
   const assets = [];
 
   for (const t of tickers) {
     // contract format: "BTC_USDT" → base = "BTC"
     const contract = t.contract || '';
-    const base = contract.replace(/_USDT$/i, '').toUpperCase();
+    const meta = contractMap[contract];
+    if (!meta || meta.status !== 'trading' || !allowedTypes.has(meta.contract_type)) continue;
+    const venueBase = contract.replace(/_USDT$/i, '').toUpperCase();
+    const normalized = normalizeOfficialRwaSymbol(venueBase, meta.is_pre_market ? 'PREMARKET' : meta.contract_type);
+    const base = normalized.symbol;
 
-    if (!knownKeys.includes(base)) continue;
     if (EXCLUDED_SYMBOLS.has(base)) continue;
 
     const markPx = parseFloat(t.mark_price) || 0;
@@ -2322,7 +2574,7 @@ async function fetchGate() {
     const change = parseFloat(t.change_percentage) || 0;
     const volume = parseFloat(t.volume_24h_quote) || parseFloat(t.volume_24h_usd) || 0;
     const oi = parseFloat(t.total_size) || 0;
-    const quantoMult = parseFloat(t.quanto_multiplier) || 1;
+    const quantoMult = parseFloat(meta.quanto_multiplier) || 1;
     const oiUsd = oi * quantoMult * markPx;
 
     const rawFunding = parseFloat(t.funding_rate);
@@ -2330,15 +2582,17 @@ async function fetchGate() {
     const rawIndicative = parseFloat(t.funding_rate_indicative);
     const predictedFunding = isNaN(rawIndicative) ? null : rawIndicative;
 
-    const cat = KNOWN_CATEGORIES[base] || inferCategory(base, contract.name || '');
-    if (!KNOWN_CATEGORIES[base]) { KNOWN_CATEGORIES[base] = cat; }
+    const cat = normalized.category;
+    registerRwaAsset(base, '', cat);
     const fullName = KNOWN_NAMES[base] || base;
     const isActive = volume > 0 || oiUsd > 0 || (funding !== null && funding !== 0);
 
     const cf = feeMap[contract] || {};
     assets.push({
-      coin: base, symbol: contract, fullName, category: cat, venue: 'gate',
+      coin: base, symbol: contract, venueSymbol: contract, fullName, category: cat, venue: 'gate',
       markPx: markPx || lastPx, indexPx, change, volume, oi: oiUsd, funding, predictedFunding, isActive,
+      contractMultiplier: quantoMult,
+      fundingIntervalHours: cf.fundingIntervalHours || VENUES.gate.fundingInterval,
       makerFee: cf.maker || VENUES.gate.makerFee, takerFee: cf.taker || VENUES.gate.takerFee
     });
   }
@@ -2346,7 +2600,8 @@ async function fetchGate() {
   // Fetch orderbook depth via bulk endpoint (1 request instead of ~55)
   if (assets.length > 0) {
     try {
-      const syms = assets.map(a => a.symbol).join(',');
+      const depthAssets = [...assets].sort((a, b) => b.volume - a.volume).slice(0, 80);
+      const syms = depthAssets.map(a => a.symbol).join(',');
       const bulkUrl = _isDev
         ? null  // fallback to individual calls in dev
         : `/api/gate-bulk?type=depth&symbols=${encodeURIComponent(syms)}&limit=50`;
@@ -2354,21 +2609,25 @@ async function fetchGate() {
         const res = await fetch(bulkUrl);
         if (res.ok) {
           const bulk = await res.json();
-          assets.forEach(a => {
+          depthAssets.forEach(a => {
             const book = bulk[a.symbol];
             if (book && (book.bids || book.asks)) {
-              a.depth2 = liquidityWithinPct({ bids: (book.bids||[]), asks: (book.asks||[]) });
+              a.depth2 = liquidityWithinPct({ bids: (book.bids||[]), asks: (book.asks||[]) }, 0.02, a.contractMultiplier);
+              a.fieldStatus = a.fieldStatus || {};
+              a.fieldStatus.depth2 = 'partial';
             }
           });
         }
       } else {
         // Dev fallback: individual calls
-        const depthTasks = assets.map(a => async () => {
+        const depthTasks = depthAssets.map(a => async () => {
           try {
             const res = await fetch(`${GATE_API_BASE}/order_book?contract=${encodeURIComponent(a.symbol)}&limit=50`);
             if (!res.ok) return;
             const book = await res.json();
-            a.depth2 = liquidityWithinPct({ bids: (book.bids||[]), asks: (book.asks||[]) });
+            a.depth2 = liquidityWithinPct({ bids: (book.bids||[]), asks: (book.asks||[]) }, 0.02, a.contractMultiplier);
+            a.fieldStatus = a.fieldStatus || {};
+            a.fieldStatus.depth2 = 'partial';
           } catch {}
         });
         for (let i = 0; i < depthTasks.length; i += 5) {
@@ -2392,21 +2651,25 @@ const BINANCE_API_BASE = 'https://fapi.binance.com/fapi/v1';
 async function fetchBinance() {
   logLoad('Fetching Binance data...');
 
-  // Fetch premiumIndex (mark+funding) + exchangeInfo (fees) + ticker24h in parallel
-  const [premiumRes, infoRes, tickerRes] = await Promise.all([
+  // Fetch mark/funding, contract metadata, volume and any non-default funding
+  // intervals in parallel. fundingInfo only lists symbols with adjustments.
+  const [premiumRes, infoRes, tickerRes, fundingInfoRes] = await Promise.all([
     fetch(`${BINANCE_API_BASE}/premiumIndex`),
     fetch(`${BINANCE_API_BASE}/exchangeInfo`).catch(() => null),
-    fetch(`${BINANCE_API_BASE}/ticker/24hr`).catch(() => null)
+    fetch(`${BINANCE_API_BASE}/ticker/24hr`).catch(() => null),
+    fetch(`${BINANCE_API_BASE}/fundingInfo`).catch(() => null)
   ]);
   if (!premiumRes.ok) throw new Error(`Binance HTTP ${premiumRes.status}`);
   const premiumData = await premiumRes.json();
 
   // Build fee map from exchangeInfo
   const feeMap = {};
+  const infoMap = {};
   if (infoRes && infoRes.ok) {
     try {
       const info = await infoRes.json();
       (info.symbols || []).forEach(s => {
+        infoMap[s.symbol] = s;
         // Binance stores fees as basis points * 10000? Actually raw decimals or integers varies
         // makerCommission/takerCommission might be absent; use commissionRates if available
         let mk = VENUES.binance.makerFee, tk = VENUES.binance.takerFee;
@@ -2429,13 +2692,29 @@ async function fetchBinance() {
     } catch(e) { /* ok */ }
   }
 
-  const knownKeys = Object.keys(KNOWN_CATEGORIES);
+  const fundingIntervalMap = {};
+  if (fundingInfoRes && fundingInfoRes.ok) {
+    try {
+      const rows = await fundingInfoRes.json();
+      (Array.isArray(rows) ? rows : []).forEach(row => {
+        const hours = parseFloat(row.fundingIntervalHours);
+        if (row.symbol && hours > 0) fundingIntervalMap[row.symbol] = hours;
+      });
+    } catch(e) { /* use venue default */ }
+  }
+
   const assets = [];
 
   for (const p of premiumData) {
     const symbol = p.symbol || '';
-    const base = symbol.replace(/USDT$/i, '').toUpperCase();
-    if (!knownKeys.includes(base)) continue;
+    const meta = infoMap[symbol];
+    if (!meta || meta.status !== 'TRADING') continue;
+    const venueBase = String(meta.baseAsset || '').toUpperCase();
+    const isOfficialRwa = meta.contractType === 'TRADIFI_PERPETUAL' ||
+      (meta.contractType === 'PERPETUAL' && ['PAXG', 'XAUT'].includes(venueBase));
+    if (!isOfficialRwa) continue;
+    const normalized = normalizeOfficialRwaSymbol(venueBase, meta.underlyingType);
+    const base = normalized.symbol;
     if (EXCLUDED_SYMBOLS.has(base)) continue;
 
     const markPx = parseFloat(p.markPrice) || 0;
@@ -2450,53 +2729,60 @@ async function fetchBinance() {
     // OI needs separate call per symbol — set to 0 until actual fetch
     const oi = 0;
 
-    const cat = KNOWN_CATEGORIES[base] || inferCategory(base);
-    if (!KNOWN_CATEGORIES[base]) { KNOWN_CATEGORIES[base] = cat; }
+    const cat = normalized.category;
+    registerRwaAsset(base, '', cat);
     const fullName = KNOWN_NAMES[base] || base;
     const isActive = volume > 0 || (funding !== null && funding !== 0);
 
     const cf = feeMap[symbol] || {};
     assets.push({
-      coin: base, symbol, fullName, category: cat, venue: 'binance',
+      coin: base, symbol, venueSymbol: symbol, fullName, category: cat, venue: 'binance',
       markPx, indexPx, change, volume, oi, funding, predictedFunding: null, isActive,
+      fundingIntervalHours: fundingIntervalMap[symbol] || VENUES.binance.fundingInterval,
       makerFee: cf.maker || VENUES.binance.makerFee,
       takerFee: cf.taker || VENUES.binance.takerFee
     });
   }
 
-  // Fetch OI for active assets in batch
+  // Fetch OI for the most liquid assets. Querying every TradFi contract on
+  // every refresh creates hundreds of requests and routinely hits rate limits.
   if (assets.length > 0) {
-    const oiTasks = assets.map((a, idx) => async () => {
+    const oiAssets = [...assets].sort((a, b) => b.volume - a.volume).slice(0, 80);
+    const oiTasks = oiAssets.map(a => async () => {
       try {
         const res = await fetch(`${BINANCE_API_BASE}/openInterest?symbol=${a.symbol}`);
         if (!res.ok) return;
         const data = await res.json();
         const oiQty = parseFloat(data.openInterest) || 0;
-        assets[idx].oi = oiQty * a.markPx;
+        a.oi = oiQty * a.markPx;
+        a.fieldStatus = a.fieldStatus || {};
+        a.fieldStatus.oi = 'full';
       } catch(e) { /* keep estimate */ }
     });
-    await batchFetch(oiTasks, 5);
+    runEnhancementTasks(oiTasks, 5, 'Binance open interest');
   }
 
   // Fetch orderbook depth for ±2% liquidity
-  const depthTasksBinance = assets.map(a => async () => {
+  const depthAssetsBinance = [...assets].sort((a, b) => b.volume - a.volume).slice(0, 80);
+  const depthTasksBinance = depthAssetsBinance.map(a => async () => {
     try {
       const res = await fetch(`${BINANCE_API_BASE}/depth?symbol=${a.symbol}&limit=50`);
       if (!res.ok) return;
       const book = await res.json();
       a.depth2 = liquidityWithinPct({ bids: (book.bids||[]), asks: (book.asks||[]) });
+      a.fieldStatus = a.fieldStatus || {};
+      a.fieldStatus.depth2 = 'partial';
     } catch {}
   });
-  for (let i = 0; i < depthTasksBinance.length; i += 5) {
-    await Promise.allSettled(depthTasksBinance.slice(i, i + 5).map(fn => fn()));
-  }
+  runEnhancementTasks(depthTasksBinance, 5, 'Binance depth');
 
   logLoad(`Binance: ${assets.length} RWA assets processed`);
   return assets;
 }
 
-async function fetchFundingHistoryBinance(symbol, hours) {
-  const periodsNeeded = Math.min(Math.max(Math.ceil(hours / 8), 20), 1000);
+async function fetchFundingHistoryBinance(symbol, hours, intervalHours = 8) {
+  const interval = intervalHours > 0 ? intervalHours : 8;
+  const periodsNeeded = Math.min(Math.max(Math.ceil(hours / interval), 20), 1000);
   try {
     const res = await fetch(`${BINANCE_API_BASE}/fundingRate?symbol=${symbol}&limit=${periodsNeeded}`);
     if (!res.ok) return [];
@@ -2531,11 +2817,18 @@ async function fetchLighter() {
 
   // Build RWA token set from tokenlist
   const rwaTokens = new Set();
+  const rwaTokenNames = {};
   if (tokenlistRes.ok) {
     try {
       const tokenlistJson = await tokenlistRes.json();
       (tokenlistJson?.tokens ?? []).forEach(t => {
-        if (t.asset_type === 'RWA') rwaTokens.add(t.symbol?.toUpperCase());
+        if (t.asset_type === 'RWA') {
+          const sym = t.symbol?.toUpperCase();
+          if (sym) {
+            rwaTokens.add(sym);
+            rwaTokenNames[sym] = t.name || sym;
+          }
+        }
       });
     } catch(e) { /* ok */ }
   }
@@ -2554,36 +2847,47 @@ async function fetchLighter() {
     } catch(e) { /* ok */ }
   }
 
-  const knownKeys = Object.keys(KNOWN_CATEGORIES);
   const assets = [];
 
   for (const entry of perps) {
     const rawSymbol = (entry.symbol || '').toUpperCase();
-    // Check if it's in the RWA tokenlist or in our known categories
-    const isRwa = rwaTokens.has(rawSymbol) || knownKeys.includes(rawSymbol);
-    if (!isRwa) continue;
-    if (EXCLUDED_SYMBOLS.has(rawSymbol)) continue;
+    // The official token list is the only allowlist. This prevents crypto
+    // tickers such as ADI from being mistaken for a same-ticker stock.
+    if (!rwaTokens.has(rawSymbol)) continue;
+    const tokenName = rwaTokenNames[rawSymbol] || rawSymbol;
+    const cat = inferCategory(rawSymbol, tokenName);
+    const coin = canonicalSymbolForCategory(rawSymbol, cat);
+    if (EXCLUDED_SYMBOLS.has(rawSymbol) || EXCLUDED_SYMBOLS.has(coin)) continue;
 
-    const coin = rawSymbol;
+    // An active market can legitimately have no last trade yet. Lighter still
+    // publishes a positive mark/index price for those books, so do not drop the
+    // market solely because last_trade_price is zero.
     const lastPrice = parseFloat(entry.last_trade_price) || 0;
-    if (lastPrice <= 0) continue;
+    const markPrice = parseFloat(entry.mark_price) || lastPrice;
+    const indexPrice = parseFloat(entry.index_price) || markPrice;
 
     const oiBase = parseFloat(entry.open_interest) || 0;
     const volume = parseFloat(entry.daily_quote_token_volume) || 0;
 
     // Funding from the funding-rates endpoint
-    const rawFunding = fundingMap[coin];
+    const rawFunding = fundingMap[rawSymbol];
     const funding = rawFunding !== undefined ? rawFunding / 100 : null; // rates come as percentage, normalize to decimal
 
-    const cat = KNOWN_CATEGORIES[coin] || inferCategory(coin);
-    if (!KNOWN_CATEGORIES[coin]) { KNOWN_CATEGORIES[coin] = cat; }
-    const fullName = KNOWN_NAMES[coin] || coin;
-    const isActive = volume > 0 || oiBase > 0 || (funding !== null && funding !== 0);
+    registerRwaAsset(coin, tokenName, cat);
+    const fullName = KNOWN_NAMES[coin] || tokenName;
+    const isActive = String(entry.status || '').toLowerCase() === 'active' || volume > 0 || oiBase > 0 || (funding !== null && funding !== 0);
 
     assets.push({
-      coin, fullName, category: cat, venue: 'lighter',
-      markPx: lastPrice, indexPx: lastPrice, change: null, volume,
-      oi: oiBase * lastPrice, funding, predictedFunding: null, isActive,
+      coin, symbol: rawSymbol, venueSymbol: rawSymbol, fullName, category: cat, venue: 'lighter',
+      markPx: markPrice, indexPx: indexPrice, change: null, volume,
+      oi: oiBase * markPrice, funding, predictedFunding: null, isActive,
+      isListed: true, isPriced: markPrice > 0,
+      fieldStatus: {
+        markPx: markPrice > 0 ? (parseFloat(entry.mark_price) > 0 ? 'full' : 'estimated') : 'unavailable',
+        indexPx: indexPrice > 0 ? (parseFloat(entry.index_price) > 0 ? 'full' : 'estimated') : 'unavailable',
+        change: 'unavailable', depth2: 'unavailable'
+      },
+      fundingIntervalHours: VENUES.lighter.fundingInterval,
       makerFee: VENUES.lighter.makerFee, takerFee: VENUES.lighter.takerFee
     });
   }
@@ -2597,6 +2901,13 @@ async function fetchLighter() {
 // ═══════════════════════════════════════════════
 
 const VEST_API_BASE = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? 'https://server-prod.hz.vestmarkets.com/v2' : '/api/vest';
+
+function rawVestSymbol(symbol) {
+  const raw = String(symbol || '').toUpperCase();
+  return raw.endsWith('-USD-PERP')
+    ? raw.slice(0, -9)
+    : raw.endsWith('-PERP') ? raw.slice(0, -5) : raw;
+}
 
 async function fetchVest() {
   logLoad('Fetching Vest data...');
@@ -2650,12 +2961,14 @@ async function fetchVest() {
 
   const assets = [];
   for (const entry of rwaSymbols) {
-    // Vest symbol format: TSLA-USD-PERP → strip -USD-PERP
-    const coin = (entry.symbol || '').replace(/-USD-PERP$/i, '').toUpperCase();
-    if (!coin || EXCLUDED_SYMBOLS.has(coin)) continue;
+    // Keep the raw venue symbol for API calls and a separate canonical symbol
+    // for aggregation (GC-PERP→XAU, CL-PERP→WTI, etc.).
+    const rawCoin = rawVestSymbol(entry.symbol);
+    const cat = inferCategory(rawCoin, entry.displayName || '');
+    const coin = canonicalSymbolForCategory(rawCoin, cat);
+    if (!coin) continue;
 
-    const cat = KNOWN_CATEGORIES[coin] || inferCategory(coin, entry.displayName || '');
-    if (!KNOWN_CATEGORIES[coin]) { KNOWN_CATEGORIES[coin] = cat; }
+    registerRwaAsset(coin, entry.displayName || '', cat);
     const fullName = KNOWN_NAMES[coin] || (entry.displayName || coin);
 
     const latest = tickerMap[entry.symbol] || {};
@@ -2664,7 +2977,6 @@ async function fetchVest() {
 
     const markPx = parseFloat(latest.markPrice) || 0;
     const indexPx = parseFloat(latest.indexPrice) || markPx;
-    if (markPx <= 0) continue;
 
     // Vest funding is hourly: oneHrFundingRate
     const rawFunding = parseFloat(latest.oneHrFundingRate);
@@ -2679,8 +2991,10 @@ async function fetchVest() {
     const isActive = volume > 0 || oiUsd > 0 || (funding !== null && funding !== 0);
 
     assets.push({
-      coin, fullName, category: cat, venue: 'vest',
+      coin, symbol: entry.symbol, venueSymbol: entry.symbol, fullName, category: cat, venue: 'vest',
       markPx, indexPx, change, volume, oi: oiUsd, funding, predictedFunding: null, isActive,
+      isListed: true, isPriced: markPx > 0,
+      fundingIntervalHours: 1,
       makerFee: VENUES.vest.makerFee, takerFee: VENUES.vest.takerFee
     });
   }
@@ -2688,7 +3002,8 @@ async function fetchVest() {
   // Fetch orderbook depth via bulk endpoint (1 request instead of ~20)
   if (assets.length > 0) {
     try {
-      const syms = assets.map(a => a.coin + '-USD-PERP').join(',');
+      const depthAssets = [...assets].sort((a, b) => b.volume - a.volume).slice(0, 60);
+      const syms = depthAssets.map(a => a.symbol).join(',');
       const bulkUrl = _isDev
         ? null
         : `/api/vest-bulk?type=depth&symbols=${encodeURIComponent(syms)}&limit=50`;
@@ -2696,23 +3011,27 @@ async function fetchVest() {
         const res = await fetch(bulkUrl);
         if (res.ok) {
           const bulk = await res.json();
-          assets.forEach(a => {
-            const vestSym = a.coin + '-USD-PERP';
+          depthAssets.forEach(a => {
+            const vestSym = a.symbol;
             const book = bulk[vestSym];
             if (book && (book.bids || book.asks)) {
               a.depth2 = liquidityWithinPct({ bids: (book.bids||[]), asks: (book.asks||[]) });
+              a.fieldStatus = a.fieldStatus || {};
+              a.fieldStatus.depth2 = 'partial';
             }
           });
         }
       } else {
         // Dev fallback: individual calls
-        const depthTasksVest = assets.map(a => async () => {
+        const depthTasksVest = depthAssets.map(a => async () => {
           try {
-            const vestSym = a.coin + '-USD-PERP';
+            const vestSym = a.symbol;
             const res = await fetch(`${VEST_API_BASE}/depth?symbol=${encodeURIComponent(vestSym)}&limit=50`);
             if (!res.ok) return;
             const book = await res.json();
             a.depth2 = liquidityWithinPct({ bids: (book.bids||[]), asks: (book.asks||[]) });
+            a.fieldStatus = a.fieldStatus || {};
+            a.fieldStatus.depth2 = 'partial';
           } catch {}
         });
         for (let i = 0; i < depthTasksVest.length; i += 5) {
@@ -2731,11 +3050,6 @@ async function fetchVest() {
 // ═══════════════════════════════════════════════
 const CBINTX_API_BASE = '/api/cbintx';
 
-// Map Coinbase product symbols to our canonical symbols
-const CBINTX_SYMBOL_MAP = {
-  'GOLD': 'XAU', 'SILVER': 'XAG',
-};
-
 async function fetchCoinbaseIntx() {
   logLoad('Fetching Coinbase INTX data...');
 
@@ -2744,61 +3058,45 @@ async function fetchCoinbaseIntx() {
   const data = await res.json();
   const products = data.products || [];
 
-  // Pre-filter candidates: must be in RWA_ASSETS or KNOWN_CATEGORIES
-  const candidates = [];
+  // The list response already contains perpetual details, so the venue's
+  // underlying_type can be used directly without an N+1 detail request.
+  const allowedTypes = new Set(['EQUITY', 'EQUITY_ETF', 'COMMOD', 'PREIPO']);
+  const assets = [];
   for (const p of products) {
     const rawSym = (p.product_id || '').replace(/-PERP-INTX$/, '');
-    if (!rawSym) continue;
-    const coin = CBINTX_SYMBOL_MAP[rawSym] || canonicalSymbol(rawSym);
-    if (EXCLUDED_SYMBOLS.has(coin)) continue;
-    const cat = KNOWN_CATEGORIES[coin] || (RWA_ASSETS[coin] ? RWA_ASSETS[coin].category : null);
-    if (!cat) continue;
+    if (!rawSym || rawSym === 'COIN50') continue;
+    const det = p.future_product_details || {};
+    const perp = det.perpetual_details || {};
+    const uType = String(perp.underlying_type || '').toUpperCase();
+    if (!allowedTypes.has(uType)) continue;
+
+    const normalized = normalizeOfficialRwaSymbol(rawSym, uType, det.display_name || '');
+    const coin = normalized.symbol;
     const markPx = parseFloat(p.price) || 0;
-    if (markPx <= 0) continue;
-    candidates.push({ product: p, coin, cat, rawSym, markPx });
+
+    const cat = normalized.category;
+    registerRwaAsset(coin, det.display_name || '', cat);
+    const fullName = KNOWN_NAMES[coin] || det.display_name || coin;
+    const volume = (parseFloat(p.volume_24h) || 0) * markPx;
+    const change = parseFloat(p.price_percentage_change_24h) || 0;
+    const rawFunding = parseFloat(perp.funding_rate ?? det.funding_rate);
+    const funding = isNaN(rawFunding) ? null : rawFunding;
+    const oiContracts = parseFloat(perp.open_interest ?? det.open_interest) || 0;
+    const oiUsd = oiContracts * markPx;
+    const intervalSeconds = parseFloat(String(det.funding_interval || '').replace(/s$/i, ''));
+    const indexPx = parseFloat(det.index_price) || markPx;
+    const isActive = volume > 0 || oiUsd > 0 || (funding !== null && funding !== 0);
+
+    assets.push({
+      coin, fullName, category: cat, venue: 'cbintx',
+      symbol: p.product_id, venueSymbol: p.product_id,
+      markPx, indexPx, change, volume, oi: oiUsd,
+      funding, predictedFunding: null, isActive,
+      isListed: true, isPriced: markPx > 0,
+      fundingIntervalHours: intervalSeconds > 0 ? intervalSeconds / 3600 : 1,
+      makerFee: VENUES.cbintx.makerFee, takerFee: VENUES.cbintx.takerFee
+    });
   }
-
-  // Fetch product details for each candidate (gives funding, OI, underlying_type)
-  const assets = [];
-  const detailTasks = candidates.map(c => async () => {
-    try {
-      const r = await fetch(`${CBINTX_API_BASE}/market/products/${encodeURIComponent(c.product.product_id)}`);
-      if (!r.ok) return;
-      const d = await r.json();
-      const det = d.future_product_details || {};
-      const perp = det.perpetual_details || {};
-
-      // Filter: only keep EQUITY, COMMOD, ETF — exclude SPOT (crypto tokens like SPX6900)
-      const uType = (perp.underlying_type || '').toUpperCase();
-      if (uType === 'SPOT' || uType === '') return;
-
-      const coin = c.coin;
-      if (!KNOWN_CATEGORIES[coin]) { KNOWN_CATEGORIES[coin] = c.cat; }
-      const fullName = KNOWN_NAMES[coin] || (RWA_ASSETS[coin] ? RWA_ASSETS[coin].name : coin);
-
-      const volume = parseFloat(c.product.volume_24h) * c.markPx || 0;
-      const change = parseFloat(c.product.price_percentage_change_24h) || 0;
-
-      // Funding rate (hourly)
-      const rawFunding = parseFloat(det.funding_rate);
-      const funding = isNaN(rawFunding) ? null : rawFunding;
-
-      // Open interest (in contracts → multiply by price for USD)
-      const oiContracts = parseFloat(det.open_interest) || 0;
-      const oiUsd = oiContracts * c.markPx;
-
-      const isActive = volume > 0 || oiUsd > 0 || (funding !== null && funding !== 0);
-
-      assets.push({
-        coin, fullName, category: c.cat, venue: 'cbintx',
-        symbol: c.product.product_id,
-        markPx: c.markPx, indexPx: c.markPx, change, volume, oi: oiUsd,
-        funding, predictedFunding: null, isActive,
-        makerFee: VENUES.cbintx.makerFee, takerFee: VENUES.cbintx.takerFee
-      });
-    } catch {}
-  });
-  await batchFetch(detailTasks, 8);
 
   logLoad(`Coinbase INTX: ${assets.length} RWA assets processed`);
   return assets;
@@ -2811,7 +3109,8 @@ async function fetchCoinbaseIntx() {
 async function fetchFundingHistoryXyz(coin, hours) {
   const API_URL = 'https://api.hyperliquid.xyz/info';
   const startTime = Date.now() - hours * 3600 * 1000;
-  for (const name of [coin, `xyz:${coin}`]) {
+  const candidates = String(coin || '').includes(':') ? [coin] : [coin, `xyz:${coin}`];
+  for (const name of candidates) {
     try {
       const res = await fetch(API_URL, {
         method: 'POST',
@@ -2826,9 +3125,9 @@ async function fetchFundingHistoryXyz(coin, hours) {
   return [];
 }
 
-async function fetchFundingHistoryBitget(symbol, hours) {
+async function fetchFundingHistoryBitget(symbol, hours, intervalHours = 8) {
   const PRODUCT_TYPE = 'USDT-FUTURES';
-  const periodsNeeded = Math.min(Math.max(Math.ceil(hours / 8), 20), 100);
+  const periodsNeeded = Math.min(Math.max(Math.ceil(hours / intervalHours), 20), 100);
   try {
     const res = await fetch(`https://api.bitget.com/api/v2/mix/market/history-fund-rate?symbol=${symbol}&productType=${PRODUCT_TYPE}&limit=${periodsNeeded}`);
     if (!res.ok) return [];
@@ -2838,9 +3137,8 @@ async function fetchFundingHistoryBitget(symbol, hours) {
   } catch (e) { return []; }
 }
 
-async function fetchFundingHistoryGate(contract, hours) {
-  // Gate settles every 8h → ensure minimum 20 points for a readable chart
-  const periodsNeeded = Math.min(Math.max(Math.ceil(hours / 8), 20), 100);
+async function fetchFundingHistoryGate(contract, hours, intervalHours = 8) {
+  const periodsNeeded = Math.min(Math.max(Math.ceil(hours / intervalHours), 20), 100);
   try {
     const res = await fetch(`${GATE_API_BASE}/funding_rate?contract=${contract}&limit=${periodsNeeded}`);
     if (!res.ok) return [];
@@ -2881,16 +3179,18 @@ async function loadSparkline(venue, asset) {
     try {
       let raw;
       if (venue === 'tradexyz') {
-        raw = await fetchFundingHistoryXyz(asset.coin, hours);
+        raw = await fetchFundingHistoryXyz(asset.symbol || asset.coin, hours);
       } else if (venue === 'gate') {
         const contract = asset.symbol || (asset.coin + '_USDT');
-        raw = await fetchFundingHistoryGate(contract, hours);
+        raw = await fetchFundingHistoryGate(contract, hours, fundingIntervalHours(venue, asset));
       } else if (venue === 'binance') {
         const symbol = asset.symbol || (asset.coin + 'USDT');
-        raw = await fetchFundingHistoryBinance(symbol, hours);
-      } else {
+        raw = await fetchFundingHistoryBinance(symbol, hours, fundingIntervalHours(venue, asset));
+      } else if (venue === 'bitget') {
         const symbol = asset.symbol || (asset.coin + 'USDT');
-        raw = await fetchFundingHistoryBitget(symbol, hours);
+        raw = await fetchFundingHistoryBitget(symbol, hours, fundingIntervalHours(venue, asset));
+      } else {
+        raw = [];
       }
       data = { hours, data: raw };
       fundingCache[cacheKey] = data;
@@ -2917,7 +3217,7 @@ async function loadSparkline(venue, asset) {
   // Update % 有效费率 cell
   const posCell = document.getElementById(`pos_${venue}_${asset.coin}`);
   if (posCell && rates.length > 0) {
-    const interval = VENUES[venue].fundingInterval;
+    const interval = fundingIntervalHours(venue, asset);
     const annFactor = 8760 / interval;
     const APR_THRESHOLD = 0.015; // 1.5% annualized
     // Expected periods for this time window
@@ -3030,6 +3330,15 @@ async function batchFetch(tasks, concurrency = 5) {
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, () => worker()));
   return results;
+}
+
+function runEnhancementTasks(tasks, concurrency = 5, label = 'Market enrichment') {
+  if (!Array.isArray(tasks) || tasks.length === 0) return;
+  batchFetch(tasks, concurrency).then(() => {
+    // Tasks mutate the same asset objects held by allData. Re-render once the
+    // optional enrichment is ready without delaying the first usable page.
+    if (Array.isArray(allData) && allData.length > 0) renderCurrentView();
+  }).catch(error => console.warn(`${label} error:`, error));
 }
 
 async function fetchVolumeGrowthXyz() {
@@ -3183,12 +3492,12 @@ function renderModalContent() {
   const v = modalVenue;
   const mc = document.getElementById('modalContent');
   const vInfo = VENUES[v];
-  const interval = vInfo.fundingInterval;
+  const interval = fundingIntervalHours(v, d);
 
   const spread = d.markPx - d.indexPx;
   const spreadPct = d.indexPx ? ((spread / d.indexPx) * 100) : 0;
   const premium = d.indexPx ? ((d.markPx - d.indexPx) / d.indexPx * 100) : 0;
-  const annRate = annualize(d.funding, v);
+  const annRate = annualize(d.funding, v, d);
   const annPct = annRate !== null ? (annRate * 100).toFixed(2) : 'N/A';
 
   const spreadColor = Math.abs(spreadPct) > 0.05 ? 'var(--red)' : 'var(--text-primary)';
@@ -3241,12 +3550,12 @@ function renderModalContent() {
         <div class="mm-value" style="color:${premiumColor}">${premium >= 0 ? '+' : ''}${premium.toFixed(4)}%</div>
       </div>
       ${d.predictedFunding !== null ? (() => {
-        const pAnn = annualize(d.predictedFunding, v);
+        const pAnn = annualize(d.predictedFunding, v, d);
         const pAnnPct = pAnn !== null ? (pAnn*100).toFixed(2) : 'N/A';
         const pColor = d.predictedFunding > 0 ? 'var(--green)' : d.predictedFunding < 0 ? 'var(--red)' : 'var(--text-muted)';
         const arrow = d.predictedFunding > (d.funding||0) ? '▲' : d.predictedFunding < (d.funding||0) ? '▼' : '▶';
         return `<div class="modal-metric"><div class="mm-label">Predicted Next ${interval}H</div><div class="mm-value" style="color:${pColor}">${arrow} ${fmtFunding(d.predictedFunding)}</div><div class="mm-sub">${pAnnPct === 'N/A' ? '' : pAnnPct + '% APR'}</div></div>`;
-      })() : ''}
+      })() : `<div class="modal-metric"><div class="mm-label">Predicted Next ${interval}H</div><div class="mm-value" style="color:var(--foreground-dim)">N/A</div><div class="mm-sub">${dataStatusBadge('unavailable','Venue does not publish an official next-period prediction')}</div></div>`}
       <div class="modal-metric">
         <div class="mm-label">Maker / Taker Fee</div>
         <div class="mm-value" style="font-size:13px">${(d.makerFee*100).toFixed(3)}% / ${(d.takerFee*100).toFixed(3)}%</div>
@@ -3288,16 +3597,18 @@ async function loadModalChart() {
   let raw;
   try {
     if (v === 'tradexyz') {
-      raw = await fetchFundingHistoryXyz(d.coin, hours);
+      raw = await fetchFundingHistoryXyz(d.symbol || d.coin, hours);
     } else if (v === 'gate') {
       const contract = d.symbol || (d.coin + '_USDT');
-      raw = await fetchFundingHistoryGate(contract, hours);
+      raw = await fetchFundingHistoryGate(contract, hours, fundingIntervalHours(v, d));
     } else if (v === 'binance') {
       const symbol = d.symbol || (d.coin + 'USDT');
-      raw = await fetchFundingHistoryBinance(symbol, hours);
-    } else {
+      raw = await fetchFundingHistoryBinance(symbol, hours, fundingIntervalHours(v, d));
+    } else if (v === 'bitget') {
       const symbol = d.symbol || (d.coin + 'USDT');
-      raw = await fetchFundingHistoryBitget(symbol, hours);
+      raw = await fetchFundingHistoryBitget(symbol, hours, fundingIntervalHours(v, d));
+    } else {
+      raw = [];
     }
   } catch (e) {
     area.innerHTML = '<span style="color:var(--text-muted);font-size:13px">Failed to load chart data</span>';
@@ -3403,23 +3714,46 @@ function renderModalChart(points) {
 // REFRESH
 // ═══════════════════════════════════════════════
 
+async function fetchVenueWithFallback(key, fetcher, timeoutMs = 45000) {
+  let timeoutId;
+  try {
+    const data = await Promise.race([
+      fetcher(),
+      new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(`Timed out after ${Math.round(timeoutMs / 1000)}s`)), timeoutMs);
+      })
+    ]);
+    const normalized = Array.isArray(data) ? data.map(normalizePerpDataState) : [];
+    if (normalized.length) lastVenueData[key] = normalized;
+    return normalized;
+  } catch (error) {
+    console.error(`${VENUES[key]?.name || key} error:`, error);
+    return lastVenueData[key] || [];
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
 async function refresh(isFirst) {
+  if (refreshInFlight) return;
+  refreshInFlight = true;
   try {
     const [xyzAssets, bitgetAssets, gateAssets, binanceAssets, lighterAssets, vestAssets, cbintxAssets] = await Promise.all([
-      fetchTradeXyz().catch(e => { console.error('trade.xyz error:', e); return []; }),
-      fetchBitget().catch(e => { console.error('Bitget error:', e); return []; }),
-      fetchGate().catch(e => { console.error('Gate.io error:', e); return []; }),
-      fetchBinance().catch(e => { console.error('Binance error:', e); return []; }),
-      fetchLighter().catch(e => { console.error('Lighter error:', e); return []; }),
-      fetchVest().catch(e => { console.error('Vest error:', e); return []; }),
-      fetchCoinbaseIntx().catch(e => { console.error('Coinbase INTX error:', e); return []; })
+      fetchVenueWithFallback('tradexyz', fetchTradeXyz),
+      fetchVenueWithFallback('bitget', fetchBitget),
+      fetchVenueWithFallback('gate', fetchGate),
+      fetchVenueWithFallback('binance', fetchBinance),
+      fetchVenueWithFallback('lighter', fetchLighter),
+      fetchVenueWithFallback('vest', fetchVest),
+      fetchVenueWithFallback('cbintx', fetchCoinbaseIntx)
     ]);
 
     allData = [...xyzAssets, ...bitgetAssets, ...gateAssets, ...binanceAssets, ...lighterAssets, ...vestAssets, ...cbintxAssets]
-      .filter(d => !EXCLUDED_SYMBOLS.has(canonicalSymbol(d.coin)));
+      .filter(d => !EXCLUDED_SYMBOLS.has(canonicalSymbolForCategory(d.coin, d.category)));
 
-    // Fetch volume growth (cached, re-fetches every 5 min)
-    await fetchVolumeGrowthAll().catch(e => console.error('Volume growth error:', e));
+    // Perp quotes are refreshed every 30 seconds; keep spot/perp matching in
+    // sync even when the slower spot catalog refresh is not running.
+    SPOT_PERP = _buildSpotPerpFromAllData();
 
     const venueCount = new Set(allData.map(d => d.venue)).size;
     const now = new Date().toLocaleTimeString();
@@ -3434,11 +3768,20 @@ async function refresh(isFirst) {
 
     computeAlerts();
     renderCurrentView();
+
+    // Volume-growth enrichment can fan out into many kline requests and must
+    // never block the first usable render. Fetch it in the background, then
+    // refresh the current view when the cache is ready.
+    fetchVolumeGrowthAll().then(() => {
+      renderCurrentView();
+    }).catch(e => console.error('Volume growth error:', e));
   } catch (e) {
     console.error('Refresh error:', e);
     document.getElementById('statusText').textContent = `Error: ${e.message}`;
     // Always hide loader even on error so user isn't stuck
     document.getElementById('loadingOverlay').style.display = 'none';
+  } finally {
+    refreshInFlight = false;
   }
 }
 
@@ -3498,7 +3841,7 @@ function computeAlerts() {
   // 8h venues (binance, bitget, gate): standard thresholds
   allData.forEach(d => {
     if (d.funding === null || d.funding === 0) return;
-    const interval = VENUES[d.venue].fundingInterval;
+    const interval = fundingIntervalHours(d.venue, d);
     const ann = d.funding * (24 / interval) * 365;
     const absAnn = Math.abs(ann);
     // Scale thresholds: 1h venues get 3× higher thresholds to account for annualization amplification
@@ -3533,7 +3876,7 @@ function computeAlerts() {
   Object.entries(grouped).forEach(([coin, venues]) => {
     if (venues.length < 2) return;
     const annRates = venues.map(d => ({
-      venue: d.venue, ann: d.funding * (24 / VENUES[d.venue].fundingInterval) * 365
+      venue: d.venue, ann: annualize(d.funding, d.venue, d)
     }));
     const maxR = annRates.reduce((a, b) => a.ann > b.ann ? a : b);
     const minR = annRates.reduce((a, b) => a.ann < b.ann ? a : b);
@@ -3566,7 +3909,7 @@ function computeAlerts() {
 
   // Sort: high severity first, then medium, then low
   const sevOrder = { high: 0, med: 1, low: 2 };
-  alertsData.sort((a, b) => (sevOrder[a.severity] || 2) - (sevOrder[b.severity] || 2));
+  alertsData.sort((a, b) => (sevOrder[a.severity] ?? 2) - (sevOrder[b.severity] ?? 2));
 
   updateAlertBadge();
 }
@@ -3712,7 +4055,7 @@ function renderKPIs() {
   const venueCount = new Set(data.map(d => d.venue)).size;
   const posRates = [], negRates = [];
   allData.forEach(d => {
-    const ann = annualize(d.funding, d.venue);
+    const ann = annualize(d.funding, d.venue, d);
     if (ann === null) return;
     if (ann > 0) posRates.push(ann);
     else if (ann < 0) negRates.push(ann);
@@ -3760,7 +4103,7 @@ function renderVenueCards() {
 
     const vDataWithChange = vData.filter(d => d.change !== null && d.change !== undefined);
     const topGainer = vDataWithChange.length > 0 ? [...vDataWithChange].sort((a,b) => b.change-a.change)[0] : null;
-    const topFunding = [...vData].filter(d => d.funding !== null).sort((a,b) => Math.abs(annualize(b.funding,vKey))-Math.abs(annualize(a.funding,vKey)))[0] || vData[0];
+    const topFunding = [...vData].filter(d => d.funding !== null).sort((a,b) => Math.abs(annualize(b.funding,vKey,b))-Math.abs(annualize(a.funding,vKey,a)))[0] || vData[0];
     const topOI = [...vData].sort((a,b) => b.oi-a.oi)[0];
 
     const sorted = [...vData].sort((a,b)=>b.volume-a.volume);
@@ -3837,7 +4180,7 @@ function renderVenueCards() {
       </div>
       <div class="vc-metrics">
         <div class="vc-metric"><div class="vm-label">24h Top Gainer</div>${topGainer ? `<div class="vm-asset">${topGainer.coin} <span class="vm-tag" style="background:var(--positive-dim);color:var(--positive)">${topGainer.change >= 0 ? '+' : ''}${topGainer.change.toFixed(2)}%</span></div><div class="vm-value">${topGainer.fullName}</div>` : `<div class="vm-asset"><span style="color:var(--foreground-dim)">N/A</span></div><div class="vm-value">Change data not available</div>`}</div>
-        <div class="vc-metric"><div class="vm-label">Highest Funding</div><div class="vm-asset">${topFunding.coin} <span class="vm-tag" style="background:${tfBg};color:${tfColor}">${fmtAnnual(topFunding.funding, vKey)} APR</span></div><div class="vm-value">${topFunding.fullName}</div></div>
+        <div class="vc-metric"><div class="vm-label">Highest Funding</div><div class="vm-asset">${topFunding.coin} <span class="vm-tag" style="background:${tfBg};color:${tfColor}">${fmtAnnual(topFunding.funding, vKey, topFunding)} APR</span></div><div class="vm-value">${topFunding.fullName}</div></div>
         <div class="vc-metric"><div class="vm-label">Largest OI</div><div class="vm-asset">${topOI.coin}</div><div class="vm-value">${fmtVolume(topOI.oi)} notional</div></div>
       </div>
       <div class="vc-section"><div class="vc-section-title">24h Volume Growth — Top 3 <span class="vc-section-hint">(today vs yesterday)</span></div>${volGrowthHTML}</div>
@@ -3903,7 +4246,7 @@ function renderDivergence() {
   const grouped = {};
   getFilteredData().forEach(d => {
     if (d.funding === null) return;
-    const ann = annualize(d.funding, d.venue);
+    const ann = annualize(d.funding, d.venue, d);
     if (ann === null) return;
     if (!grouped[d.coin]) grouped[d.coin] = { coin: d.coin, fullName: d.fullName, category: d.category, venues: [] };
     grouped[d.coin].venues.push({ venue: d.venue, ann, raw: d.funding });
@@ -4236,9 +4579,9 @@ function renderRevenue() {
   const mult = getMultiplier(revPeriod);
   const periodLabel = getPeriodLabel(revPeriod);
   const methodTag = periodRev._method === 'real'
-    ? `<span style="color:var(--positive);font-size:10px;border:1px solid var(--positive);padding:1px 6px;border-radius:10px;margin-left:8px">Real</span>`
+    ? `<span style="color:var(--positive);font-size:10px;border:1px solid var(--positive);padding:1px 6px;border-radius:10px;margin-left:8px">Modeled history</span>`
     : periodRev._method === 'partial'
-    ? `<span style="color:var(--accent);font-size:10px;border:1px solid var(--accent);padding:1px 6px;border-radius:10px;margin-left:8px">${periodRev._realDays}d real + projected</span>`
+    ? `<span style="color:var(--accent);font-size:10px;border:1px solid var(--accent);padding:1px 6px;border-radius:10px;margin-left:8px">${periodRev._realDays}d modeled + projected</span>`
     : `<span style="color:var(--foreground-dim);font-size:10px;border:1px solid var(--border);padding:1px 6px;border-radius:10px;margin-left:8px">Projected</span>`;
 
   // ── Period selector buttons ──
@@ -4297,7 +4640,7 @@ function renderRevenue() {
           <span class="rev-row-value" style="color:var(--foreground-sec)">$${fmtRevenue(annEst - annBase)}</span>
         </div>
         <div class="rev-row est">
-          <span class="rev-row-label">+ Liquidation Rev. (OI $${fmtVolume(vOI)} × 0.35%/d × ${(liqFee*100).toFixed(1)}%)</span>
+          <span class="rev-row-label">+ Liquidation Rev. (OI ${fmtVolume(vOI)} × 0.35%/d × ${(liqFee*100).toFixed(1)}%)</span>
           <span class="rev-row-value" style="color:var(--foreground-sec)">$${fmtRevenue(estLiq)}</span>
         </div>
       </div>`;
@@ -4315,7 +4658,7 @@ function renderRevenue() {
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
       <div>
         <div class="section-title">RWA Revenue Estimator</div>
-        <div class="section-subtitle">Volume × (Maker + Taker Fee) · ${periodLabel}${methodTag}</div>
+        <div class="section-subtitle">Fee model: 24h volume × (maker + taker fee); not reported exchange revenue · ${periodLabel}${methodTag}</div>
       </div>
       <div class="spark-range-btns" style="margin:0">${periodBtns}</div>
     </div>
@@ -4336,13 +4679,13 @@ function renderRevenue() {
     <div class="rev-ledger" style="margin-top:24px">
       <div class="rev-ledger-title">Annual Revenue Projection</div>
       <div class="rev-legend">
-        <div class="rev-legend-item"><div class="rev-legend-line" style="background:var(--positive)"></div>Real data</div>
+        <div class="rev-legend-item"><div class="rev-legend-line" style="background:var(--positive)"></div>Modeled from live inputs</div>
         <div class="rev-legend-item"><div class="rev-legend-dash"></div>Estimated</div>
       </div>
       <div style="margin-top:12px">
         ${projRows}
         <div class="rev-total" style="background:var(--muted)">
-          <span style="color:var(--foreground-sec)">Total Base (Real Data Only)</span>
+          <span style="color:var(--foreground-sec)">Total Base (Fee Model)</span>
           <span style="color:var(--foreground);font-family:'JetBrains Mono',monospace">$${fmtRevenue(totalAnnBase)}</span>
         </div>
         <div class="rev-total" style="background:var(--info-dim);margin-top:4px">
@@ -4370,13 +4713,21 @@ function fmtRevenue(val) {
 
 let _top30Cache = null;       // { ts, data }
 let _top30Loading = false;
+let _top30InFlight = null;
 const TOP30_CACHE_TTL = 5 * 60 * 1000; // 5 min cache
 
-async function fetchReal30DayVolume() {
-  if (_top30Cache && Date.now() - _top30Cache.ts < TOP30_CACHE_TTL) return _top30Cache.data;
-  if (_top30Loading) return _top30Cache ? _top30Cache.data : {};
+function fetchReal30DayVolume() {
+  if (_top30Cache && Date.now() - _top30Cache.ts < TOP30_CACHE_TTL) return Promise.resolve(_top30Cache.data);
+  if (_top30InFlight) return _top30InFlight;
   _top30Loading = true;
+  _top30InFlight = _fetchReal30DayVolumeImpl().finally(() => {
+    _top30Loading = false;
+    _top30InFlight = null;
+  });
+  return _top30InFlight;
+}
 
+async function _fetchReal30DayVolumeImpl() {
   const now = Date.now();
   const thirtyDaysAgo = now - 30 * 24 * 3600 * 1000;
   const thirtyDaysAgoSec = Math.floor(thirtyDaysAgo / 1000);
@@ -4387,16 +4738,14 @@ async function fetchReal30DayVolume() {
   // Only affects Top-30 volume table; does NOT touch arbitrage / reference pricing.
   const VOLUME_MERGE_GROUPS = {
     XAUT: 'XAU', PAXG: 'XAU', XAUM: 'XAU', KAU: 'XAU', PGOLD: 'XAU', GGBR: 'XAU',
-    SILVER: 'XAG',          // Silver token → XAG
-    BZ: 'BRENTOIL',         // Brent Crude (Binance/Bitget ticker) → BRENTOIL
     SKHX: 'SKHYNIX',       // SKHX is alias for SK Hynix on Hyperliquid
   };
 
   // result: { COIN: { venues: { venueName: { vol30d, method } }, totalVol30d, components: Set } }
   const merged = {};
 
-  function addVol(coin, venue, vol, method = 'real') {
-    const key = canonicalSymbol(coin);
+  function addVol(coin, venue, vol, method = 'real', category = '') {
+    const key = canonicalSymbolForCategory(coin, category);
     if (!key || EXCLUDED_SYMBOLS.has(key)) return;
     const mergeKey = VOLUME_MERGE_GROUPS[key] || key;
     if (!merged[mergeKey]) merged[mergeKey] = { venues: {}, totalVol30d: 0, components: new Set() };
@@ -4413,7 +4762,7 @@ async function fetchReal30DayVolume() {
   }
 
   // ── Binance: /klines?interval=1d&limit=30 ──
-  const bnKlineTasks = allData.filter(d => d.venue === 'binance').map(asset => async () => {
+  const bnKlineTasks = allData.filter(d => d.venue === 'binance').sort((a,b)=>b.volume-a.volume).slice(0,80).map(asset => async () => {
     try {
       const sym = asset.symbol || (asset.coin + 'USDT');
       const res = await fetch(`${BINANCE_API_BASE}/klines?symbol=${sym}&interval=1d&limit=30`);
@@ -4422,12 +4771,12 @@ async function fetchReal30DayVolume() {
       if (!Array.isArray(klines)) return;
       let totalVol = 0;
       klines.forEach(k => { totalVol += parseFloat(k[7] || 0); }); // index 7 = quoteAssetVolume
-      if (totalVol > 0) addVol(asset.coin, 'binance', totalVol, 'real');
+      if (totalVol > 0) addVol(asset.coin, 'binance', totalVol, 'real', asset.category);
     } catch {}
   });
 
   // ── Bitget: /candles?granularity=1Dutc&limit=30 ──
-  const bgKlineTasks = allData.filter(d => d.venue === 'bitget').map(asset => async () => {
+  const bgKlineTasks = allData.filter(d => d.venue === 'bitget').sort((a,b)=>b.volume-a.volume).slice(0,80).map(asset => async () => {
     try {
       const sym = asset.symbol || (asset.coin + 'USDT');
       const res = await fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=1Dutc&limit=30`);
@@ -4440,12 +4789,12 @@ async function fetchReal30DayVolume() {
         const volQuote = parseFloat(c[6] || c[5] || 0);
         totalVol += volQuote;
       });
-      if (totalVol > 0) addVol(asset.coin, 'bitget', totalVol, 'real');
+      if (totalVol > 0) addVol(asset.coin, 'bitget', totalVol, 'real', asset.category);
     } catch {}
   });
 
   // ── Gate.io: bulk klines via serverless function (1 call instead of ~55) ──
-  const gateAssets = allData.filter(d => d.venue === 'gate');
+  const gateAssets = allData.filter(d => d.venue === 'gate').sort((a,b)=>b.volume-a.volume).slice(0,80);
   const gateKlineTasks = [async () => {
     if (gateAssets.length === 0) return;
     const syms = gateAssets.map(a => a.symbol || (a.coin + '_USDT'));
@@ -4461,7 +4810,7 @@ async function fetchReal30DayVolume() {
           if (!Array.isArray(candles)) return;
           let totalVol = 0;
           candles.forEach(c => { totalVol += parseFloat(c.sum || 0); });
-          if (totalVol > 0) addVol(a.coin, 'gate', totalVol, 'real');
+          if (totalVol > 0) addVol(a.coin, 'gate', totalVol, 'real', a.category);
         });
       } catch {}
     } else {
@@ -4475,7 +4824,7 @@ async function fetchReal30DayVolume() {
           if (!Array.isArray(candles)) continue;
           let totalVol = 0;
           candles.forEach(c => { totalVol += parseFloat(c.sum || 0); });
-          if (totalVol > 0) addVol(asset.coin, 'gate', totalVol, 'real');
+          if (totalVol > 0) addVol(asset.coin, 'gate', totalVol, 'real', asset.category);
         } catch {}
       }
     }
@@ -4483,14 +4832,14 @@ async function fetchReal30DayVolume() {
 
   // ── trade.xyz (Hyperliquid): candleSnapshot with xyz: prefix + 1h interval ──
   // Note: trade.xyz RWA perps require xyz: prefix and only support 1h interval (not 1d)
-  const xyzKlineTasks = allData.filter(d => d.venue === 'tradexyz').map(asset => async () => {
+  const xyzKlineTasks = allData.filter(d => d.venue === 'tradexyz').sort((a,b)=>b.volume-a.volume).slice(0,80).map(asset => async () => {
     try {
       const res = await fetch('https://api.hyperliquid.xyz/info', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type: 'candleSnapshot',
-          req: { coin: `xyz:${asset.coin}`, interval: '1h', startTime: thirtyDaysAgo, endTime: now }
+          req: { coin: asset.symbol || `xyz:${asset.coin}`, interval: '1h', startTime: thirtyDaysAgo, endTime: now }
         })
       });
       if (!res.ok) return;
@@ -4502,12 +4851,12 @@ async function fetchReal30DayVolume() {
         const px = parseFloat(c.c || asset.markPx || 0);
         totalVol += vol * px;
       });
-      if (totalVol > 0) addVol(asset.coin, 'tradexyz', totalVol, 'real');
+      if (totalVol > 0) addVol(asset.coin, 'tradexyz', totalVol, 'real', asset.category);
     } catch {}
   });
 
   // ── Coinbase INTX: /market/products/{id}/candles ──
-  const cbiKlineTasks = allData.filter(d => d.venue === 'cbintx').map(asset => async () => {
+  const cbiKlineTasks = allData.filter(d => d.venue === 'cbintx').sort((a,b)=>b.volume-a.volume).slice(0,80).map(asset => async () => {
     try {
       const now = Math.floor(Date.now() / 1000);
       const thirtyDaysAgo = now - 30 * 86400;
@@ -4518,7 +4867,7 @@ async function fetchReal30DayVolume() {
       if (!Array.isArray(candles)) return;
       let totalVol = 0;
       candles.forEach(c => { totalVol += (parseFloat(c.volume) || 0) * (parseFloat(c.close) || parseFloat(c.open) || 0); });
-      if (totalVol > 0) addVol(asset.coin, 'cbintx', totalVol, 'real');
+      if (totalVol > 0) addVol(asset.coin, 'cbintx', totalVol, 'real', asset.category);
     } catch {}
   });
 
@@ -4533,15 +4882,17 @@ async function fetchReal30DayVolume() {
 
   // ── Lighter & Vest: no kline API, fall back to 24h × 30 (tagged as estimate) ──
   allData.filter(d => d.venue === 'lighter' || d.venue === 'vest').forEach(d => {
-    if (d.volume > 0) addVol(d.coin, d.venue, d.volume * 30, 'est');
+    if (d.volume > 0) addVol(d.coin, d.venue, d.volume * 30, 'est', d.category);
   });
 
   // ── Also add estimate fallback for any venue where kline fetch failed ──
   allData.forEach(d => {
-    const key = canonicalSymbol(d.coin);
+    const key = canonicalSymbolForCategory(d.coin, d.category);
     if (!key || EXCLUDED_SYMBOLS.has(key)) return;
-    if (merged[key] && merged[key].venues[d.venue]) return; // already have real data
-    if (d.volume > 0) addVol(d.coin, d.venue, d.volume * 30, 'est');
+    const mergeKey = VOLUME_MERGE_GROUPS[key] || key;
+    const existing = merged[mergeKey]?.venues[d.venue];
+    if (existing?.symbols?.has(key)) return; // this exact component already has real data
+    if (d.volume > 0) addVol(d.coin, d.venue, d.volume * 30, 'est', d.category);
   });
 
   // ── Compute totals ──
@@ -4557,7 +4908,6 @@ async function fetchReal30DayVolume() {
   }
 
   _top30Cache = { ts: Date.now(), data: merged };
-  _top30Loading = false;
   return merged;
 }
 
@@ -4568,8 +4918,8 @@ function renderTop30Volume() {
   // Initial render with loading state
   if (!_top30Cache) {
     section.innerHTML = `
-      <div class="section-title">Top 30 RWA Perps by 30-Day Volume</div>
-      <div class="section-subtitle">Fetching real kline data from all venues…</div>
+      <div class="section-title">Top 30 RWA Perps by Estimated 30-Day Volume</div>
+      <div class="section-subtitle">Fetching klines for the highest-current-volume candidates; remaining listings use 24h×30 estimates…</div>
       <div style="text-align:center;padding:40px;color:var(--foreground-dim)">
         <div class="spin" style="display:inline-block;width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite"></div>
         <div style="margin-top:12px;font-size:12px">Loading 30-day kline data from Binance, Bitget, Gate.io, trade.xyz, Coinbase INTX…</div>
@@ -4587,8 +4937,6 @@ function renderTop30Volume() {
   // Re-read VOLUME_MERGE_GROUPS for OI/funding aggregation
   const VMG = {
     XAUT: 'XAU', PAXG: 'XAU', XAUM: 'XAU', KAU: 'XAU', PGOLD: 'XAU', GGBR: 'XAU',
-    SILVER: 'XAG',
-    BZ: 'BRENTOIL',
     SKHX: 'SKHYNIX',
   };
 
@@ -4596,17 +4944,27 @@ function renderTop30Volume() {
   const nameMap = {};
   const catMap = {};
   const oiMap = {};
-  const fundingMap = {};
+  const fundingSamples = {};
   allData.forEach(d => {
-    const key = canonicalSymbol(d.coin);
+    const key = canonicalSymbolForCategory(d.coin, d.category);
     const mergeKey = VMG[key] || key;
     if (!nameMap[mergeKey]) nameMap[mergeKey] = d.fullName || d.coin;
     catMap[mergeKey] = d.category || inferCategory(mergeKey, d.fullName);
     // Sum OI across venues (merged)
     if (d.oi > 0) oiMap[mergeKey] = (oiMap[mergeKey] || 0) + d.oi;
-    // Collect funding (use first non-null, prefer main symbol)
-    if (d.funding !== null && fundingMap[mergeKey] === undefined) {
-      fundingMap[mergeKey] = annualize(d.funding, d.venue);
+    // Collect every venue's current annualized funding; render the median so
+    // array order cannot silently choose one venue as the representative.
+    if (d.funding !== null) {
+      if (!fundingSamples[mergeKey]) fundingSamples[mergeKey] = [];
+      fundingSamples[mergeKey].push(annualize(d.funding, d.venue, d));
+    }
+  });
+  const fundingMap = {};
+  Object.entries(fundingSamples).forEach(([key, values]) => {
+    const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+    if (sorted.length) {
+      const mid = Math.floor(sorted.length / 2);
+      fundingMap[key] = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
     }
   });
 
@@ -4655,7 +5013,7 @@ function renderTop30Volume() {
       const syms = v.symbols ? [...v.symbols] : [];
       const symLabel = syms.length > 0 && syms.some(s => s !== r.coin) ? ` [${syms.join('+')}]` : '';
       const tag = v.method === 'est' ? ' (est)' : '';
-      return `<span class="venue-dot ${realVenue}" title="${vName}${symLabel}: $${fmtVolume(v.vol30d)}${tag}" style="cursor:help"></span>`;
+      return `<span class="venue-dot ${realVenue}" title="${vName}${symLabel}: ${fmtVolume(v.vol30d)}${tag}" style="cursor:help"></span>`;
     }).join(' ');
 
     const methodTag = r.hasReal ? '' : '<span style="color:var(--foreground-dim);font-size:9px;margin-left:4px" title="No kline API; estimated from 24h×30">est</span>';
@@ -4675,7 +5033,7 @@ function renderTop30Volume() {
         .map(c => {
           const vol = compVolMap[c] || 0;
           const pct = r.totalVol30d > 0 ? (vol / r.totalVol30d * 100).toFixed(0) : 0;
-          return `${c} $${fmtVolume(vol)} (${pct}%)`;
+          return `${c} ${fmtVolume(vol)} (${pct}%)`;
         });
       compLine = `<div style="font-size:9px;color:var(--foreground-dim);margin-top:1px;opacity:0.8">= ${parts.join(' + ')}</div>`;
     }
@@ -4704,8 +5062,8 @@ function renderTop30Volume() {
   section.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
       <div>
-        <div class="section-title">Top 30 RWA Perps by 30-Day Volume</div>
-        <div class="section-subtitle">Real kline data from ${realCount} assets · ${estCount > 0 ? estCount + ' estimated (24h×30) · ' : ''}Total: ${fmtVolume(totalVol30d)} · Updated ${new Date(_top30Cache.ts).toLocaleTimeString()}</div>
+        <div class="section-title">Top 30 RWA Perps by Estimated 30-Day Volume</div>
+        <div class="section-subtitle">Klines for top current-volume candidates · ${realCount} rows include real history · ${estCount > 0 ? estCount + ' rows include 24h×30 estimates · ' : ''}Total: ${fmtVolume(totalVol30d)} · Updated ${new Date(_top30Cache.ts).toLocaleTimeString()}</div>
       </div>
       <button class="sr-btn" onclick="_top30Cache=null;renderTop30Volume()" style="font-size:11px">⟳ Refresh</button>
     </div>
@@ -4717,7 +5075,7 @@ function renderTop30Volume() {
           <th>30d Volume</th>
           <th style="width:120px"></th>
           <th>OI</th>
-          <th>Funding APR</th>
+          <th>Median Funding APR</th>
           <th>Venues</th>
         </tr></thead>
         <tbody>${rows}</tbody>
@@ -4766,11 +5124,33 @@ function renderVenueTable(venue) {
   const search = venueTableSearch[venue] || '';
   const hideInactive = document.getElementById(hideId)?.checked ?? true;
 
-  const allVenueData = getFilteredData().filter(d => d.venue === venue);
-  const catCounts = { all: allVenueData.length, equity: 0, commodity: 0, index: 0, etf: 0, fx: 0 };
+  const allVenueData = getFilteredData().filter(d => d.venue === venue).map(normalizePerpDataState);
+  const listedCount = allVenueData.filter(d => d.isListed).length;
+  const activeCount = allVenueData.filter(d => d.isActive).length;
+  const pricedCount = allVenueData.filter(d => d.isPriced).length;
+  const filterBar = document.querySelector(`#sub-${venue} .filter-bar`);
+  if (filterBar) {
+    let summary = filterBar.querySelector('.market-state-summary');
+    if (!summary) {
+      summary = document.createElement('span');
+      summary.className = 'market-state-summary';
+      const searchBox = filterBar.querySelector('.search-box');
+      filterBar.insertBefore(summary, searchBox || null);
+    }
+    summary.innerHTML = `Listed <strong>${listedCount}</strong> · Active <strong>${activeCount}</strong> · Priced <strong>${pricedCount}</strong>`;
+    summary.title = 'Listed = official venue catalog · Active = current activity/status · Priced = usable positive mark price';
+  }
+  const infoBar = document.querySelector(`#sub-${venue} .info-bar`);
+  if (infoBar && !infoBar.querySelector('.field-status-legend')) {
+    const legend = document.createElement('span');
+    legend.className = 'field-status-legend';
+    legend.innerHTML = `${dataStatusBadge('full','Complete official field')} ${dataStatusBadge('partial','Only a documented subset/level range is covered')} ${dataStatusBadge('estimated','Derived or fallback value')} ${dataStatusBadge('unavailable','Unsupported, not returned, or not fetched')}`;
+    infoBar.appendChild(legend);
+  }
+  const catCounts = { all: allVenueData.length, equity: 0, commodity: 0, index: 0, etf: 0, 'pre-ipo': 0, fx: 0 };
   allVenueData.forEach(d => { if (catCounts[d.category] !== undefined) catCounts[d.category]++; });
   Object.entries(catCounts).forEach(([cat, count]) => {
-    const capCat = cat.charAt(0).toUpperCase() + cat.slice(1);
+    const capCat = cat === 'pre-ipo' ? 'PreIpo' : cat.charAt(0).toUpperCase() + cat.slice(1);
     const el = document.getElementById(`${prefix}Count${capCat}`);
     if (el) el.textContent = `(${count})`;
   });
@@ -4795,13 +5175,13 @@ function renderVenueTable(venue) {
       case 'depth':   va = a.depth2||0; vb = b.depth2||0; break;
       case 'funding': va = a.funding===null?-1:Math.abs(a.funding); vb = b.funding===null?-1:Math.abs(b.funding); break;
       case 'posRate': {
-        const intv = VENUES[venue].fundingInterval;
-        const af = 8760 / intv;
-        const ep = Math.round(sparkHours[venue] / intv);
         const ca = fundingCache[`${venue}:${a.coin}`];
         const cb = fundingCache[`${venue}:${b.coin}`];
-        const calcDom = (c) => {
+        const calcDom = (c, asset) => {
           if (!c || !c.data) return -1;
+          const intv = fundingIntervalHours(venue, asset);
+          const af = 8760 / intv;
+          const ep = Math.round(sparkHours[venue] / intv);
           const allR = c.data.map(d=>parseFloat(d.fundingRate||d.fundRate||0));
           const total = Math.max(allR.length, ep);
           const rs = allR.filter(r=>Math.abs(r*af)>=0.015);
@@ -4809,7 +5189,7 @@ function renderVenueTable(venue) {
           const pos = rs.filter(r=>r>0).length, neg = rs.filter(r=>r<0).length;
           return Math.max(pos, neg) / total;
         };
-        va = calcDom(ca); vb = calcDom(cb); break;
+        va = calcDom(ca, a); vb = calcDom(cb, b); break;
       }
       default:        va = a.volume; vb = b.volume;
     }
@@ -4829,25 +5209,29 @@ function renderVenueTable(venue) {
     const hasChange = d.change !== null && d.change !== undefined;
     const isUp = hasChange ? d.change >= 0 : true;
     const catColor = CAT_COLORS[d.category] || '#63656e';
-    const annRate = annualize(d.funding, venue);
+    const annRate = annualize(d.funding, venue, d);
     const annPct = annRate !== null ? (annRate * 100).toFixed(2) : 'N/A';
     const sparkId = `spark_${venue}_${d.coin}`;
     const changeHTML = hasChange
       ? `<span class="change-badge ${isUp?'up':'down'}">${isUp?'+':''}${d.change.toFixed(2)}%</span>`
       : `<span style="color:var(--foreground-dim)">—</span>`;
+    const fs = d.fieldStatus;
+    const marketStateHTML = `<div class="market-state-row"><span class="market-badge">Listed</span><span class="market-badge ${d.isActive?'active':'inactive'}">${d.isActive?'Active':'Inactive'}</span><span class="market-badge ${d.isPriced?'priced':'unpriced'}">${d.isPriced?'Priced':'Unpriced'}</span></div>`;
+    const markHTML = d.isPriced ? `$${fmtPrice(d.markPx)}` : '<span style="color:var(--foreground-dim)">—</span>';
+    const indexHTML = d.indexPx > 0 ? `$${fmtPrice(d.indexPx)}` : '<span style="color:var(--foreground-dim)">—</span>';
 
     const tr = document.createElement('tr');
     tr.style.cursor = 'pointer';
     tr.onclick = () => openAssetModal(venue, d);
     tr.innerHTML = `
-      <td><div class="asset-cell"><div class="asset-icon" style="background:${catColor}12;color:${catColor};border:1px solid ${catColor}25">${d.coin.slice(0,2)}</div><div class="asset-info"><div class="asset-name">${d.coin} <span class="asset-tag tag-${d.category}">${d.category.toUpperCase()}</span></div><div class="asset-type">${d.fullName}</div></div></div></td>
-      <td class="mono" style="font-weight:600">$${fmtPrice(d.markPx)}</td>
-      <td class="mono" style="color:var(--foreground-sec)">$${fmtPrice(d.indexPx)}</td>
-      <td>${changeHTML}</td>
-      <td class="mono">${fmtVolume(d.volume)}</td>
-      <td class="mono">${fmtVolume(d.oi)}</td>
-      <td class="mono ${d.depth2 > 100000 ? 'pos' : d.depth2 > 10000 ? '' : 'neg'}">${d.depth2 != null ? '$' + fmtVolume(d.depth2) : '<span style="color:var(--foreground-dim)">—</span>'}</td>
-      <td><span class="funding-badge ${fundingClass(d.funding, venue)}">${fmtFunding(d.funding)}</span><span style="display:block;font-size:10px;color:var(--foreground-dim);margin-top:2px">${annPct === 'N/A' ? 'N/A' : annPct + '% APR'}</span></td>
+      <td><div class="asset-cell"><div class="asset-icon" style="background:${catColor}12;color:${catColor};border:1px solid ${catColor}25">${d.coin.slice(0,2)}</div><div class="asset-info"><div class="asset-name">${d.coin} <span class="asset-tag tag-${d.category}">${d.category.toUpperCase()}</span></div><div class="asset-type">${d.fullName}</div>${marketStateHTML}</div></div></td>
+      <td class="mono" style="font-weight:600">${fieldValueWithStatus(markHTML, fs.markPx, 'Official mark price coverage')}</td>
+      <td class="mono" style="color:var(--foreground-sec)">${fieldValueWithStatus(indexHTML, fs.indexPx, 'Official index/oracle coverage')}</td>
+      <td>${fieldValueWithStatus(changeHTML, fs.change, '24h change coverage')}</td>
+      <td class="mono">${fieldValueWithStatus(fmtVolume(d.volume), fs.volume, '24h volume coverage')}</td>
+      <td class="mono">${fieldValueWithStatus(fmtVolume(d.oi), fs.oi, venue === 'binance' ? 'Binance OI is fetched for the top 80 contracts; other rows are unavailable' : 'Open interest coverage')}</td>
+      <td class="mono ${d.depth2 > 100000 ? 'pos' : d.depth2 > 10000 ? '' : 'neg'}">${fieldValueWithStatus(d.depth2 != null ? fmtVolume(d.depth2) : '<span style="color:var(--foreground-dim)">—</span>', fs.depth2, 'Partial = top-liquidity subset and up to 50 order-book levels')}</td>
+      <td>${fieldValueWithStatus(`<span class="funding-badge ${fundingClass(d.funding, venue, d)}">${fmtFunding(d.funding)}</span><span style="display:block;font-size:10px;color:var(--foreground-dim);margin-top:2px">${annPct === 'N/A' ? 'N/A' : annPct + '% APR'}</span>`, fs.funding, 'Current funding coverage')}</td>
       <td id="pos_${venue}_${d.coin}" style="text-align:center"><span style="color:var(--foreground-dim);font-size:11px">—</span></td>
       <td id="${sparkId}"><span style="color:var(--foreground-dim);font-size:11px">—</span></td>
     `;
@@ -4883,10 +5267,10 @@ function renderAssetView() {
   });
   let allAssets = Object.values(grouped);
 
-  const catCounts = { all: allAssets.length, equity: 0, commodity: 0, index: 0, etf: 0, fx: 0 };
+  const catCounts = { all: allAssets.length, equity: 0, commodity: 0, index: 0, etf: 0, 'pre-ipo': 0, fx: 0 };
   allAssets.forEach(a => { if (catCounts[a.category] !== undefined) catCounts[a.category]++; });
   Object.entries(catCounts).forEach(([cat, count]) => {
-    const capCat = cat.charAt(0).toUpperCase() + cat.slice(1);
+    const capCat = cat === 'pre-ipo' ? 'PreIpo' : cat.charAt(0).toUpperCase() + cat.slice(1);
     const el = document.getElementById(`aCount${capCat}`);
     if (el) el.textContent = `(${count})`;
   });
@@ -4911,7 +5295,8 @@ function renderAssetView() {
       case 'volume': va = aVols.reduce((s,v)=>s+v.volume,0); vb = bVols.reduce((s,v)=>s+v.volume,0); break;
       case 'oi':     va = aVols.reduce((s,v)=>s+v.oi,0); vb = bVols.reduce((s,v)=>s+v.oi,0); break;
       case 'spread':
-        const aR = aVols.map(v=>v.funding).filter(f=>f!==null), bR = bVols.map(v=>v.funding).filter(f=>f!==null);
+        const aR = aVols.filter(v=>v.funding!==null).map(v=>annualize(v.funding,v.venue,v));
+        const bR = bVols.filter(v=>v.funding!==null).map(v=>annualize(v.funding,v.venue,v));
         va = aR.length>=2 ? Math.max(...aR)-Math.min(...aR) : 0;
         vb = bR.length>=2 ? Math.max(...bR)-Math.min(...bR) : 0; break;
       default: va = aVols.reduce((s,v)=>s+v.volume,0); vb = bVols.reduce((s,v)=>s+v.volume,0);
@@ -4962,13 +5347,13 @@ function renderAssetView() {
     if (expandedAsset === a.coin) {
       vList.forEach(vk => {
         const d = a.venues[vk];
-        const fAnn = fmtAnnual(d.funding, vk);
+        const fAnn = fmtAnnual(d.funding, vk, d);
         const fAnnLabel = fAnn === 'N/A' ? 'N/A' : fAnn + ' APR';
         const sub = document.createElement('tr');
         sub.className = 'venue-subrow';
         const subHasChg = d.change !== null && d.change !== undefined;
         const subChgHTML = subHasChg ? `<span class="change-badge ${d.change>=0?'up':'down'}">${d.change>=0?'+':''}${d.change.toFixed(2)}%</span>` : `<span style="color:var(--foreground-dim)">—</span>`;
-        sub.innerHTML = `<td style="padding-left:56px"><span class="venue-badge-sm ${vk}">${VENUES[vk].name}</span> <span style="font-size:11px;color:var(--foreground-dim);margin-left:6px">${VENUES[vk].fundingInterval}h funding</span> <span style="font-size:10px;color:var(--info);margin-left:8px;cursor:pointer" title="Click for detail">⊕ Detail</span></td><td></td><td class="mono" style="font-weight:600">$${fmtPrice(d.markPx)}</td><td>${subChgHTML}</td><td class="mono">${fmtVolume(d.volume)}</td><td class="mono">${fmtVolume(d.oi)}</td><td><span class="funding-badge ${fundingClass(d.funding, vk)}">${fmtFunding(d.funding)}</span> <span style="font-size:10px;color:var(--foreground-dim)">${fAnnLabel}</span></td>`;
+        sub.innerHTML = `<td style="padding-left:56px"><span class="venue-badge-sm ${vk}">${VENUES[vk].name}</span> <span style="font-size:11px;color:var(--foreground-dim);margin-left:6px">${fundingIntervalHours(vk,d)}h funding</span> <span style="font-size:10px;color:var(--info);margin-left:8px;cursor:pointer" title="Click for detail">⊕ Detail</span></td><td></td><td class="mono" style="font-weight:600">$${fmtPrice(d.markPx)}</td><td>${subChgHTML}</td><td class="mono">${fmtVolume(d.volume)}</td><td class="mono">${fmtVolume(d.oi)}</td><td><span class="funding-badge ${fundingClass(d.funding, vk, d)}">${fmtFunding(d.funding)}</span> <span style="font-size:10px;color:var(--foreground-dim)">${fAnnLabel}</span></td>`;
         sub.onclick = (e) => { e.stopPropagation(); openAssetModal(vk, d); };
         tbody.appendChild(sub);
       });
@@ -5011,8 +5396,8 @@ function renderHeatmap() {
   if (heatmapSortVenue && VENUES[heatmapSortVenue]) {
     const sv = heatmapSortVenue;
     assetList.sort((a, b) => {
-      const aR = a.venues[sv] && a.venues[sv].funding !== null ? Math.abs(annualize(a.venues[sv].funding, sv) || 0) : -1;
-      const bR = b.venues[sv] && b.venues[sv].funding !== null ? Math.abs(annualize(b.venues[sv].funding, sv) || 0) : -1;
+      const aR = a.venues[sv] && a.venues[sv].funding !== null ? Math.abs(annualize(a.venues[sv].funding, sv, a.venues[sv]) || 0) : -1;
+      const bR = b.venues[sv] && b.venues[sv].funding !== null ? Math.abs(annualize(b.venues[sv].funding, sv, b.venues[sv]) || 0) : -1;
       return bR - aR;
     });
   } else {
@@ -5038,7 +5423,7 @@ function renderHeatmap() {
         return;
       }
       const int = Math.min(Math.abs(r)/maxRate, 1);
-      const annVal = annualize(r, v);
+      const annVal = annualize(r, v, d);
       const isNearZero = annVal !== null && Math.abs(annVal) < 0.005;
 
       let bg, col;
@@ -5052,7 +5437,7 @@ function renderHeatmap() {
         bg=`rgba(255,59,48,${opac.toFixed(2)})`; col=int>0.45?'#fff':'#D70015';
       }
 
-      grid.innerHTML += `<div class="hm-cell" style="background:${bg};color:${col}" onclick="openHeatmapModal('${a.coin}','${v}')"><div class="hm-val">${fmtFunding(r)}</div><div class="hm-ann">${fmtAnnual(r,v)} APR</div></div>`;
+      grid.innerHTML += `<div class="hm-cell" style="background:${bg};color:${col}" onclick="openHeatmapModal('${a.coin}','${v}')"><div class="hm-val">${fmtFunding(r)}</div><div class="hm-ann">${fmtAnnual(r,v,d)} APR</div></div>`;
     });
   });
 }
@@ -5087,9 +5472,9 @@ const YAHOO_SYMBOL_MAP = {
   // Commodities
   WTI: 'CL=F', BRENTOIL: 'BZ=F', NATGAS: 'NG=F', COFFEE: 'KC=F', COTTON: 'CT=F',
   CORN: 'ZC=F', WHEAT: 'ZW=F', URANIUM: 'URA', SOYBEAN: 'ZS=F', SUGAR: 'SB=F',
-  ALUMINIUM: 'ALI=F', COPPER: 'HG=F', OIL: 'CL=F', BRN: 'BZ=F', COP: 'HG=F', HG: 'HG=F',
+  ALUMINIUM: 'ALI=F', COPPER: 'HG=F', OIL: 'CL=F', BRN: 'BZ=F', COP: 'COP',
   XAU: 'GC=F', XAG: 'SI=F', XCU: 'HG=F', XPT: 'PL=F', XPD: 'PA=F',
-  PALL: 'PA=F', PLAT: 'PL=F', TTF: 'TTF=F',
+  PLAT: 'PL=F', TTF: 'TTF=F',
   // Indices
   SPX: '^GSPC', VIX: '^VIX', JP225: '^N225', KR200: '^KS200', KRCOMP: '^KS11',
   DXY: 'DX-Y.NYB', DAX: '^GDAXI', FTSE: '^FTSE', DJI: '^DJI',
@@ -5106,34 +5491,44 @@ const YAHOO_SYMBOL_MAP = {
   TSLA: 'TSLA', AAPL: 'AAPL', NVDA: 'NVDA', AMZN: 'AMZN', GOOGL: 'GOOGL',
   META: 'META', MSFT: 'MSFT', COIN: 'COIN', MSTR: 'MSTR', AMD: 'AMD',
   PLTR: 'PLTR', HOOD: 'HOOD', INTC: 'INTC', ORCL: 'ORCL', NFLX: 'NFLX',
-  BABA: 'BABA', GME: 'GME', RIVN: 'RIVN', CRWV: 'CRWV', USAR: 'ITA',
+  BABA: 'BABA', GME: 'GME', RIVN: 'RIVN', CRWV: 'CRWV', USAR: 'USAR',
   AVGO: 'AVGO', CRM: 'CRM', QCOM: 'QCOM', ASML: 'ASML', ARM: 'ARM',
   UBER: 'UBER', PYPL: 'PYPL', SNAP: 'SNAP', SHOP: 'SHOP', SQ: 'SQ',
   NIO: 'NIO', LCID: 'LCID', FUTU: 'FUTU', PDD: 'PDD', JD: 'JD',
 };
+// These equities are quoted in KRW/JPY by Yahoo while venue perps are USD.
+// Until an FX conversion layer exists, prefer the venue index median instead
+// of displaying a numerically incomparable local-currency reference.
+const NON_USD_YAHOO_EQUITIES = new Set(['SAMSUNG','SMSN','SKHYNIX','HYUNDAI','SOFTBANK','KIOXIA']);
 const REFERENCE_SYMBOL_ALIASES = {
   // Gold tokenized → XAU
   XAUT: 'XAU', PAXG: 'XAU', XAUM: 'XAU', KAU: 'XAU', PGOLD: 'XAU', GGBR: 'XAU',
-  // Silver / Brent / SK Hynix aliases
-  SILVER: 'XAG', BZ: 'BRENTOIL', SKHX: 'SKHYNIX',
+  // SK Hynix venue alias
+  SKHX: 'SKHYNIX',
   // Backed Finance (X suffix) → underlying
   AAPLX: 'AAPL', TSLAX: 'TSLA', NVDAX: 'NVDA', GOOGLX: 'GOOGL', AMZNX: 'AMZN',
-  METAX: 'META', MSFTX: 'MSFT', MSTRX: 'MSTR', MSTRx: 'MSTR', COINX: 'COIN', SPYx: 'SPY',
+  METAX: 'META', MSFTX: 'MSFT', MSTRX: 'MSTR', COINX: 'COIN', SPYX: 'SPY',
   // Ondo Finance (on suffix) → underlying
-  TSLAon: 'TSLA', NVDAon: 'NVDA', AAPLon: 'AAPL', AMZNon: 'AMZN',
-  GOOGLon: 'GOOGL', MSTRon: 'MSTR', COINon: 'COIN', MSFTon: 'MSFT', SPYon: 'SPY',
+  TSLAON: 'TSLA', NVDAON: 'NVDA', AAPLON: 'AAPL', AMZNON: 'AMZN',
+  GOOGLON: 'GOOGL', MSTRON: 'MSTR', COINON: 'COIN', MSFTON: 'MSFT', SPYON: 'SPY',
   // Backed Finance additional (X suffix) → underlying
   CSCOX: 'CSCO', INTCX: 'INTC', BRKBX: 'BRK-B', JPMORX: 'JPM',
 };
 
-// ── Stock Split Adjustments ──
-// Tokenized versions on-chain may NOT adjust for corporate splits.
-// Multiplier = how many post-split shares equal one on-chain token.
-// e.g. NFLX 10:1 split → 1 NFLXON token = 10 post-split shares → multiply ref × 10
-const SPLIT_ADJUSTMENTS = {
-  NFLX: 10,   // Netflix 10:1 split (June 2024)
-  TQQQ: 2,    // ProShares UltraPro QQQ 2:1 split (Nov 2025)
+// Current Reality and xStocks quotes already reflect corporate actions. Any
+// future exception must be keyed by the exact issuer token, never globally by
+// underlying, or adjusted tokens would be multiplied a second time.
+const SPLIT_ADJUSTMENTS = {};
+
+const UNIT_ADJUSTMENTS = {
+  // KAU represents one gram while XAU futures are quoted per troy ounce.
+  KAU: 1 / 31.1034768,
 };
+
+function perpMarkInSpotUnits(mark, spotCoin) {
+  const adjustment = UNIT_ADJUSTMENTS[String(spotCoin || '').toUpperCase()] || 1;
+  return mark * adjustment;
+}
 
 function assetToYahoo(symbol) {
   const canonical = canonicalSymbol(symbol);
@@ -5153,14 +5548,21 @@ function assetToYahoo(symbol) {
 
 let REF_PRICES = {};       // canonical → price
 let REF_SOURCES = {};      // canonical → source label ('Yahoo','Perp Index','Spot Median','Finnhub')
+let REF_UPDATED_AT = {};   // canonical → epoch ms
+const REF_PRICE_TTL = 300000;
 let refPriceLoading = false;
+
+function hasFreshReference(symbol) {
+  return !!REF_PRICES[symbol] && Date.now() - (REF_UPDATED_AT[symbol] || 0) < REF_PRICE_TTL;
+}
 
 // ── Tier 1: Yahoo Finance ──
 async function _fetchRefYahoo(symbols) {
   const YAHOO_HOSTS = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com'];
   const useProxy = !_isDev;
   const tasks = symbols.map(sym => async () => {
-    if (REF_PRICES[sym]) return; // already fetched
+    if (hasFreshReference(sym)) return;
+    if (NON_USD_YAHOO_EQUITIES.has(sym)) return;
     const yahooSym = assetToYahoo(sym);
     for (const host of YAHOO_HOSTS) {
       try {
@@ -5172,11 +5574,11 @@ async function _fetchRefYahoo(symbols) {
         const json = await res.json();
         const result = json?.chart?.result?.[0];
         const price = parseFloat(result?.meta?.regularMarketPrice);
-        if (price > 0) { REF_PRICES[sym] = price; REF_SOURCES[sym] = 'Yahoo'; return; }
+        if (price > 0) { REF_PRICES[sym] = price; REF_SOURCES[sym] = 'Yahoo'; REF_UPDATED_AT[sym] = Date.now(); return; }
         const closes = result?.indicators?.quote?.[0]?.close ?? [];
         for (let i = closes.length - 1; i >= 0; i--) {
           const c = parseFloat(closes[i]);
-          if (c > 0) { REF_PRICES[sym] = c; REF_SOURCES[sym] = 'Yahoo'; return; }
+          if (c > 0) { REF_PRICES[sym] = c; REF_SOURCES[sym] = 'Yahoo'; REF_UPDATED_AT[sym] = Date.now(); return; }
         }
       } catch { /* try next host */ }
     }
@@ -5199,14 +5601,14 @@ function _fillRefFromPerpIndex(symbols) {
     }
   });
   symbols.forEach(sym => {
-    if (REF_PRICES[sym]) return;
+    if (hasFreshReference(sym)) return;
     const prices = perpPriceMap[sym] || perpPriceMap[canonicalSymbol(sym)];
     if (prices && prices.length > 0) {
       prices.sort((a, b) => a - b);
       const median = prices.length % 2 === 0
         ? (prices[prices.length / 2 - 1] + prices[prices.length / 2]) / 2
         : prices[Math.floor(prices.length / 2)];
-      if (median > 0) { REF_PRICES[sym] = median; REF_SOURCES[sym] = 'Perp Index'; }
+      if (median > 0) { REF_PRICES[sym] = median; REF_SOURCES[sym] = 'Perp Index'; REF_UPDATED_AT[sym] = Date.now(); }
     }
   });
 }
@@ -5226,14 +5628,14 @@ function _fillRefFromSpotMedian(symbols) {
     });
   });
   symbols.forEach(sym => {
-    if (REF_PRICES[sym]) return;
+    if (hasFreshReference(sym)) return;
     const prices = spotPriceMap[sym] || spotPriceMap[canonicalSymbol(sym)];
     if (prices && prices.length >= 2) { // only use if ≥2 exchanges agree
       prices.sort((a, b) => a - b);
       const median = prices.length % 2 === 0
         ? (prices[prices.length / 2 - 1] + prices[prices.length / 2]) / 2
         : prices[Math.floor(prices.length / 2)];
-      if (median > 0) { REF_PRICES[sym] = median; REF_SOURCES[sym] = 'Spot Median'; }
+      if (median > 0) { REF_PRICES[sym] = median; REF_SOURCES[sym] = 'Spot Median'; REF_UPDATED_AT[sym] = Date.now(); }
     }
   });
 }
@@ -5243,7 +5645,7 @@ async function _fetchRefFinnhub(symbols) {
   const params = new URLSearchParams(location.search);
   const apiKey = params.get('finnhub_key');
   if (!apiKey) return;
-  const missing = symbols.filter(s => !REF_PRICES[s]);
+  const missing = symbols.filter(s => !hasFreshReference(s));
   if (missing.length === 0) return;
   const tasks = missing.map(sym => async () => {
     try {
@@ -5251,7 +5653,7 @@ async function _fetchRefFinnhub(symbols) {
       if (!res.ok) return;
       const data = await res.json();
       const price = parseFloat(data.c);
-      if (price > 0) { REF_PRICES[sym] = price; REF_SOURCES[sym] = 'Finnhub'; }
+      if (price > 0) { REF_PRICES[sym] = price; REF_SOURCES[sym] = 'Finnhub'; REF_UPDATED_AT[sym] = Date.now(); }
     } catch {}
   });
   for (let i = 0; i < tasks.length; i += 4) {
@@ -5263,40 +5665,35 @@ async function _fetchRefFinnhub(symbols) {
 async function fetchReferencePrices(symbols) {
   if (refPriceLoading) return;
   refPriceLoading = true;
+  try {
+    const resolvedSet = new Set();
+    symbols.forEach(s => {
+      const canonical = canonicalSymbol(s);
+      let ref = REFERENCE_SYMBOL_ALIASES[canonical];
+      if (!ref && typeof _arbUnderlyingKey === 'function') {
+        const u = _arbUnderlyingKey(canonical);
+        ref = (u !== canonical) ? u : canonical;
+      }
+      if (!ref) ref = canonical;
+      resolvedSet.add(ref);
+    });
+    const unique = [...resolvedSet];
 
-  // Deduplicate by resolved reference symbol
-  const resolvedSet = new Set();
-  symbols.forEach(s => {
-    const canonical = canonicalSymbol(s);
-    let ref = REFERENCE_SYMBOL_ALIASES[canonical];
-    if (!ref && typeof _arbUnderlyingKey === 'function') {
-      const u = _arbUnderlyingKey(canonical);
-      ref = (u !== canonical) ? u : canonical;
-    }
-    if (!ref) ref = canonical;
-    resolvedSet.add(ref);
-  });
-  const unique = [...resolvedSet];
+    await _fetchRefYahoo(unique);
+    const afterYahoo = Object.keys(REF_PRICES).length;
+    _fillRefFromPerpIndex(unique);
+    const afterPerp = Object.keys(REF_PRICES).length;
+    _fillRefFromSpotMedian(unique);
+    const afterSpot = Object.keys(REF_PRICES).length;
+    await _fetchRefFinnhub(unique);
+    const afterFinnhub = Object.keys(REF_PRICES).length;
 
-  // Tier 1: Yahoo Finance (primary — best for TradFi assets)
-  await _fetchRefYahoo(unique);
-  const afterYahoo = Object.keys(REF_PRICES).length;
-
-  // Tier 2: Perp Index Prices (from already-loaded exchange data — no extra API calls)
-  _fillRefFromPerpIndex(unique);
-  const afterPerp = Object.keys(REF_PRICES).length;
-
-  // Tier 3: Cross-exchange Spot Median (needs ≥2 exchanges for reliability)
-  _fillRefFromSpotMedian(unique);
-  const afterSpot = Object.keys(REF_PRICES).length;
-
-  // Tier 4: Finnhub (optional backup, only if ?finnhub_key= URL param set)
-  await _fetchRefFinnhub(unique);
-  const afterFinnhub = Object.keys(REF_PRICES).length;
-
-  refPriceLoading = false;
-  const missing = unique.filter(s => !REF_PRICES[s]);
-  console.log(`[Ref] ${afterYahoo} Yahoo · +${afterPerp-afterYahoo} Perp Index · +${afterSpot-afterPerp} Spot Median · +${afterFinnhub-afterSpot} Finnhub | ${Object.keys(REF_PRICES).length}/${unique.length} total` + (missing.length > 0 ? ` | Missing: ${missing.join(', ')}` : ''));
+    const missing = unique.filter(s => !hasFreshReference(s));
+    const missingPreview = missing.slice(0, 20).join(', ') + (missing.length > 20 ? ` … +${missing.length-20}` : '');
+    console.log(`[Ref] ${afterYahoo} Yahoo · +${afterPerp-afterYahoo} Perp Index · +${afterSpot-afterPerp} Spot Median · +${afterFinnhub-afterSpot} Finnhub | ${Object.keys(REF_PRICES).length}/${unique.length} total` + (missing.length > 0 ? ` | Missing: ${missingPreview}` : ''));
+  } finally {
+    refPriceLoading = false;
+  }
 }
 
 function getRefPrice(coin) {
@@ -5321,6 +5718,7 @@ function getRefPrice(coin) {
   if (underlying2 !== canonical && SPLIT_ADJUSTMENTS[underlying2]) {
     price = price * SPLIT_ADJUSTMENTS[underlying2];
   }
+  if (UNIT_ADJUSTMENTS[canonical]) price = price * UNIT_ADJUSTMENTS[canonical];
   return price;
 }
 
@@ -5348,7 +5746,7 @@ function priceDeviation(venuePrice, refPrice) {
 // ═══════════════════════════════════════════════
 // ORDERBOOK LIQUIDITY DEPTH
 // ═══════════════════════════════════════════════
-function liquidityWithinPct(book, pct = 0.02) {
+function liquidityWithinPct(book, pct = 0.02, sizeMultiplier = 1) {
   if (!book?.bids?.length || !book?.asks?.length) return null;
   const bestBid = Number(book.bids[0][0] ?? book.bids[0].price);
   const bestAsk = Number(book.asks[0][0] ?? book.asks[0].price);
@@ -5359,11 +5757,11 @@ function liquidityWithinPct(book, pct = 0.02) {
   let total = 0;
   for (const level of book.bids) {
     const p = Number(level[0] ?? level.price), s = Number(level[1] ?? level.size);
-    if (p >= minBid) total += p * s;
+    if (p >= minBid) total += p * s * sizeMultiplier;
   }
   for (const level of book.asks) {
     const p = Number(level[0] ?? level.price), s = Number(level[1] ?? level.size);
-    if (p <= maxAsk) total += p * s;
+    if (p <= maxAsk) total += p * s * sizeMultiplier;
   }
   return total;
 }
@@ -5388,16 +5786,27 @@ function _isRwaBase(base) {
 // (COINX = Backed, TSLAon = Ondo) or are registered in ASSET_META.
 // Commodities (PAXG, XAUT, XAU…) are the exception — they trade under
 // their own unique tickers and are safe to allow.
-function _isRwaSpotBase(base) {
+function _isRwaSpotBase(base, venue = '') {
   if (!base || base.length < 2) return false;
   const up = base.toUpperCase();
 
-  // 1. Explicitly registered tokenised token → always allow
-  if (typeof ASSET_META !== 'undefined' && ASSET_META[up]) return true;
+  // 1. Static tokens are globally trusted. Dynamically discovered tokens are
+  // trusted only on the venue whose authoritative catalog registered them.
+  // This prevents Reality's rON from causing Gate's RON (Ronin), for example,
+  // to be reclassified as a tokenized ON Semiconductor share.
+  if (typeof ASSET_META !== 'undefined' && ASSET_META[up]) {
+    const isStatic = typeof STATIC_SPOT_ASSET_KEYS !== 'undefined' && STATIC_SPOT_ASSET_KEYS.has(up);
+    const allowedVenues = ASSET_META[up].venues || [];
+    if (isStatic || (venue && allowedVenues.includes(venue))) return true;
+  }
 
   // 2. Tokenised suffix detected (COINX, GOOGLon, SPYon…) → allow if underlying is RWA
-  const underlying = _arbUnderlyingKey(up);
-  if (underlying !== up && isTradableRwaSymbol(underlying)) return true;
+  // Resolve the suffix without consulting dynamic ASSET_META, otherwise a
+  // same-ticker crypto asset can inherit another venue's registration.
+  let suffixUnderlying = '';
+  if (up.length >= 5 && up.endsWith('ON')) suffixUnderlying = up.slice(0, -2);
+  else if (up.length >= 5 && up.endsWith('X')) suffixUnderlying = up.slice(0, -1);
+  if (suffixUnderlying && isTradableRwaSymbol(suffixUnderlying)) return true;
 
   // 3. WHITELIST of commodity/FX tokens known to be genuine on spot exchanges.
   //    Generic commodity tickers (CORN, BRN, OIL, WHEAT…) are crypto tokens
@@ -5443,9 +5852,13 @@ async function fetchSpotRwaGate() {
     const pair = t.currency_pair || '';
     if (!pair.endsWith('_USDT') && !pair.endsWith('_USD')) continue;
     const base = pair.replace(/_(USDT|USD)$/, '').toUpperCase();
-    if (!_isRwaSpotBase(base)) continue;
+    if (!_isRwaSpotBase(base, 'gate')) continue;
+    const gateUnderlying = _arbUnderlyingKey(base);
+    if (gateUnderlying !== base) {
+      const gateCategory = ETF_SYMBOLS.has(gateUnderlying) ? 'etf' : (PRE_IPO_SYMBOLS.has(gateUnderlying) ? 'pre-ipo' : 'equity');
+      registerSpotAssetMeta(base, gateUnderlying, base.endsWith('ON') ? 'Ondo Finance' : 'xStocks', gateCategory, 'gate');
+    }
     const last = parseFloat(t.last) || 0;
-    if (last <= 0) continue;
     assets.push({
       coin: base, pair,
       last,
@@ -5457,8 +5870,8 @@ async function fetchSpotRwaGate() {
       ask: parseFloat(t.lowest_ask) || 0,
     });
   }
-  // Fetch orderbook depth for each asset (parallel, max 5 concurrent)
-  const depthTasks = assets.map(a => async () => {
+  // Fetch orderbook depth for the most liquid assets (parallel, max 5 concurrent)
+  const depthTasks = [...assets].sort((a, b) => b.vol - a.vol).slice(0, 80).map(a => async () => {
     try {
       const res = await fetch(`${GATE_SPOT_BASE}/order_book?currency_pair=${encodeURIComponent(a.pair)}&limit=50`);
       if (!res.ok) return;
@@ -5485,12 +5898,16 @@ async function fetchSpotRwaKraken() {
   const rwaPairNames = [];
   const pairToBase = {};
   for (const [pairName, info] of Object.entries(allPairs)) {
-    const quote = (info.quote || '').replace(/^[XZ]/, '');
+    const wsParts = String(info.wsname || '').split('/');
+    const quote = (wsParts[1] || info.quote || '').replace(/^(ZUSD|ZUSDT)$/i, m => m.slice(1)).toUpperCase();
     if (quote !== 'USD' && quote !== 'USDT' && quote !== 'ZUSD') continue;
-    // Extract base: use info.base, strip X/Z prefix Kraken adds
-    let base = (info.base || '').replace(/^[XZ]/, '').toUpperCase();
-    if (!base) base = pairName.replace(/(USD|USDT|ZUSD)$/i, '').replace(/^[XZ]/, '').toUpperCase();
-    if (!_isRwaSpotBase(base)) continue;
+    // Prefer wsname, which distinguishes real tickers beginning with X/Z
+    // (ZRO, ZRC) from Kraken's legacy internal prefixes (XXBT, ZUSD).
+    let base = (wsParts[0] || info.base || '').toUpperCase();
+    const legacyKrakenBase = { XXBT:'XBT', XETH:'ETH', XLTC:'LTC', XXRP:'XRP', XXDG:'XDG' };
+    base = legacyKrakenBase[base] || base;
+    if (!base) base = pairName.replace(/(USD|USDT|ZUSD)$/i, '').toUpperCase();
+    if (!_isRwaSpotBase(base, 'kraken')) continue;
     rwaPairNames.push(pairName);
     pairToBase[pairName] = base;
   }
@@ -5516,7 +5933,6 @@ async function fetchSpotRwaKraken() {
         }
         if (!base) continue;
         const last = parseFloat(t.c?.[0]) || 0;
-        if (last <= 0) continue;
         const open = parseFloat(t.o) || last;
         const vol24 = parseFloat(t.v?.[1]) || 0;
         assets.push({
@@ -5577,6 +5993,9 @@ async function _fetchKrakenXStocks() {
     const base = (info.base || '');
     if (seen.has(base)) continue;
     seen.add(base);
+    // Kraken's tokenized_asset class also contains non-equity RWAs such as
+    // PAXG. Only the explicit trailing-x wrappers are xStocks.
+    if (!/x$/i.test(base)) continue;
     // Extract underlying: "AAPLx" → "AAPL", "GOOGLx" → "GOOGL"
     const underlying = base.replace(/x$/i, '').toUpperCase();
     if (!underlying || underlying.length < 1) continue;
@@ -5606,11 +6025,13 @@ async function _fetchKrakenXStocks() {
         }
         if (!pairInfo) continue;
         const last = parseFloat(t.c?.[0]) || 0;
-        if (last <= 0) continue;
         const open = parseFloat(t.o) || last;
         const vol24 = parseFloat(t.v?.[1]) || 0;
+        const tokenCoin = `${pairInfo.underlying}X`;
+        const category = ETF_SYMBOLS.has(pairInfo.underlying) ? 'etf' : 'equity';
+        registerSpotAssetMeta(tokenCoin, pairInfo.underlying, 'xStocks', category, 'kraken');
         assets.push({
-          coin: pairInfo.underlying, pair: pairKey,
+          coin: tokenCoin, pair: pairKey, underlyingSymbol: pairInfo.underlying,
           last,
           chg: open > 0 ? ((last - open) / open * 100) : 0,
           vol: vol24 * last,
@@ -5618,14 +6039,14 @@ async function _fetchKrakenXStocks() {
           lo: parseFloat(t.l?.[1]) || 0,
           bid: parseFloat(t.b?.[0]) || 0,
           ask: parseFloat(t.a?.[0]) || 0,
-          xstock: true, // Flag as xStock
+          xstock: true, isListed: true, isActive: true, isPriced: last > 0,
         });
       }
     } catch (e) { console.warn('[Spot] Kraken xStocks ticker batch error:', e); }
   }
 
-  // Fetch orderbook depth for xStocks assets
-  const xDepthTasks = assets.map(a => async () => {
+  // Fetch orderbook depth for the most liquid xStocks assets
+  const xDepthTasks = [...assets].sort((a, b) => b.vol - a.vol).slice(0, 80).map(a => async () => {
     try {
       const res = await fetch(`${KRAKEN_SPOT_BASE}/Depth?pair=${encodeURIComponent(a.pair)}&count=50&asset_class=tokenized_asset`);
       if (!res.ok) return;
@@ -5639,26 +6060,90 @@ async function _fetchKrakenXStocks() {
     await Promise.allSettled(xDepthTasks.slice(i, i + 5).map(fn => fn()));
   }
 
+  // AssetPairs is the official listed catalog. Keep entries that currently
+  // have no ticker response so Listed / Active / Priced remain distinct.
+  const discoveredTokens = new Set(assets.map(a => a.coin));
+  xPairs.forEach(pairInfo => {
+    const tokenCoin = `${pairInfo.underlying}X`;
+    if (discoveredTokens.has(tokenCoin)) return;
+    const category = ETF_SYMBOLS.has(pairInfo.underlying) ? 'etf' : 'equity';
+    registerSpotAssetMeta(tokenCoin, pairInfo.underlying, 'xStocks', category, 'kraken');
+    assets.push({
+      coin: tokenCoin, pair: pairInfo.pairName, underlyingSymbol: pairInfo.underlying,
+      last: 0, chg: 0, vol: 0, hi: 0, lo: 0, bid: 0, ask: 0,
+      xstock: true, isListed: true, isActive: true, isPriced: false
+    });
+  });
+
   console.log(`[Spot] Kraken xStocks: ${assets.length} tokenized equities discovered`);
   return assets;
 }
 
 // ── Bitget Spot Fetch ──
 async function fetchSpotRwaBitget() {
-  const res = await fetch(`${BITGET_SPOT_BASE}/api/v2/spot/market/tickers`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = await res.json();
-  if (json.code !== '00000') throw new Error(`API ${json.code}: ${json.msg}`);
-  const tickers = json.data || [];
+  const [instrumentsRes, realityTickersRes, legacyTickersRes] = await Promise.all([
+    fetch(`${BITGET_SPOT_BASE}/api/v3/market/instruments?category=SPOT`),
+    fetch(`${BITGET_SPOT_BASE}/api/v3/market/tickers?category=SPOT`),
+    fetch(`${BITGET_SPOT_BASE}/api/v2/spot/market/tickers`),
+  ]);
+  if (!instrumentsRes.ok || !realityTickersRes.ok) throw new Error('Bitget Reality metadata unavailable');
+
+  const [instrumentsJson, realityTickersJson] = await Promise.all([
+    instrumentsRes.json(), realityTickersRes.json()
+  ]);
+  if (instrumentsJson.code !== '00000') throw new Error(`API ${instrumentsJson.code}: ${instrumentsJson.msg}`);
+  if (realityTickersJson.code !== '00000') throw new Error(`API ${realityTickersJson.code}: ${realityTickersJson.msg}`);
+
+  const realityTickerMap = {};
+  (realityTickersJson.data || []).forEach(t => { realityTickerMap[String(t.symbol || '').toUpperCase()] = t; });
   const assets = [];
-  for (const t of tickers) {
+
+  // Reality rTokens are an official, dynamically maintained spot RWA catalog.
+  for (const instrument of instrumentsJson.data || []) {
+    if (instrument.status !== 'online' || String(instrument.isReality || '').toLowerCase() !== 'yes' || instrument.quoteCoin !== 'USDT') continue;
+    const pair = String(instrument.symbol || '').toUpperCase();
+    const venueBase = String(instrument.baseCoin || '').toUpperCase();
+    const rawUnderlying = venueBase.replace(/^R/, '');
+    const category = categoryFromOfficial(instrument.symbolType || 'stock', rawUnderlying, instrument.symbolName || '');
+    const underlying = canonicalSymbolForCategory(rawUnderlying, category);
+    if (!pair || !underlying) continue;
+    const t = realityTickerMap[pair] || {};
+    const last = parseFloat(t.lastPrice) || 0;
+    const coin = venueBase || `R${underlying}`;
+    registerSpotAssetMeta(coin, underlying, 'Reality', category, 'bitget');
+    const platformTurnover = parseFloat(t.platformTurnover24h);
+    assets.push({
+      coin, pair, venueSymbol: pair, underlyingSymbol: underlying,
+      last,
+      chg: (parseFloat(t.price24hPcnt) || 0) * 100,
+      // Reality exposes both underlying-market turnover and actual platform
+      // turnover. Use the latter so dashboard volume is not overstated.
+      vol: Number.isFinite(platformTurnover) ? platformTurnover : (parseFloat(t.turnover24h) || 0),
+      hi: parseFloat(t.highPrice24h) || 0,
+      lo: parseFloat(t.lowPrice24h) || 0,
+      bid: parseFloat(t.bid1Price) || 0,
+      ask: parseFloat(t.ask1Price) || 0,
+      depth2: null,
+      reality: true, isListed: true, isActive: true, isPriced: last > 0,
+    });
+  }
+
+  // Keep the legacy v2 feed for tokenized metals and other non-Reality RWA.
+  let legacyTickers = [];
+  if (legacyTickersRes.ok) {
+    const json = await legacyTickersRes.json();
+    if (json.code === '00000') legacyTickers = json.data || [];
+  }
+  const legacyAssets = [];
+  const realityPairs = new Set(assets.map(a => a.pair));
+  for (const t of legacyTickers) {
     const symbol = (t.symbol || '').toUpperCase();
+    if (realityPairs.has(symbol)) continue;
     if (!symbol.endsWith('USDT') && !symbol.endsWith('USD')) continue;
     const base = symbol.replace(/(USDT|USD)$/, '');
-    if (!_isRwaSpotBase(base)) continue;
+    if (!_isRwaSpotBase(base, 'bitget')) continue;
     const last = parseFloat(t.lastPr) || 0;
-    if (last <= 0) continue;
-    assets.push({
+    legacyAssets.push({
       coin: base, pair: symbol,
       last,
       chg: (parseFloat(t.change24h) || 0) * 100,
@@ -5670,7 +6155,8 @@ async function fetchSpotRwaBitget() {
     });
   }
   // Fetch orderbook depth
-  const depthTasks = assets.map(a => async () => {
+  const depthAssets = [...legacyAssets].sort((a, b) => b.vol - a.vol).slice(0, 80);
+  const depthTasks = depthAssets.map(a => async () => {
     try {
       const res = await fetch(`${BITGET_SPOT_BASE}/api/v2/spot/market/orderbook?symbol=${a.pair}&type=step0&limit=50`);
       if (!res.ok) return;
@@ -5683,23 +6169,31 @@ async function fetchSpotRwaBitget() {
   for (let i = 0; i < depthTasks.length; i += 5) {
     await Promise.allSettled(depthTasks.slice(i, i + 5).map(fn => fn()));
   }
+  assets.push(...legacyAssets);
   console.log(`[Spot] Bitget: ${assets.length} RWA spot assets discovered`);
   return assets;
 }
 
 // ── Binance Spot Fetch ──
 async function fetchSpotRwaBinance() {
-  const res = await fetch(`${BINANCE_SPOT_BASE}/ticker/24hr`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const tickers = await res.json();
+  // exchangeInfo supplies authoritative baseAsset/quoteAsset fields. Parsing a
+  // concatenated symbol by suffix misread RENBUSD as base RENB + quote USD.
+  const [tickerRes, infoRes] = await Promise.all([
+    fetch(`${BINANCE_SPOT_BASE}/ticker/24hr`),
+    fetch(`${BINANCE_SPOT_BASE}/exchangeInfo`)
+  ]);
+  if (!tickerRes.ok || !infoRes.ok) throw new Error(`HTTP ${!tickerRes.ok ? tickerRes.status : infoRes.status}`);
+  const [tickers, infoJson] = await Promise.all([tickerRes.json(), infoRes.json()]);
+  const symbolInfo = {};
+  (infoJson.symbols || []).forEach(s => { symbolInfo[String(s.symbol || '').toUpperCase()] = s; });
   const assets = [];
   for (const t of tickers) {
     const symbol = (t.symbol || '').toUpperCase();
-    if (!symbol.endsWith('USDT') && !symbol.endsWith('USD')) continue;
-    const base = symbol.replace(/(USDT|USD)$/, '');
-    if (!_isRwaSpotBase(base)) continue;
+    const info = symbolInfo[symbol];
+    if (!info || info.status !== 'TRADING' || !['USDT', 'USD'].includes(String(info.quoteAsset || '').toUpperCase())) continue;
+    const base = String(info.baseAsset || '').toUpperCase();
+    if (!_isRwaSpotBase(base, 'binance')) continue;
     const last = parseFloat(t.lastPrice) || 0;
-    if (last <= 0) continue;
     assets.push({
       coin: base, pair: symbol,
       last,
@@ -5755,7 +6249,7 @@ async function fetchSpotRwaBybit() {
     if (entry.quoteCoin !== 'USDT' || entry.status !== 'Trading') return false;
     const base = (entry.baseCoin || '').toUpperCase();
     // Strip ON/X suffixes for RWA detection (Bybit lists TSLAON, NVDAX etc)
-    return _isRwaSpotBase(base);
+    return _isRwaSpotBase(base, 'bybit');
   });
   if (rwaPairs.length === 0) return [];
 
@@ -5769,11 +6263,14 @@ async function fetchSpotRwaBybit() {
   const assets = [];
   for (const entry of rwaPairs) {
     const symbol = entry.symbol;
-    const t = tickerMap[symbol];
-    if (!t) continue;
+    const t = tickerMap[symbol] || {};
     const base = (entry.baseCoin || '').toUpperCase();
+    const underlying = _arbUnderlyingKey(base);
+    if (underlying !== base) {
+      const bybitCategory = ETF_SYMBOLS.has(underlying) ? 'etf' : (PRE_IPO_SYMBOLS.has(underlying) ? 'pre-ipo' : 'equity');
+      registerSpotAssetMeta(base, underlying, 'xStocks', bybitCategory, 'bybit');
+    }
     const last = parseFloat(t.lastPrice) || 0;
-    if (last <= 0) continue;
     const prevPrice = parseFloat(t.prevPrice24h) || last;
     assets.push({
       coin: base, pair: symbol,
@@ -5784,6 +6281,7 @@ async function fetchSpotRwaBybit() {
       lo: parseFloat(t.lowPrice24h) || 0,
       bid: parseFloat(t.bid1Price) || 0,
       ask: parseFloat(t.ask1Price) || 0,
+      isListed: true, isActive: true, isPriced: last > 0,
     });
   }
   // Fetch orderbook depth
@@ -5824,7 +6322,7 @@ async function fetchSpotRwaBit() {
     const quote = (p.quote_currency || '').toUpperCase();
     if (quote !== 'USDT' && quote !== 'USD') return false;
     const base = (p.base_currency || '').toUpperCase();
-    return _isRwaSpotBase(base);
+    return _isRwaSpotBase(base, 'bit');
   });
   if (rwaPairs.length === 0) { console.log('[Spot] Bit.com: 0 RWA pairs found'); return []; }
 
@@ -5834,13 +6332,18 @@ async function fetchSpotRwaBit() {
     try {
       const base = (p.base_currency || '').toUpperCase();
       const pair = p.pair;
-      const res = await fetch(`${BIT_API_BASE}/rfq-price?symbol=${encodeURIComponent(pair)}&cash=100&side=0`);
-      if (!res.ok) return;
-      const json = await res.json();
-      if (json.code !== 0 || !json.data) return;
+      const [buyRes, sellRes] = await Promise.all([
+        fetch(`${BIT_API_BASE}/rfq-price?symbol=${encodeURIComponent(pair)}&cash=100&side=0`),
+        fetch(`${BIT_API_BASE}/rfq-price?symbol=${encodeURIComponent(pair)}&cash=100&side=1`),
+      ]);
+      if (!buyRes.ok || !sellRes.ok) return;
+      const [buyJson, sellJson] = await Promise.all([buyRes.json(), sellRes.json()]);
+      if (buyJson.code !== 0 || sellJson.code !== 0 || !buyJson.data || !sellJson.data) return;
 
-      const price = parseFloat(json.data.price) || 0;
-      if (price <= 0) return;
+      const ask = parseFloat(buyJson.data.price) || 0;
+      const bid = parseFloat(sellJson.data.price) || 0;
+      if (ask <= 0 || bid <= 0 || ask < bid) return;
+      const price = (ask + bid) / 2;
 
       assets.push({
         coin: base, pair,
@@ -5848,8 +6351,9 @@ async function fetchSpotRwaBit() {
         chg: 0,    // RFQ API doesn't provide 24h change
         vol: 0,    // RFQ API doesn't provide volume
         hi: 0, lo: 0,
-        bid: price, ask: price,  // RFQ: single price, no spread
-        rfq: true,  // Flag as RFQ-based pricing
+        bid, ask,
+        rfq: true,
+        twoSided: true,
       });
     } catch (e) { console.warn(`[Spot] Bit.com rfq error for ${p.pair}:`, e.message); }
   });
@@ -5865,15 +6369,41 @@ function _buildSpotPerpFromAllData() {
   const result = {};
   for (const d of allData) {
     if (!d.venue || !d.coin) continue;
-    if (EXCLUDED_SYMBOLS.has(canonicalSymbol(d.coin))) continue;
+    if (EXCLUDED_SYMBOLS.has(canonicalSymbolForCategory(d.coin, d.category))) continue;
     if (!result[d.venue]) result[d.venue] = {};
-    const entry = { mark: d.markPx || 0, f: d.funding || 0, depth2: d.depth2 || null };
+    const interval = fundingIntervalHours(d.venue, d);
+    const entry = {
+      mark: d.markPx || 0,
+      f: d.funding === null || d.funding === undefined ? null : d.funding,
+      depth2: d.depth2 ?? null,
+      volume: d.volume || 0,
+      category: d.category || 'other',
+      fundingIntervalHours: interval,
+      settlesPerDay: 24 / interval,
+    };
     result[d.venue][d.coin] = entry;
     // Also store under canonical symbol for robust matching (GOLD→XAU, etc.)
-    const canonical = canonicalSymbol(d.coin);
+    const canonical = canonicalSymbolForCategory(d.coin, d.category);
     if (canonical !== d.coin) result[d.venue][canonical] = entry;
   }
   return result;
+}
+
+function updateSpotStatusLine(statusEl = document.getElementById('spotArbStatus')) {
+  if (!statusEl) return;
+  const totalSpot = Object.values(SPOT_DATA).reduce((s, a) => s + a.length, 0);
+  const pricedSpot = Object.values(SPOT_DATA).flat().filter(a => Number(a.last) > 0).length;
+  const totalPerp = Object.values(SPOT_PERP).reduce((s, o) => s + Object.keys(o).length, 0);
+  const totalRef = Object.keys(REF_PRICES).length;
+  const srcCounts = {};
+  Object.values(REF_SOURCES).forEach(s => { srcCounts[s] = (srcCounts[s] || 0) + 1; });
+  const srcSummary = Object.entries(srcCounts).map(([k, v]) => `${v} ${k}`).join(' · ');
+  const timeStr = (spotArbLastUpdate || new Date()).toLocaleTimeString();
+  let html = `<span style="color:var(--foreground-dim);font-size:10.5px">${totalSpot} spot listed · ${pricedSpot} priced · ${totalPerp} perps · ${totalRef} ref${srcSummary ? ` (${srcSummary})` : ''} · ${timeStr}</span>`;
+  if (spotArbErrors.length > 0) {
+    html += ` <span style="color:var(--negative);font-size:10px;cursor:help" title="${escapeHtml(spotArbErrors.join('\n'))}">⚠ ${spotArbErrors.length} venue(s) failed</span>`;
+  }
+  statusEl.innerHTML = html;
 }
 
 // ── Orchestrator: fetch all spot venues + bridge perp data ──
@@ -5885,75 +6415,83 @@ async function refreshSpotArbData() {
   const refreshBtn = document.getElementById('spotArbRefreshBtn');
   if (statusEl) statusEl.innerHTML = '<span style="color:var(--foreground-dim)">Loading spot data…</span>';
   if (refreshBtn) { refreshBtn.disabled = true; refreshBtn.textContent = '⟳ Loading…'; }
+  try {
+    // Load the authoritative Reality catalog first. It registers hundreds of
+    // underlyings used by suffix-based discovery on Gate/Bybit and removes a
+    // timing race where those venues could miss newly listed tokenized stocks.
+    const bitgetResult = (await Promise.allSettled([fetchSpotRwaBitget()]))[0];
+    const otherResults = await Promise.allSettled([
+      fetchSpotRwaGate(),
+      fetchSpotRwaKraken(),
+      fetchSpotRwaBinance(),
+      fetchSpotRwaBybit(),
+      fetchSpotRwaBit(),
+    ]);
+    const results = [otherResults[0], otherResults[1], bitgetResult, otherResults[2], otherResults[3], otherResults[4]];
+    const venueKeys = ['gate', 'kraken', 'bitget', 'binance', 'bybit', 'bit'];
+    const nextSpotData = { ...SPOT_DATA };
+    results.forEach((r, i) => {
+      const venue = venueKeys[i];
+      if (r.status === 'fulfilled') {
+        nextSpotData[venue] = Array.isArray(r.value) ? r.value.map(normalizeSpotDataState) : [];
+      } else {
+        const err = r.reason?.message || 'No RWA assets found';
+        spotArbErrors.push(`${SPOT_VENUE_NAMES[venue] || venue}: ${err}`);
+        console.warn(`[Spot] ${venue} error:`, err);
+      }
+    });
+    SPOT_DATA = nextSpotData;
 
-  const results = await Promise.allSettled([
-    fetchSpotRwaGate(),
-    fetchSpotRwaKraken(),
-    fetchSpotRwaBitget(),
-    fetchSpotRwaBinance(),
-    fetchSpotRwaBybit(),
-    fetchSpotRwaBit(),
-  ]);
-  const venueKeys = ['gate', 'kraken', 'bitget', 'binance', 'bybit', 'bit'];
-  SPOT_DATA = {};
-  results.forEach((r, i) => {
-    const venue = venueKeys[i];
-    if (r.status === 'fulfilled' && r.value.length > 0) {
-      SPOT_DATA[venue] = r.value;
-    } else {
-      const err = r.status === 'rejected' ? r.reason?.message : 'No RWA assets found';
-      spotArbErrors.push(`${SPOT_VENUE_NAMES[venue] || venue}: ${err}`);
-      console.warn(`[Spot] ${venue} error:`, err);
-    }
-  });
+    SPOT_PERP = _buildSpotPerpFromAllData();
 
-  // Bridge perp data from the perps dashboard's allData
-  SPOT_PERP = _buildSpotPerpFromAllData();
+    // Only request external reference prices for spot underlyings that can
+    // actually form a spot/perp route. Reality adds hundreds of spot symbols;
+    // fetching unrelated Yahoo charts would make every refresh unnecessarily slow.
+    const perpUnderlyings = new Set(allData.map(d => canonicalSymbolForCategory(d.coin, d.category)));
+    const referenceCoins = Object.values(SPOT_DATA).flat()
+      .map(a => ({ underlying: _arbUnderlyingKey(a.coin), vol: a.vol || 0 }))
+      .filter(a => perpUnderlyings.has(a.underlying))
+      .sort((a, b) => (b.vol || 0) - (a.vol || 0))
+      .map(a => a.underlying)
+      .filter((underlying, index, arr) => arr.indexOf(underlying) === index)
+      .slice(0, 150);
+    // Reference enrichment should not block the live market tables. Re-render
+    // the active spot views when the capped background batch completes.
+    fetchReferencePrices(referenceCoins).then(() => {
+      renderSpotArbRank();
+      if (spotSubView === 'allAssets') renderSpotAllAssets();
+      else if (spotSubView !== 'overview') renderSpotVenueTable(spotSubView);
+      updateSpotStatusLine(statusEl);
+    }).catch(e => console.warn('[Ref] price fetch error:', e));
 
-  // Fetch multi-source reference prices for all discovered spot assets
-  const allSpotCoins = Object.values(SPOT_DATA).flatMap(arr => arr.map(a => a.coin));
-  await fetchReferencePrices(allSpotCoins).catch(e => console.warn('[Ref] price fetch error:', e));
+    spotArbLastUpdate = new Date();
+    updateSpotStatusLine(statusEl);
 
-  const totalSpot = Object.values(SPOT_DATA).reduce((s, a) => s + a.length, 0);
-  const totalPerp = Object.values(SPOT_PERP).reduce((s, o) => s + Object.keys(o).length, 0);
-  const totalRef = Object.keys(REF_PRICES).length;
-  // Count ref sources
-  const srcCounts = {};
-  Object.values(REF_SOURCES).forEach(s => { srcCounts[s] = (srcCounts[s]||0) + 1; });
-  const srcSummary = Object.entries(srcCounts).map(([k,v]) => `${v} ${k}`).join(' · ');
+    renderSpotVenueGrid();
+    renderSpotArbRank();
+    updateSpotKpis();
 
-  spotArbLastUpdate = new Date();
-  spotArbLoading = false;
-  if (refreshBtn) { refreshBtn.disabled = false; refreshBtn.textContent = '⟳ Refresh'; }
-
-  if (statusEl) {
-    const timeStr = spotArbLastUpdate.toLocaleTimeString();
-    let html = `<span style="color:var(--foreground-dim);font-size:10.5px">${totalSpot} spot · ${totalPerp} perps · ${totalRef} ref (${srcSummary}) · ${timeStr}</span>`;
-    if (spotArbErrors.length > 0) {
-      html += ' <span style="color:var(--negative);font-size:10px;cursor:help" title="' + spotArbErrors.join('\\n') + '">⚠ ' + spotArbErrors.length + ' venue(s) failed</span>';
-    }
-    statusEl.innerHTML = html;
+    document.querySelectorAll('#spotSubNav .spot-sub-tab').forEach(tab => {
+      const onclick = tab.getAttribute('onclick') || '';
+      const m = onclick.match(/switchSpotSub\('(\w+)'/);
+      if (!m) return;
+      const v = m[1];
+      if (v === 'overview' || v === 'allAssets') return;
+      const cnt = (SPOT_DATA[v] || []).length;
+      const badge = tab.querySelector('.spot-cnt');
+      if (badge) badge.textContent = cnt;
+    });
+  } catch (error) {
+    console.error('[Spot] refresh error:', error);
+    if (statusEl) statusEl.textContent = `Spot refresh error: ${error.message}`;
+  } finally {
+    spotArbLoading = false;
+    if (refreshBtn) { refreshBtn.disabled = false; refreshBtn.textContent = '⟳ Refresh'; }
   }
-
-  renderSpotVenueGrid();
-  renderSpotArbRank();
-  updateSpotKpis();
-
-  // Update spot sub-tab count badges dynamically
-  document.querySelectorAll('#spotSubNav .spot-sub-tab').forEach(tab => {
-    const onclick = tab.getAttribute('onclick') || '';
-    const m = onclick.match(/switchSpotSub\('(\w+)'/);
-    if (!m) return;
-    const v = m[1];
-    if (v === 'overview' || v === 'allAssets') return;
-    const cnt = (SPOT_DATA[v] || []).length;
-    const badge = tab.querySelector('.spot-cnt');
-    if (badge) badge.textContent = cnt;
-  });
 }
 
 const SPOT_VENUE_NAMES = { gate:'Gate.io', binance:'Binance', bitget:'Bitget', kraken:'Kraken', bybit:'Bybit', bit:'Bit.com' };
-const SPOT_PERP_VENUES = { gate:{name:'Gate.io',settlesPerDay:3}, binance:{name:'Binance',settlesPerDay:3}, bitget:{name:'Bitget',settlesPerDay:3}, tradexyz:{name:'trade.xyz',settlesPerDay:24}, lighter:{name:'Lighter',settlesPerDay:3}, vest:{name:'Vest',settlesPerDay:24}, cbintx:{name:'Coinbase INTX',settlesPerDay:24} };
+const SPOT_PERP_VENUES = { gate:{name:'Gate.io',settlesPerDay:3}, binance:{name:'Binance',settlesPerDay:3}, bitget:{name:'Bitget',settlesPerDay:3}, tradexyz:{name:'trade.xyz',settlesPerDay:24}, lighter:{name:'Lighter',settlesPerDay:24}, vest:{name:'Vest',settlesPerDay:24}, cbintx:{name:'Coinbase INTX',settlesPerDay:24} };
 
 const ASSET_META = {
   // ── Tokenized Gold ──
@@ -5971,34 +6509,67 @@ const ASSET_META = {
   AMZNX:  { underlying:'Amazon (AMZN)',  issuer:'Backed Finance', category:'equity' },
   METAX:  { underlying:'Meta (META)',    issuer:'Backed Finance', category:'equity' },
   MSFTX:  { underlying:'Microsoft (MSFT)', issuer:'Backed Finance', category:'equity' },
-  SPYx:   { underlying:'S&P 500 (SPY)', issuer:'Backed Finance', category:'etf' },
-  MSTRx:  { underlying:'Strategy (MSTR)', issuer:'Backed Finance', category:'equity' },
+  SPYX:   { underlying:'S&P 500 (SPY)', issuer:'Backed Finance', category:'etf' },
   MSTRX:  { underlying:'Strategy (MSTR)', issuer:'Backed Finance', category:'equity' },
   COINX:  { underlying:'Coinbase (COIN)',issuer:'Backed Finance', category:'equity' },
   // ── Ondo Finance (on suffix) ──
-  TSLAon: { underlying:'Tesla (TSLA)',   issuer:'Ondo Finance',   category:'equity' },
-  NVDAon: { underlying:'Nvidia (NVDA)',  issuer:'Ondo Finance',   category:'equity' },
-  AAPLon: { underlying:'Apple (AAPL)',   issuer:'Ondo Finance',   category:'equity' },
-  AMZNon: { underlying:'Amazon (AMZN)',  issuer:'Ondo Finance',   category:'equity' },
-  GOOGLon:{ underlying:'Google (GOOGL)', issuer:'Ondo Finance',   category:'equity' },
-  MSTRon: { underlying:'Strategy (MSTR)',issuer:'Ondo Finance',   category:'equity' },
-  COINon: { underlying:'Coinbase (COIN)',issuer:'Ondo Finance',   category:'equity' },
-  MSFTon: { underlying:'Microsoft (MSFT)', issuer:'Ondo Finance', category:'equity' },
-  SPYon:  { underlying:'S&P 500 (SPY)', issuer:'Ondo Finance',   category:'etf' },
+  TSLAON: { underlying:'Tesla (TSLA)',   issuer:'Ondo Finance',   category:'equity' },
+  NVDAON: { underlying:'Nvidia (NVDA)',  issuer:'Ondo Finance',   category:'equity' },
+  AAPLON: { underlying:'Apple (AAPL)',   issuer:'Ondo Finance',   category:'equity' },
+  AMZNON: { underlying:'Amazon (AMZN)',  issuer:'Ondo Finance',   category:'equity' },
+  GOOGLON:{ underlying:'Google (GOOGL)', issuer:'Ondo Finance',   category:'equity' },
+  MSTRON: { underlying:'Strategy (MSTR)',issuer:'Ondo Finance',   category:'equity' },
+  COINON: { underlying:'Coinbase (COIN)',issuer:'Ondo Finance',   category:'equity' },
+  MSFTON: { underlying:'Microsoft (MSFT)', issuer:'Ondo Finance', category:'equity' },
+  SPYON:  { underlying:'S&P 500 (SPY)', issuer:'Ondo Finance',   category:'etf' },
 };
+// Snapshot the hand-curated, globally trusted token identifiers before live
+// venue catalogs add dynamic entries to ASSET_META.
+const STATIC_SPOT_ASSET_KEYS = new Set(Object.keys(ASSET_META));
+
+function registerSpotAssetMeta(token, underlyingSymbol, issuer, category, venue = '') {
+  const tokenKey = String(token || '').toUpperCase();
+  const rawUnderlying = String(underlyingSymbol || '').toUpperCase();
+  const resolvedCategory = category || (ETF_SYMBOLS.has(rawUnderlying) ? 'etf' : (PRE_IPO_SYMBOLS.has(rawUnderlying) ? 'pre-ipo' : 'equity'));
+  const underlying = canonicalSymbolForCategory(rawUnderlying, resolvedCategory);
+  if (!tokenKey || !underlying) return;
+  const isAmbiguousSecurity = _assetCategoryFamily(resolvedCategory) === 'security' && AMBIGUOUS_SHORT_SYMBOLS.has(underlying);
+  const underlyingName = isAmbiguousSecurity ? '' : KNOWN_NAMES[underlying];
+  const priorVenues = Array.isArray(ASSET_META[tokenKey]?.venues) ? ASSET_META[tokenKey].venues : [];
+  const venues = venue ? [...new Set([...priorVenues, venue])] : priorVenues;
+  // Live catalogs may describe where a trusted wrapper trades, but must not
+  // rewrite its underlying/category/issuer. This keeps PAXG as Paxos gold and
+  // AAPLX as a Backed/xStocks wrapper even when Kraken lists both in the same
+  // tokenized_asset class.
+  if (STATIC_SPOT_ASSET_KEYS.has(tokenKey)) {
+    ASSET_META[tokenKey].venues = venues;
+    registerRwaAsset(underlying, '', resolvedCategory);
+    return;
+  }
+  ASSET_META[tokenKey] = {
+    underlying: underlyingName ? `${underlyingName} (${underlying})` : underlying,
+    underlyingSymbol: underlying,
+    issuer,
+    category: resolvedCategory,
+    venues,
+  };
+  registerRwaAsset(underlying, '', resolvedCategory);
+}
 
 const ISSUER_STYLES = {
   'Paxos':          { bg:'rgba(52,199,89,0.08)', color:'#248A3D', border:'rgba(52,199,89,0.18)' },
   'Tether':         { bg:'rgba(80,175,149,0.08)', color:'#2D8A6F', border:'rgba(80,175,149,0.18)' },
   'Backed Finance': { bg:'rgba(0,122,255,0.08)', color:'#0055CC', border:'rgba(0,122,255,0.18)' },
   'Ondo Finance':   { bg:'rgba(175,82,222,0.08)', color:'#8944AB', border:'rgba(175,82,222,0.18)' },
+  'Reality':        { bg:'rgba(255,149,0,0.08)', color:'#B35F00', border:'rgba(255,149,0,0.18)' },
+  'xStocks':        { bg:'rgba(50,173,230,0.08)', color:'#1677A3', border:'rgba(50,173,230,0.18)' },
 };
-const ISSUER_SHORT = { 'Paxos':'Paxos','Tether':'Tether','Backed Finance':'Backed','Ondo Finance':'Ondo' };
+const ISSUER_SHORT = { 'Paxos':'Paxos','Tether':'Tether','Backed Finance':'Backed','Ondo Finance':'Ondo','Reality':'Reality','xStocks':'xStocks' };
 function issuerShort(n) { return ISSUER_SHORT[n] || n; }
 
 const SPOT_FEES = {
   spot:  { gate:{maker:0.001,taker:0.001}, binance:{maker:0.001,taker:0.001}, bitget:{maker:0.001,taker:0.001}, kraken:{maker:0.0016,taker:0.0026}, bybit:{maker:0.001,taker:0.001} },
-  perp:  { gate:{maker:0.0002,taker:0.0005}, binance:{maker:0.0002,taker:0.0005}, bitget:{maker:0.0002,taker:0.0006}, tradexyz:{maker:0.0003,taker:0.0009}, lighter:{maker:0.0002,taker:0.0005}, vest:{maker:0.0002,taker:0.0006} },
+  perp:  { gate:{maker:0.0002,taker:0.0005}, binance:{maker:0.0002,taker:0.0005}, bitget:{maker:0.0002,taker:0.0006}, tradexyz:{maker:0.0003,taker:0.0009}, lighter:{maker:0.00004,taker:0.00028}, vest:{maker:0.0002,taker:0.0006} },
 };
 let SPOT_HOLD_DAYS = 0; // 0 = "No Fees" mode (show gross funding APR)
 
@@ -6009,6 +6580,11 @@ function spotCalcArbAPR(fundingAnn, spotVenue, perpVenue, spreadPct) {
   const oneTimeCost = sf.taker*2 + pf.taker*2 + (spreadPct||0);
   const annualizedCost = oneTimeCost * (365/SPOT_HOLD_DAYS);
   return Math.abs(fundingAnn) - annualizedCost;
+}
+
+function spotSpreadRate(asset) {
+  if (!asset || (asset.rfq && !asset.twoSided) || !(asset.last > 0) || !(asset.bid > 0) || !(asset.ask > 0) || asset.ask < asset.bid) return null;
+  return (asset.ask - asset.bid) / asset.last;
 }
 
 function spotFP(v) {
@@ -6066,47 +6642,80 @@ function setSpotVenueSort(key) {
   if (spotSubView !== 'overview' && spotSubView !== 'allAssets') renderSpotVenueTable(spotSubView);
 }
 
-function _findBestPerp(coinKey, preferVenue) {
+function _assetCategoryFamily(category) {
+  return ['equity', 'etf', 'pre-ipo'].includes(category) ? 'security' : (category || 'other');
+}
+
+function _categoriesCompatible(spotCategory, perpCategory) {
+  if (!spotCategory || !perpCategory || spotCategory === 'other' || perpCategory === 'other') return true;
+  return _assetCategoryFamily(spotCategory) === _assetCategoryFamily(perpCategory);
+}
+
+function _spotAssetCategory(asset) {
+  const meta = ASSET_META[String(asset?.coin || '').toUpperCase()];
+  return asset?.category || meta?.category || KNOWN_CATEGORIES[_arbUnderlyingKey(asset?.coin)] || 'other';
+}
+
+function _findBestPerp(coinKey, preferVenue, spotCategory = '') {
   // Try preferred venue first, then fall back to best across all venues
   const tryVenue = (pv) => {
     const pd = SPOT_PERP[pv] || {};
     let p = pd[coinKey];
-    if (!p) { for (const k of Object.keys(pd)) { if (_arbTickerKey(k) === coinKey) { p = pd[k]; break; } } }
+    if (p && !_categoriesCompatible(spotCategory, p.category)) p = null;
+    if (!p) {
+      for (const k of Object.keys(pd)) {
+        if (_arbTickerKey(k) === coinKey && _categoriesCompatible(spotCategory, pd[k].category)) { p = pd[k]; break; }
+      }
+    }
     if (p) return { p, pv };
     return null;
   };
   const preferred = tryVenue(preferVenue);
   if (preferred) return preferred;
-  // Fall back: search all perp venues, pick the one with highest mark (most liquid)
+  // Fall back: prefer observable depth, then 24h volume. Nominal price is not a
+  // liquidity measure and previously selected the wrong venue for many assets.
   let best = null;
   for (const pv of Object.keys(SPOT_PERP)) {
     if (pv === preferVenue) continue;
     const found = tryVenue(pv);
-    if (found && (!best || found.p.mark > best.p.mark)) best = found;
+    const score = found ? (found.p.depth2 || found.p.volume || 0) : -1;
+    const bestScore = best ? (best.p.depth2 || best.p.volume || 0) : -1;
+    if (found && (!best || score > bestScore)) best = found;
   }
   return best;
 }
 
+function _hasMatchingPerp(venue, spotCoin, spotCategory = '') {
+  const target = _arbTickerKey(spotCoin);
+  return Object.entries(SPOT_PERP[venue] || {}).some(([perpCoin, p]) =>
+    _arbTickerKey(perpCoin) === target && _categoriesCompatible(spotCategory, p.category)
+  );
+}
+
 function renderSpotVenueTable(venue) {
-  const assets = SPOT_DATA[venue] || [];
+  const assets = (SPOT_DATA[venue] || []).map(normalizeSpotDataState);
   const selectedPv = document.getElementById('spotPerpSel').value;
-  document.getElementById('spotVenueTitle').innerHTML = '<svg class="ic ic-18" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>' + (SPOT_VENUE_NAMES[venue]||venue) + ' Spot';
+  const listedCount = assets.filter(a => a.isListed).length;
+  const activeCount = assets.filter(a => a.isActive).length;
+  const pricedCount = assets.filter(a => a.isPriced).length;
+  document.getElementById('spotVenueTitle').innerHTML = '<svg class="ic ic-18" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>' + (SPOT_VENUE_NAMES[venue]||venue) + ' Spot <span class="market-state-summary" title="Listed = official venue catalog · Active = venue trading status/activity · Priced = usable positive last price">Listed <strong>'+listedCount+'</strong> · Active <strong>'+activeCount+'</strong> · Priced <strong>'+pricedCount+'</strong></span>';
 
   // Pre-compute sort values
   const rows = assets.map(a => {
     // Normalize coin for perp matching (TSLAX→TSLA, AAPLON→AAPL, etc.)
     const coinKey = _arbTickerKey(a.coin);
-    const match = _findBestPerp(coinKey, selectedPv);
+    const match = _findBestPerp(coinKey, selectedPv, _spotAssetCategory(a));
     const p = match ? match.p : null;
     const pv = match ? match.pv : selectedPv;
-    const perpSettles = (SPOT_PERP_VENUES[pv]||{}).settlesPerDay || 3;
-    const basis = p ? (p.mark - a.last)/a.last : -999;
-    const fAnn = p ? p.f*perpSettles*365 : 0;
-    const spreadRate = (a.ask-a.bid)/a.last;
-    const netArb = p ? spotCalcArbAPR(fAnn, venue, pv, spreadRate)*100 : -999;
+    const perpSettles = p?.settlesPerDay || (SPOT_PERP_VENUES[pv]||{}).settlesPerDay || 3;
+    const comparableMark = p ? perpMarkInSpotUnits(p.mark, a.coin) : 0;
+    const basis = p && a.isPriced ? (comparableMark - a.last)/a.last : -999;
+    const fAnn = p && p.f !== null ? p.f*perpSettles*365 : 0;
+    const spreadRate = spotSpreadRate(a);
+    const netArb = p && p.f !== null && spreadRate !== null ? spotCalcArbAPR(fAnn, venue, pv, spreadRate)*100 : -999;
     const ref = getRefPrice(a.coin);
-    const dev = ref ? priceDeviation(a.last, ref) : null;
-    return { a, p, pv, _name: a.coin, _price: a.last, _ref: ref || 0, _dev: dev !== null ? dev : -999, _mark: p?p.mark:0, _basis: basis, _chg: a.chg, _vol: a.vol*a.last, _spread: spreadRate*10000, _depth: a.depth2 || 0, _funding: fAnn, _arb: netArb };
+    const dev = ref && a.isPriced ? priceDeviation(a.last, ref) : null;
+    return { a, p, pv, _name: a.coin, _price: a.last, _ref: ref || 0, _dev: dev !== null ? dev : -999, _mark: comparableMark, _basis: basis, _chg: a.chg, _vol: a.vol, _spread: spreadRate === null ? -1 : spreadRate*10000, _depth: a.depth2 || 0, _funding: p?.f === null ? -Infinity : fAnn, _arb: netArb };
   });
 
   const sk = spotVenueSort.key, sd = spotVenueSort.dir;
@@ -6122,13 +6731,14 @@ function renderSpotVenueTable(venue) {
   rows.forEach(({a, p, pv}) => {
     const cc = a.chg >= 0 ? 'pos' : 'neg';
     const cs = a.chg >= 0 ? '+' : '';
-    const spBps = ((a.ask - a.bid)/a.last*10000).toFixed(1);
-    const perpSettles = (SPOT_PERP_VENUES[pv]||{}).settlesPerDay || 3;
+    const spreadRate = spotSpreadRate(a);
+    const spBps = spreadRate === null ? '—' : (spreadRate*10000).toFixed(1);
+    const perpSettles = p?.settlesPerDay || (SPOT_PERP_VENUES[pv]||{}).settlesPerDay || 3;
 
     let markH='<span class="dim">—</span>', basisH='<span class="dim">—</span>', fundH='<span class="dim">—</span>', arbH='<span class="spot-arb l">N/A</span>';
 
     const ref = getRefPrice(a.coin);
-    const dev = ref ? priceDeviation(a.last, ref) : null;
+    const dev = ref && a.isPriced ? priceDeviation(a.last, ref) : null;
     const refSrc = getRefSource(a.coin);
     const srcTag = refSrc && refSrc !== 'Yahoo' ? '<span style="font-size:9px;color:var(--foreground-dim);display:block;margin-top:1px">'+refSrc+'</span>' : '';
     const refH = ref ? spotFP(ref) + srcTag : '<span class="dim">—</span>';
@@ -6136,12 +6746,13 @@ function renderSpotVenueTable(venue) {
       ? '<span class="'+(Math.abs(dev)>0.005?'neg':'dim')+'" style="font-weight:600">'+(dev>=0?'+':'')+(dev*100).toFixed(2)+'%</span>'
       : '<span class="dim">—</span>';
 
-    if (p) {
+    if (p && a.isPriced) {
       const perpVenueName = (SPOT_PERP_VENUES[pv]||{}).name || pv;
       const isFallback = pv !== selectedPv;
       const venueTag = isFallback ? '<span style="font-size:9px;color:var(--foreground-dim);display:block;margin-top:1px">'+perpVenueName+'</span>' : '';
-      markH = spotFP(p.mark) + venueTag;
-      const basis = (p.mark - a.last)/a.last;
+      const comparableMark = perpMarkInSpotUnits(p.mark, a.coin);
+      markH = spotFP(comparableMark) + venueTag;
+      const basis = (comparableMark - a.last)/a.last;
       const bPct = (basis*100).toFixed(3);
       const absBasis = Math.abs(basis);
       let bLabel, bLabelCol;
@@ -6157,23 +6768,28 @@ function renderSpotVenueTable(venue) {
       const bCol = basis>0.001?'pos':basis<-0.001?'neg':'dim';
       basisH = '<span class="'+bCol+'" style="font-weight:600">'+(basis>=0?'+':'')+bPct+'%</span><br><span style="font-size:10px;font-family:Inter,sans-serif;color:'+bLabelCol+'">'+bLabel+'</span>';
 
-      const fAnn = p.f*perpSettles*365;
-      const fAnnPct = fAnn*100;
-      fundH = '<span class="'+(fAnn>=0?'pos':'neg')+'" style="font-weight:600">'+(fAnn>=0?'+':'')+fAnnPct.toFixed(1)+'%</span>';
-
-      const spreadRate = (a.ask-a.bid)/a.last;
-      const netArb = spotCalcArbAPR(fAnn, venue, pv, spreadRate)*100;
-      const arbCls = netArb>=15?'g':netArb>=5?'m':'l';
-      arbH = netArb>0?'<span class="spot-arb '+arbCls+'">'+netArb.toFixed(1)+'%</span>':'<span class="spot-arb l">'+netArb.toFixed(1)+'%</span>';
+      if (p.f !== null) {
+        const fAnn = p.f*perpSettles*365;
+        const fAnnPct = fAnn*100;
+        fundH = '<span class="'+(fAnn>=0?'pos':'neg')+'" style="font-weight:600">'+(fAnn>=0?'+':'')+fAnnPct.toFixed(1)+'%</span>';
+        if (spreadRate !== null) {
+          const netArb = spotCalcArbAPR(fAnn, venue, pv, spreadRate)*100;
+          const arbCls = netArb>=15?'g':netArb>=5?'m':'l';
+          arbH = netArb>0?'<span class="spot-arb '+arbCls+'">'+netArb.toFixed(1)+'%</span>':'<span class="spot-arb l">'+netArb.toFixed(1)+'%</span>';
+        }
+      }
     }
 
     const depthH = a.depth2 != null ? '$'+spotFV(a.depth2) : '<span class="dim">—</span>';
     const depthCls = a.depth2 > 100000 ? 'pos' : a.depth2 > 10000 ? '' : 'neg';
 
-    h += '<tr><td style="text-align:left;font-family:Inter,sans-serif;font-weight:600">'+a.coin+'</td><td>'+spotFP(a.last)+'</td><td>'+refH+'</td><td>'+devH+'</td><td>'+markH+'</td><td>'+basisH+'</td>';
-    h += '<td class="'+cc+'">'+cs+a.chg.toFixed(2)+'%</td><td>$'+spotFV(a.vol*a.last)+'</td>';
-    h += '<td style="font-size:11px;color:var(--foreground-sec)">'+spotFP(a.hi)+' / '+spotFP(a.lo)+'</td>';
-    h += '<td>'+spBps+' bps</td><td class="'+depthCls+'">'+depthH+'</td><td>'+fundH+'</td><td>'+arbH+'</td></tr>';
+    const spotState = '<div class="market-state-row"><span class="market-badge">Listed</span><span class="market-badge '+(a.isActive?'active':'inactive')+'">'+(a.isActive?'Active':'Inactive')+'</span><span class="market-badge '+(a.isPriced?'priced':'unpriced')+'">'+(a.isPriced?'Priced':'Unpriced')+'</span></div>';
+    const lastH = a.isPriced ? spotFP(a.last) : '<span class="dim">—</span>';
+    const hiLoH = a.isPriced && a.hi > 0 && a.lo > 0 ? spotFP(a.hi)+' / '+spotFP(a.lo) : '<span class="dim">—</span>';
+    h += '<tr><td style="text-align:left;font-family:Inter,sans-serif;font-weight:600">'+a.coin+spotState+'</td><td>'+fieldValueWithStatus(lastH,a.fieldStatus.last,'Official last-price coverage')+'</td><td>'+refH+'</td><td>'+devH+'</td><td>'+markH+'</td><td>'+basisH+'</td>';
+    h += '<td class="'+cc+'">'+(a.isPriced?cs+a.chg.toFixed(2)+'%':'<span class="dim">—</span>')+'</td><td>$'+spotFV(a.vol)+'</td>';
+    h += '<td style="font-size:11px;color:var(--foreground-sec)">'+hiLoH+'</td>';
+    h += '<td>'+spBps+(spBps==='—'?'':' bps')+'</td><td class="'+depthCls+'">'+fieldValueWithStatus(depthH,a.fieldStatus.depth2,'Partial = up to 50 order-book levels; Unavailable = not fetched or unsupported')+'</td><td>'+fundH+'</td><td>'+arbH+'</td></tr>';
   });
   document.getElementById('spotVenueBody').innerHTML = h;
 }
@@ -6251,17 +6867,20 @@ function _arbUnderlyingKey(t) {
   if (!t) return '';
   const up = String(t).toUpperCase();
   // 1) Use canonicalSymbol for known aliases (GOLD→XAU, SILVER→XAG, CL→WTI, etc.)
-  const canonical = canonicalSymbol(up);
+  const canonical = AMBIGUOUS_SHORT_SYMBOLS.has(up) ? up : canonicalSymbol(up);
   if (canonical !== up && RWA_ASSETS[canonical]) return canonical;
   // 2) ASSET_META explicit mapping
   const meta = (typeof ASSET_META !== 'undefined') && (ASSET_META[t] || ASSET_META[up]);
+  if (meta?.underlyingSymbol) return canonicalSymbolForCategory(meta.underlyingSymbol, meta.category);
   if (meta && meta.underlying) {
     const m = meta.underlying.match(/\(([A-Z0-9]+)\)/);
     if (m) return m[1];
   }
-  // 3) Known crypto tickers — never transform
-  if (_CRYPTO_TICKER_KEEP.has(up)) return up;
-  // 4) Heuristic suffix strip for tokenized stocks
+  // 3) Registered real tickers and known crypto tickers are never suffixes.
+  // This protects MINIMAX, SKHYNIX, SPACEX, NFLX, etc. from losing their X.
+  if (_CRYPTO_TICKER_KEEP.has(up) || RWA_ASSETS[up] || KNOWN_CATEGORIES[up] || PRE_IPO_SYMBOLS.has(up)) return up;
+  // 4) Last-resort heuristic for an unregistered issuer token. Authoritative
+  // catalog fetchers immediately register the result in ASSET_META.
   if (up.length >= 5 && up.endsWith('ON')) return up.slice(0, -2);
   if (up.length >= 5 && up.endsWith('X'))  return up.slice(0, -1);
   return up;
@@ -6274,9 +6893,10 @@ function updateSpotKpis() {
   const allAssets = Object.values(SPOT_DATA).flat();
   const exchanges = Object.keys(SPOT_DATA).filter(v => (SPOT_DATA[v]||[]).length > 0).length;
   const totalPairs = allAssets.length;
+  const pricedPairs = allAssets.filter(a => Number(a.last) > 0).length;
   const totalVol = allAssets.reduce((s,a) => s + (a.vol||0), 0);
   // Avg spread (bps) — only from assets with valid bid/ask
-  const spreads = allAssets.filter(a => a.bid>0 && a.ask>0 && a.last>0).map(a => (a.ask-a.bid)/a.last*10000);
+  const spreads = allAssets.map(spotSpreadRate).filter(v => v !== null).map(v => v*10000);
   const avgSpread = spreads.length > 0 ? spreads.reduce((a,b)=>a+b,0)/spreads.length : 0;
   // Best arb: find the highest net APR from arb rank data
   let bestArb = null;
@@ -6285,13 +6905,17 @@ function updateSpotKpis() {
     const sFee = SPOT_FEES.spot[sVenue] || {taker:0.001};
     arr.forEach(a => {
       const coinKey = _arbTickerKey(a.coin);
-      const spreadRate = (a.ask-a.bid)/a.last;
+      const spotCategory = _spotAssetCategory(a);
+      const spreadRate = spotSpreadRate(a);
+      if (spreadRate === null) return;
       perpVenues.forEach(pVenue => {
         const pMap = SPOT_PERP[pVenue] || {};
         let p = null;
-        for (const k of Object.keys(pMap)) { if (_arbTickerKey(k) === coinKey) { p = pMap[k]; break; } }
-        if (!p) return;
-        const settles = (SPOT_PERP_VENUES[pVenue]||{}).settlesPerDay || 3;
+        for (const k of Object.keys(pMap)) {
+          if (_arbTickerKey(k) === coinKey && _categoriesCompatible(spotCategory, pMap[k].category)) { p = pMap[k]; break; }
+        }
+        if (!p || p.f === null) return;
+        const settles = p.settlesPerDay || (SPOT_PERP_VENUES[pVenue]||{}).settlesPerDay || 3;
         const fAnn = Math.abs(p.f * settles * 365);
         const pFee = SPOT_FEES.perp[pVenue] || {taker:0.0005};
         const costAnn = SPOT_HOLD_DAYS > 0 ? (sFee.taker*2 + pFee.taker*2 + spreadRate) * (365/SPOT_HOLD_DAYS) : 0;
@@ -6305,7 +6929,7 @@ function updateSpotKpis() {
   // Update DOM
   const el = (id) => document.getElementById(id);
   if (el('spotKpiPairs')) el('spotKpiPairs').textContent = totalPairs;
-  if (el('spotKpiExchanges')) el('spotKpiExchanges').textContent = exchanges + ' exchanges';
+  if (el('spotKpiExchanges')) el('spotKpiExchanges').textContent = pricedPairs + ' priced · ' + exchanges + ' exchanges';
   if (el('spotKpiVol')) el('spotKpiVol').textContent = '$' + spotFV(totalVol);
   if (el('spotKpiSpread')) el('spotKpiSpread').textContent = avgSpread.toFixed(1) + ' bps';
   if (el('spotKpiBestArb')) el('spotKpiBestArb').textContent = bestArb ? bestArb.net.toFixed(1)+'%' : '—';
@@ -6317,7 +6941,7 @@ function updateSpotKpis() {
 }
 
 // ── Dynamic Exchange Summary Cards ──
-const _CAT_COLORS = {equity:'#AF52DE',commodity:'var(--gold)',index:'#007AFF',etf:'#32ADE6',other:'var(--foreground-dim)'};
+const _CAT_COLORS = {equity:'#AF52DE',commodity:'var(--gold)',index:'#007AFF',etf:'#32ADE6','pre-ipo':'#FF9500',other:'var(--foreground-dim)'};
 function renderSpotVenueGrid() {
   const grid = document.getElementById('spotVenueGrid');
   if (!grid) return;
@@ -6330,7 +6954,7 @@ function renderSpotVenueGrid() {
     const fees = SPOT_FEES.spot[v] || {maker:0.001,taker:0.001};
     const totalVol = assets.reduce((s,a) => s + (a.vol||0), 0);
     // avg spread in bps
-    const spreads = assets.filter(a => a.bid > 0 && a.ask > 0).map(a => (a.ask - a.bid) / ((a.ask + a.bid)/2) * 10000);
+    const spreads = assets.map(spotSpreadRate).filter(v => v !== null).map(v => v*10000);
     const avgSpread = spreads.length > 0 ? (spreads.reduce((a,b) => a+b,0) / spreads.length) : 0;
     const rt = (fees.taker * 2 * 10000 + avgSpread).toFixed(1);
     // category breakdown
@@ -6382,19 +7006,24 @@ function renderSpotArbRank() {
   Object.entries(SPOT_DATA).forEach(([sVenue, arr]) => {
     const sFee = SPOT_FEES.spot[sVenue] || {taker:0.001};
     arr.forEach(a => {
-      const spreadRate = (a.ask-a.bid)/a.last;
+      const spreadRate = spotSpreadRate(a);
+      if (spreadRate === null) return;
       const coinKey = _arbTickerKey(a.coin);
+      const spotCategory = _spotAssetCategory(a);
       perpVenues.forEach(pVenue => {
         if (sameVenueOnly && pVenue !== sVenue) return;
         const pMap = SPOT_PERP[pVenue] || {};
         // find perp entry by case-insensitive ticker match
         let p = null;
-        for (const k of Object.keys(pMap)) { if (_arbTickerKey(k) === coinKey) { p = pMap[k]; break; } }
-        if (!p) return;
+        for (const k of Object.keys(pMap)) {
+          if (_arbTickerKey(k) === coinKey && _categoriesCompatible(spotCategory, pMap[k].category)) { p = pMap[k]; break; }
+        }
+        if (!p || p.f === null || !(p.mark > 0)) return;
         const pFee = SPOT_FEES.perp[pVenue] || {taker:0.0005};
-        const settles = (SPOT_PERP_VENUES[pVenue]||{}).settlesPerDay || 3;
+        const settles = p.settlesPerDay || (SPOT_PERP_VENUES[pVenue]||{}).settlesPerDay || 3;
         const fAnn = p.f * settles * 365;            // signed annualized funding
-        const basis = (p.mark - a.last) / a.last;    // signed basis
+        const comparableMark = perpMarkInSpotUnits(p.mark, a.coin);
+        const basis = (comparableMark - a.last) / a.last; // signed basis, common unit
         const oneTimeCost = sFee.taker*2 + pFee.taker*2 + spreadRate;
         const hold = SPOT_HOLD_DAYS;
         // direction: long spot / short perp when fAnn>=0 else reverse
@@ -6408,7 +7037,7 @@ function renderSpotArbRank() {
         const ref = getRefPrice(a.coin);
         rows.push({
           coin: a.coin, sVenue, pVenue,
-          spot: a.last, mark: p.mark, basis, fAnn, costAnn, netFund, dir, ref,
+          spot: a.last, mark: comparableMark, basis, fAnn, costAnn, netFund, dir, ref,
           refSrc: getRefSource(a.coin),
           depthSpot: a.depth2 || null, depthPerp: p.depth2 || null
         });
@@ -6474,8 +7103,8 @@ function renderSpotArbRank() {
        + '<td class="op-col">=</td>'
        + '<td><span class="'+netFundCls+'">'+(r.netFund>=0?'+':'')+(r.netFund*100).toFixed(1)+'%</span></td>'
        + '<td class="'+clsPct(basisDirRaw)+'" style="font-weight:600">'+(basisDirRaw>=0?'+':'')+(basisDirRaw*100).toFixed(3)+'%</td>'
-       + '<td class="mono '+(r.depthSpot>100000?'pos':r.depthSpot>10000?'':'neg')+'">'+(r.depthSpot!=null?'$'+fmtVolume(r.depthSpot):'<span class="dim">—</span>')+'</td>'
-       + '<td class="mono '+(r.depthPerp>100000?'pos':r.depthPerp>10000?'':'neg')+'">'+(r.depthPerp!=null?'$'+fmtVolume(r.depthPerp):'<span class="dim">—</span>')+'</td>'
+       + '<td class="mono '+(r.depthSpot>100000?'pos':r.depthSpot>10000?'':'neg')+'">'+(r.depthSpot!=null?fmtVolume(r.depthSpot):'<span class="dim">—</span>')+'</td>'
+       + '<td class="mono '+(r.depthPerp>100000?'pos':r.depthPerp>10000?'':'neg')+'">'+(r.depthPerp!=null?fmtVolume(r.depthPerp):'<span class="dim">—</span>')+'</td>'
        + '<td style="text-align:left">'+dirBadge+'</td>'
        + '</tr>';
   });
@@ -6548,7 +7177,8 @@ function renderSpotAllAssets() {
     // Skip commodities — price structures differ (per-gram vs per-oz)
     if (group.category === 'commodity') continue;
     const entries = Object.values(group.coins).flat();
-    const avgPrice = entries.reduce((s,e) => s + e.last, 0) / entries.length;
+    const pricedEntries = entries.filter(e => Number(e.last) > 0);
+    const avgPrice = pricedEntries.length ? pricedEntries.reduce((s,e) => s + e.last, 0) / pricedEntries.length : 0;
     if (avgPrice <= 0) continue;
     // Check if ANY coin in this group is in ASSET_META → trusted
     const hasMeta = Object.keys(group.coins).some(c => ASSET_META[c]);
@@ -6578,9 +7208,10 @@ function renderSpotAllAssets() {
   const perpVenueColors = {gate:'var(--gate)', binance:'var(--binance)', bitget:'var(--bitget)', tradexyz:'var(--tradexyz)'};
 
   function bpsRange(entries) {
-    const arr = entries.map(e=>(e.ask-e.bid)/e.last*10000);
+    const arr = entries.map(spotSpreadRate).filter(v=>v!==null).map(v=>v*10000);
+    if (arr.length === 0) return '—';
     const mn=Math.min(...arr), mx=Math.max(...arr);
-    if (entries.length===1||Math.abs(mn-mx)<0.05) return mn.toFixed(1)+' bps';
+    if (arr.length===1||Math.abs(mn-mx)<0.05) return mn.toFixed(1)+' bps';
     return mn.toFixed(1)+'–'+mx.toFixed(1)+' bps';
   }
 
@@ -6590,16 +7221,17 @@ function renderSpotAllAssets() {
     .map(([underlying, group]) => {
       const coinKeys = Object.keys(group.coins);
       const entries = coinKeys.flatMap(c=>group.coins[c]);
-      const prices = entries.map(e=>e.last);
-      const avgPrice = prices.reduce((a,b)=>a+b,0)/prices.length;
-      const avgChg = entries.reduce((s,e)=>s+e.chg,0)/entries.length;
-      const totalVol = entries.reduce((s,e)=>s+e.vol*e.last,0);
+      const pricedEntries = entries.filter(e => Number(e.last) > 0);
+      const prices = pricedEntries.map(e=>e.last);
+      const avgPrice = prices.length ? prices.reduce((a,b)=>a+b,0)/prices.length : -1;
+      const avgChg = pricedEntries.length ? pricedEntries.reduce((s,e)=>s+e.chg,0)/pricedEntries.length : -Infinity;
+      const totalVol = entries.reduce((s,e)=>s+e.vol,0);
       const venueCount = new Set(entries.map(e=>e.venue)).size;
-      const spreadArr = entries.map(e=>(e.ask-e.bid)/e.last*10000);
-      const avgSpread = spreadArr.reduce((a,b)=>a+b,0)/spreadArr.length;
+      const spreadArr = entries.map(spotSpreadRate).filter(v=>v!==null).map(v=>v*10000);
+      const avgSpread = spreadArr.length ? spreadArr.reduce((a,b)=>a+b,0)/spreadArr.length : -1;
       const perpVKeys = ['gate','binance','bitget','tradexyz'];
       const perpSet = new Set();
-      coinKeys.forEach(c=>{ perpVKeys.forEach(pv=>{ if(SPOT_PERP[pv]&&SPOT_PERP[pv][c]) perpSet.add(pv); }); });
+      coinKeys.forEach(c=>{ perpVKeys.forEach(pv=>{ if(_hasMatchingPerp(pv,c,group.category)) perpSet.add(pv); }); });
       return { underlying, group, _name: underlying, _cat: group.category, _price: avgPrice, _chg: avgChg, _vol: totalVol, _exchanges: venueCount, _spread: avgSpread, _perp: perpSet.size };
     });
 
@@ -6619,13 +7251,14 @@ function renderSpotAllAssets() {
     const uid = 'sa_'+underlying.replace(/[^a-zA-Z0-9]/g,'_');
     const catColor = CAT_COLORS[group.category]||'#5C6170';
 
-    const prices = allCoinEntries.map(e=>e.last);
-    const minP=Math.min(...prices), maxP=Math.max(...prices);
-    const priceStr = (minP===maxP)?spotFP(minP):spotFP(minP)+' – '+spotFP(maxP);
-    const totalVol = allCoinEntries.reduce((s,e)=>s+e.vol*e.last,0);
-    const avgChg = allCoinEntries.reduce((s,e)=>s+e.chg,0)/allCoinEntries.length;
-    const chgCls = avgChg>=0?'pos':'neg';
-    const chgSign = avgChg>=0?'+':'';
+    const pricedCoinEntries = allCoinEntries.filter(e => Number(e.last) > 0);
+    const prices = pricedCoinEntries.map(e=>e.last);
+    const minP=prices.length?Math.min(...prices):null, maxP=prices.length?Math.max(...prices):null;
+    const priceStr = minP===null?'—':(minP===maxP)?spotFP(minP):spotFP(minP)+' – '+spotFP(maxP);
+    const totalVol = allCoinEntries.reduce((s,e)=>s+e.vol,0);
+    const avgChg = pricedCoinEntries.length ? pricedCoinEntries.reduce((s,e)=>s+e.chg,0)/pricedCoinEntries.length : null;
+    const chgCls = avgChg===null?'':avgChg>=0?'pos':'neg';
+    const chgSign = avgChg!==null&&avgChg>=0?'+':'';
 
     const issuers = [...new Set(coinKeys.map(c=>(ASSET_META[c]||{}).issuer||'—'))];
     const issuerBadges = issuers.map(iss=>{
@@ -6637,7 +7270,7 @@ function renderSpotAllAssets() {
     const spotDots = venueSet.map(v=>'<span class="venue-dot '+v+'"></span>').join('');
 
     const allPerpVenues = new Set();
-    coinKeys.forEach(coin=>{ perpVenueKeys.forEach(pv=>{ if(SPOT_PERP[pv]&&SPOT_PERP[pv][coin]) allPerpVenues.add(pv); }); });
+    coinKeys.forEach(coin=>{ perpVenueKeys.forEach(pv=>{ if(_hasMatchingPerp(pv,coin,group.category)) allPerpVenues.add(pv); }); });
     const perpCount = allPerpVenues.size;
     const perpTipDots = [...allPerpVenues].map(pv=>'<span class="venue-dot '+pv+'"></span> '+(SPOT_PERP_VENUES[pv]||{}).name).join('&nbsp;&nbsp;');
     const perpCountColor = perpCount>=3?'var(--positive)':perpCount>=2?'var(--accent)':perpCount===1?'var(--foreground-sec)':'var(--foreground-dim)';
@@ -6654,7 +7287,7 @@ function renderSpotAllAssets() {
     h += '<td style="font-family:Inter,sans-serif"><span style="display:flex;align-items:center;gap:3px">'+spotDots+' <span style="font-size:11px;color:var(--foreground-dim)">'+venueSet.length+'</span></span></td>';
     h += '<td style="font-family:Inter,sans-serif"><span class="perp-tooltip-s"><span class="perp-count-s" style="color:'+perpCountColor+'">'+perpCount+'</span>'+(perpCount>0?'<span class="perp-tip-s">'+perpTipDots+'</span>':'')+'</span></td>';
     h += '<td style="font-size:12px">'+priceStr+'</td>';
-    h += '<td class="'+chgCls+'">'+chgSign+avgChg.toFixed(2)+'%</td>';
+    h += '<td class="'+chgCls+'">'+(avgChg===null?'—':chgSign+avgChg.toFixed(2)+'%')+'</td>';
     h += '<td style="font-size:12px">'+bpsRange(allCoinEntries)+'</td>';
     h += '<td>$'+spotFV(totalVol)+'</td>';
     h += '</tr>';
@@ -6666,13 +7299,14 @@ function renderSpotAllAssets() {
       const coinEntries = group.coins[coin];
       const midId = uid+'_'+coin;
 
-      const cPrices = coinEntries.map(e=>e.last);
-      const cMinP=Math.min(...cPrices), cMaxP=Math.max(...cPrices);
-      const cPriceStr = coinEntries.length===1?spotFP(cMinP):spotFP(cMinP)+' – '+spotFP(cMaxP);
-      const cVol = coinEntries.reduce((s,e)=>s+e.vol*e.last,0);
-      const cChg = coinEntries.reduce((s,e)=>s+e.chg,0)/coinEntries.length;
-      const cChgCls = cChg>=0?'pos':'neg';
-      const cChgSign = cChg>=0?'+':'';
+      const cPricedEntries = coinEntries.filter(e => Number(e.last) > 0);
+      const cPrices = cPricedEntries.map(e=>e.last);
+      const cMinP=cPrices.length?Math.min(...cPrices):null, cMaxP=cPrices.length?Math.max(...cPrices):null;
+      const cPriceStr = cMinP===null?'—':cPrices.length===1?spotFP(cMinP):spotFP(cMinP)+' – '+spotFP(cMaxP);
+      const cVol = coinEntries.reduce((s,e)=>s+e.vol,0);
+      const cChg = cPricedEntries.length ? cPricedEntries.reduce((s,e)=>s+e.chg,0)/cPricedEntries.length : null;
+      const cChgCls = cChg===null?'':cChg>=0?'pos':'neg';
+      const cChgSign = cChg!==null&&cChg>=0?'+':'';
       const hasMultiVenue = coinEntries.length>1;
       const cVenueSet = [...new Set(coinEntries.map(e=>e.venue))];
 
@@ -6693,7 +7327,7 @@ function renderSpotAllAssets() {
       h += '<td style="font-family:Inter,sans-serif">'+exchCell+'</td>';
       h += '<td></td>';
       h += '<td class="mid-data" style="font-size:12px">'+cPriceStr+'</td>';
-      h += '<td class="mid-data '+cChgCls+'">'+cChgSign+cChg.toFixed(2)+'%</td>';
+      h += '<td class="mid-data '+cChgCls+'">'+(cChg===null?'—':cChgSign+cChg.toFixed(2)+'%')+'</td>';
       h += '<td class="mid-data" style="font-size:12px">'+bpsRange(coinEntries)+'</td>';
       h += '<td class="mid-data">$'+spotFV(cVol)+'</td>';
       h += '</tr>';
@@ -6702,15 +7336,16 @@ function renderSpotAllAssets() {
       coinEntries.forEach(a=>{
         const cc = a.chg>=0?'pos':'neg';
         const cs = a.chg>=0?'+':'';
-        const spBps = ((a.ask-a.bid)/a.last*10000).toFixed(1);
+        const spreadRate = spotSpreadRate(a);
+        const spBps = spreadRate === null ? '—' : (spreadRate*10000).toFixed(1)+' bps';
         h += '<tr class="spot-row-child hidden-row" data-parent="'+midId+'">';
         h += '<td></td><td></td><td></td><td></td><td></td>';
         h += '<td style="font-size:12px;font-family:Inter,sans-serif;padding-left:4px"><span class="venue-dot '+a.venue+'"></span> '+(SPOT_VENUE_NAMES[a.venue]||a.venue)+'</td>';
         h += '<td></td>';
-        h += '<td style="font-size:12px">'+spotFP(a.last)+'</td>';
-        h += '<td class="'+cc+'">'+cs+a.chg.toFixed(2)+'%</td>';
-        h += '<td style="font-size:12px">'+spBps+' bps</td>';
-        h += '<td>$'+spotFV(a.vol*a.last)+'</td>';
+        h += '<td style="font-size:12px">'+(a.last>0?spotFP(a.last):'—')+'</td>';
+        h += '<td class="'+cc+'">'+(a.last>0?cs+a.chg.toFixed(2)+'%':'—')+'</td>';
+        h += '<td style="font-size:12px">'+spBps+'</td>';
+        h += '<td>$'+spotFV(a.vol)+'</td>';
         h += '</tr>';
       });
     });
@@ -6764,6 +7399,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal()
   refreshTimer = setInterval(() => refresh(false), REFRESH_INTERVAL);
   // Load spot RWA data (depends on allData from perps refresh above)
   await refreshSpotArbData().catch(e => console.error('[Spot] init error:', e));
+  spotRefreshTimer = setInterval(() => refreshSpotArbData(), SPOT_REFRESH_INTERVAL);
 })();
 
 </script>
