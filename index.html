@@ -6385,14 +6385,24 @@ async function fetchSpotRwaBinance() {
   // exchangeInfo supplies authoritative baseAsset/quoteAsset fields. Parsing a
   // concatenated symbol by suffix misread RENBUSD as base RENB + quote USD.
   const infoRes = await fetchBinanceSpotPublic('/exchangeInfo', true);
-  const [tickerRes, tradfiInfoRes] = await Promise.all([
-    fetchBinanceSpotPublic('/ticker/24hr', true),
-    fetchBinancePublic('/exchangeInfo', true)
-  ]);
   const liveInfoJson = await parseOptionalJson(infoRes, null, 'Binance spot exchangeInfo');
   const infoJson = Array.isArray(liveInfoJson?.symbols) && liveInfoJson.symbols.length
     ? liveInfoJson
     : { symbols: [...BINANCE_BSTOCK_SNAPSHOT, 'PAXG', 'XAUT'].map(baseAsset => ({ symbol:`${baseAsset}USDT`, baseAsset, quoteAsset:'USDT', status:'TRADING', snapshot:true })) };
+  // Request only candidate RWA tickers instead of Binance's entire spot
+  // universe. The full ticker payload can exceed the client timeout while the
+  // targeted response stays small and preserves all bStocks prices.
+  const tickerSymbols = (infoJson.symbols || []).filter(s => {
+    const base = String(s.baseAsset || '').toUpperCase();
+    const quote = String(s.quoteAsset || '').toUpperCase();
+    return s.status === 'TRADING' && ['USDT','USD'].includes(quote) &&
+      ((base.length >= 3 && base.endsWith('B')) || ['PAXG','XAUT'].includes(base));
+  }).map(s => String(s.symbol || '').toUpperCase()).filter(Boolean);
+  const tickerPath = `/ticker/24hr?symbols=${encodeURIComponent(JSON.stringify(tickerSymbols))}`;
+  const [tickerRes, tradfiInfoRes] = await Promise.all([
+    fetchBinanceSpotPublic(tickerPath, true),
+    fetchBinancePublic('/exchangeInfo', true)
+  ]);
   const tickers = await parseOptionalJson(tickerRes, [], 'Binance spot ticker');
   const symbolInfo = {};
   (infoJson.symbols || []).forEach(s => { symbolInfo[String(s.symbol || '').toUpperCase()] = s; });
