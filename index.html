@@ -2650,47 +2650,86 @@ async function fetchGate() {
 // API: Binance (USDT-M Perpetual Futures)
 // ═══════════════════════════════════════════════
 
-// Binance supports CORS — always call directly to avoid Vercel edge request quota
 const BINANCE_API_BASE = 'https://fapi.binance.com/fapi/v1';
+// Official Binance catalog snapshot captured 2026-08-07. Live exchangeInfo is
+// always preferred; this prevents a temporary Binance block from deleting the
+// venue. Duplicate canonical names preserve separately listed contracts.
+const BINANCE_TRADIFI_SNAPSHOT_GROUPS = {
+  EQUITY: ['AAOI','AAPL','ADBE','ALAB','AMAT','AMD','AMZN','APP','ARM','ASML','ASTS','AVGO','AXTI','BABA','BB','BE','BMNR','BNC','BOT','BRK-B','BSP','BX','CAT','CIEN','COHR','COIN','COST','CRCL','CRDO','CRM','CRWD','CRWV','CSCO','DELL','DIS','DKNG','EBAY','FLEX','FLNC','FWDI','GEV','GIGADEV','GLW','GME','GOOGL','GS','HD','HIMS','HOOD','HPE','HYUNDAI','IBM','INTC','INTW','IREN','JPM','KLAC','KO','LITE','LLY','LRCX','META','MRVL','MSFT','MSTR','MU','MUU','MVLL','NBIS','NFLX','NOK','NOW','NVDA','NVO','ONDS','ORCL','PANW','PAYP','PENG','PLTR','POPMART','PYPL','QCOM','QNTX','RDDT','RIVN','RKLB','SAMSUNG','SHAZ','SKHY','SKHYNIX','SMCI','SNDK','SNOW','SOFI','SONY','STRC','STXX','TBT','TENCENT','TENCENT','TER','TMF','TSLA','TSM','TTWO','TXN','UBER','USAR','V','VRT','WDC','WEN','WMT','XBI','XIAOMI','ZM'],
+  'PRE-IPO': ['ANTHROPIC','CBRS','MINIMAX','OPENAI','SPCX','SPCX','ZHIPU'],
+  ETF: ['BITO','DRAM','EWJ','EWT','EWY','EWZ','IWM','KORU','KSTR','QQQ','SMH','SNXX','SOXL','SOXS','SPY','SQQQ','TQQQ','TZA','URNM','UVXY','XLE'],
+  COMMODITY: ['BRENTOIL','NATGAS','PAXG','WTI','XAG','XAU','XAUT','XCU','XPD','XPT']
+};
+const BINANCE_TRADIFI_SNAPSHOT = (() => {
+  const seen = {};
+  return Object.entries(BINANCE_TRADIFI_SNAPSHOT_GROUPS).flatMap(([type, bases]) => bases.map(baseAsset => {
+    const ordinal = (seen[baseAsset] || 0) + 1;
+    seen[baseAsset] = ordinal;
+    let symbol = `${baseAsset.replace(/-/g, '')}USDT`;
+    if (baseAsset === 'SPCX' && ordinal === 2) symbol = 'SPACEXUSDT';
+    if (baseAsset === 'TENCENT' && ordinal === 2) symbol = '0700USDT';
+    return { symbol, baseAsset, contractType: 'TRADIFI_PERPETUAL', underlyingType: type, status: 'TRADING', snapshot: true };
+  }));
+})();
+
+async function fetchBinancePublic(path, optional = false) {
+  let lastError = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const response = await fetch(`${BINANCE_API_BASE}${path}`, { cache: 'no-store', signal: AbortSignal.timeout(3500) });
+      if (response.ok) return response;
+      lastError = new Error(`HTTP ${response.status}`);
+      const retryAfter = parseFloat(response.headers.get('Retry-After'));
+      if (Number.isFinite(retryAfter) && retryAfter > 0) {
+        await new Promise(resolve => setTimeout(resolve, Math.min(retryAfter * 1000, 3000)));
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 300 * (attempt + 1)));
+  }
+  if (optional) return null;
+  throw new Error(`Binance ${path} unavailable after retries: ${lastError?.message || 'unknown error'}`);
+}
 
 async function fetchBinance() {
   logLoad('Fetching Binance data...');
 
-  // Fetch mark/funding, contract metadata, volume and any non-default funding
-  // intervals in parallel. fundingInfo only lists symbols with adjustments.
-  const [premiumRes, infoRes, tickerRes, fundingInfoRes] = await Promise.all([
-    fetch(`${BINANCE_API_BASE}/premiumIndex`),
-    fetch(`${BINANCE_API_BASE}/exchangeInfo`).catch(() => null),
-    fetch(`${BINANCE_API_BASE}/ticker/24hr`).catch(() => null),
-    fetch(`${BINANCE_API_BASE}/fundingInfo`).catch(() => null)
+  // Load the authoritative catalog first and retry it independently. A failed
+  // optional market snapshot must not make the entire Binance venue disappear.
+  const infoRes = await fetchBinancePublic('/exchangeInfo', true);
+  const premiumRes = await fetchBinancePublic('/premiumIndex', true);
+  const [tickerRes, fundingInfoRes] = await Promise.all([
+    fetchBinancePublic('/ticker/24hr', true),
+    fetchBinancePublic('/fundingInfo', true)
   ]);
-  if (!premiumRes.ok) throw new Error(`Binance HTTP ${premiumRes.status}`);
-  const premiumData = await premiumRes.json();
+  const liveInfo = infoRes ? await infoRes.json() : null;
+  const info = Array.isArray(liveInfo?.symbols) && liveInfo.symbols.length
+    ? liveInfo
+    : { symbols: BINANCE_TRADIFI_SNAPSHOT };
+  if (!infoRes) logLoad(`Binance: live catalog unavailable · using ${BINANCE_TRADIFI_SNAPSHOT.length}-contract official snapshot`);
+  const premiumData = premiumRes ? await premiumRes.json() : [];
 
   // Build fee map from exchangeInfo
   const feeMap = {};
   const infoMap = {};
-  if (infoRes && infoRes.ok) {
-    try {
-      const info = await infoRes.json();
-      (info.symbols || []).forEach(s => {
-        infoMap[s.symbol] = s;
-        // Binance stores fees as basis points * 10000? Actually raw decimals or integers varies
-        // makerCommission/takerCommission might be absent; use commissionRates if available
-        let mk = VENUES.binance.makerFee, tk = VENUES.binance.takerFee;
-        if (s.makerCommission !== undefined) {
-          mk = parseFloat(s.makerCommission) / 1000000; // e.g. 200 → 0.0002
-          tk = parseFloat(s.takerCommission) / 1000000;
-        }
-        feeMap[s.symbol] = { maker: mk, taker: tk };
-      });
-      logLoad(`Binance: fee data for ${Object.keys(feeMap).length} symbols`);
-    } catch(e) { /* use defaults */ }
-  }
+  (info.symbols || []).forEach(s => {
+    infoMap[s.symbol] = s;
+    let mk = VENUES.binance.makerFee, tk = VENUES.binance.takerFee;
+    if (s.makerCommission !== undefined) {
+      mk = parseFloat(s.makerCommission) / 1000000;
+      tk = parseFloat(s.takerCommission) / 1000000;
+    }
+    feeMap[s.symbol] = { maker: mk, taker: tk };
+  });
+  logLoad(`Binance: fee data for ${Object.keys(feeMap).length} symbols`);
+
+  const premiumMap = {};
+  (Array.isArray(premiumData) ? premiumData : []).forEach(p => { premiumMap[p.symbol] = p; });
 
   // Build ticker map for volume
   const tickerMap = {};
-  if (tickerRes && tickerRes.ok) {
+  if (tickerRes) {
     try {
       const tickers = await tickerRes.json();
       tickers.forEach(t => { tickerMap[t.symbol] = t; });
@@ -2698,7 +2737,7 @@ async function fetchBinance() {
   }
 
   const fundingIntervalMap = {};
-  if (fundingInfoRes && fundingInfoRes.ok) {
+  if (fundingInfoRes) {
     try {
       const rows = await fundingInfoRes.json();
       (Array.isArray(rows) ? rows : []).forEach(row => {
@@ -2710,10 +2749,9 @@ async function fetchBinance() {
 
   const assets = [];
 
-  for (const p of premiumData) {
-    const symbol = p.symbol || '';
-    const meta = infoMap[symbol];
-    if (!meta || meta.status !== 'TRADING') continue;
+  for (const meta of Object.values(infoMap)) {
+    const symbol = meta.symbol || '';
+    if (meta.status !== 'TRADING') continue;
     const venueBase = String(meta.baseAsset || '').toUpperCase();
     const isOfficialRwa = meta.contractType === 'TRADIFI_PERPETUAL' ||
       (meta.contractType === 'PERPETUAL' && ['PAXG', 'XAUT'].includes(venueBase));
@@ -2722,12 +2760,13 @@ async function fetchBinance() {
     const base = normalized.symbol;
     if (EXCLUDED_SYMBOLS.has(base)) continue;
 
-    const markPx = parseFloat(p.markPrice) || 0;
+    const p = premiumMap[symbol] || {};
+    const t = tickerMap[symbol] || {};
+    const markPx = parseFloat(p.markPrice) || parseFloat(t.lastPrice) || 0;
     const indexPx = parseFloat(p.indexPrice) || 0;
     const rawFunding = parseFloat(p.lastFundingRate);
     const funding = isNaN(rawFunding) ? null : rawFunding;
 
-    const t = tickerMap[symbol] || {};
     const volume = parseFloat(t.quoteVolume) || 0;
     const change = parseFloat(t.priceChangePercent) || 0;
 
@@ -2737,12 +2776,20 @@ async function fetchBinance() {
     const cat = normalized.category;
     registerRwaAsset(base, '', cat);
     const fullName = KNOWN_NAMES[base] || base;
-    const isActive = volume > 0 || (funding !== null && funding !== 0);
+    const isActive = meta.status === 'TRADING';
 
     const cf = feeMap[symbol] || {};
     assets.push({
       coin: base, symbol, venueSymbol: symbol, fullName, category: cat, venue: 'binance',
       markPx, indexPx, change, volume, oi, funding, predictedFunding: null, isActive,
+      isListed: true, isPriced: markPx > 0,
+      fieldStatus: {
+        markPx: markPx > 0 ? (premiumMap[symbol] ? 'full' : 'estimated') : 'unavailable',
+        indexPx: indexPx > 0 ? 'full' : 'unavailable',
+        change: tickerMap[symbol] ? 'full' : 'unavailable',
+        volume: tickerMap[symbol] ? 'full' : 'unavailable',
+        funding: funding !== null ? 'full' : 'unavailable'
+      },
       fundingIntervalHours: fundingIntervalMap[symbol] || VENUES.binance.fundingInterval,
       makerFee: cf.maker || VENUES.binance.makerFee,
       takerFee: cf.taker || VENUES.binance.takerFee
@@ -5886,11 +5933,28 @@ function _isRwaSpotBase(base, venue = '') {
 // ── Proxy base URLs (Vercel proxy in prod, direct in dev) ──
 const _isDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 const GATE_SPOT_BASE   = _isDev ? 'https://api.gateio.ws/api/v4/spot'   : '/api/gate-spot';  // Gate CORS blocked — must proxy
-// Binance, Kraken, Bitget, Bybit all support CORS — call directly to save Vercel edge requests
+// Binance's official market-data-only endpoint is preferred for public spot data.
 const KRAKEN_SPOT_BASE = 'https://api.kraken.com/0/public';
-const BINANCE_SPOT_BASE= 'https://api.binance.com/api/v3';
+const BINANCE_SPOT_BASE= 'https://data-api.binance.vision/api/v3';
 const BITGET_SPOT_BASE = 'https://api.bitget.com';
 const BINANCE_BSTOCK_SPECIAL_UNDERLYINGS = new Set(['QNT']); // Quantinuum; QNT perp ticker collides with Quant crypto
+const BINANCE_BSTOCK_SNAPSHOT = ['AAOIB','AAPLB','ALABB','AMATB','AMDB','AMZNB','ARMB','ASMLB','ASTSB','AVGOB','AXTIB','BABAB','BEB','BMNRB','CBRSB','COHRB','COINB','CRCLB','CRDOB','CRWVB','DELLB','DRAMB','EWYB','FLNCB','GLWB','GOOGLB','GSB','HOODB','IBMB','INTCB','INTWB','IRENB','KORUB','LITEB','METAB','MRVLB','MSFTB','MSTRB','MUB','MUUB','MVLLB','NBISB','NFLXB','NOKB','NVDAB','ORCLB','PLTRB','PYPLB','QCOMB','QNTB','QQQB','RKLBB','SKHYB','SMCIB','SMHB','SNDKB','SNXXB','SOXLB','SOXSB','SPCXB','SPYB','TQQQB','TSLAB','TSMB','USARB','WDCB'];
+
+async function fetchBinanceSpotPublic(path, optional = false) {
+  let lastError = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const response = await fetch(`${BINANCE_SPOT_BASE}${path}`, { cache: 'no-store', signal: AbortSignal.timeout(3500) });
+      if (response.ok) return response;
+      lastError = new Error(`HTTP ${response.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 300 * (attempt + 1)));
+  }
+  if (optional) return null;
+  throw new Error(`Binance spot ${path} unavailable after retries: ${lastError?.message || 'unknown error'}`);
+}
 
 // ── Gate.io Spot Fetch ──
 async function fetchSpotRwaGate() {
@@ -6240,17 +6304,29 @@ async function fetchSpotRwaBitget() {
 async function fetchSpotRwaBinance() {
   // exchangeInfo supplies authoritative baseAsset/quoteAsset fields. Parsing a
   // concatenated symbol by suffix misread RENBUSD as base RENB + quote USD.
-  const [tickerRes, infoRes, tradfiInfoRes] = await Promise.all([
-    fetch(`${BINANCE_SPOT_BASE}/ticker/24hr`),
-    fetch(`${BINANCE_SPOT_BASE}/exchangeInfo`),
-    fetch(`${BINANCE_API_BASE}/exchangeInfo`).catch(() => null)
+  const infoRes = await fetchBinanceSpotPublic('/exchangeInfo', true);
+  const [tickerRes, tradfiInfoRes] = await Promise.all([
+    fetchBinanceSpotPublic('/ticker/24hr', true),
+    fetchBinancePublic('/exchangeInfo', true)
   ]);
-  if (!tickerRes.ok || !infoRes.ok) throw new Error(`HTTP ${!tickerRes.ok ? tickerRes.status : infoRes.status}`);
-  const [tickers, infoJson] = await Promise.all([tickerRes.json(), infoRes.json()]);
+  const liveInfoJson = infoRes ? await infoRes.json() : null;
+  const infoJson = Array.isArray(liveInfoJson?.symbols) && liveInfoJson.symbols.length
+    ? liveInfoJson
+    : { symbols: [...BINANCE_BSTOCK_SNAPSHOT, 'PAXG', 'XAUT'].map(baseAsset => ({ symbol:`${baseAsset}USDT`, baseAsset, quoteAsset:'USDT', status:'TRADING', snapshot:true })) };
+  const tickers = tickerRes ? await tickerRes.json() : [];
   const symbolInfo = {};
   (infoJson.symbols || []).forEach(s => { symbolInfo[String(s.symbol || '').toUpperCase()] = s; });
+  const tickerMap = {};
+  (Array.isArray(tickers) ? tickers : []).forEach(t => { tickerMap[String(t.symbol || '').toUpperCase()] = t; });
   const officialTradFi = {};
-  if (tradfiInfoRes?.ok) {
+  BINANCE_TRADIFI_SNAPSHOT.forEach(meta => { officialTradFi[String(meta.baseAsset || '').toUpperCase()] = meta; });
+  // Reuse the already-validated Binance perp catalog if available so a second
+  // transient futures metadata failure cannot remove every bStock.
+  (lastVenueData.binance || []).forEach(asset => {
+    const underlying = String(asset.coin || '').toUpperCase();
+    if (underlying) officialTradFi[underlying] = { underlyingType: asset.category || 'EQUITY' };
+  });
+  if (tradfiInfoRes) {
     try {
       const tradfiInfo = await tradfiInfoRes.json();
       (tradfiInfo.symbols || []).forEach(s => {
@@ -6261,10 +6337,9 @@ async function fetchSpotRwaBinance() {
     } catch { /* retain the explicit collision-safe special set */ }
   }
   const assets = [];
-  for (const t of tickers) {
-    const symbol = (t.symbol || '').toUpperCase();
-    const info = symbolInfo[symbol];
-    if (!info || info.status !== 'TRADING' || !['USDT', 'USD'].includes(String(info.quoteAsset || '').toUpperCase())) continue;
+  for (const info of Object.values(symbolInfo)) {
+    const symbol = String(info.symbol || '').toUpperCase();
+    if (info.status !== 'TRADING' || !['USDT', 'USD'].includes(String(info.quoteAsset || '').toUpperCase())) continue;
     const base = String(info.baseAsset || '').toUpperCase();
     const bStockUnderlying = base.length >= 3 && base.endsWith('B') ? base.slice(0, -1) : '';
     const bStockMeta = bStockUnderlying ? officialTradFi[bStockUnderlying] : null;
@@ -6274,6 +6349,7 @@ async function fetchSpotRwaBinance() {
       const bStockCategory = categoryFromOfficial(bStockMeta?.underlyingType || 'EQUITY', bStockUnderlying);
       registerSpotAssetMeta(base, bStockUnderlying, 'Binance bStocks', bStockCategory, 'binance');
     }
+    const t = tickerMap[symbol] || {};
     const last = parseFloat(t.lastPrice) || 0;
     assets.push({
       coin: base, pair: symbol, underlyingSymbol: isBStock ? bStockUnderlying : undefined,
