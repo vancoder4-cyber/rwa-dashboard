@@ -1,9 +1,9 @@
+import { getJsonWithRetry } from './_lib/http.mjs';
+
 const baseUrl = String(process.env.DASHBOARD_URL || 'https://avenir-rwa-analyst.vercel.app').replace(/\/$/, '');
 
 async function getJson(path) {
-  const response = await fetch(`${baseUrl}${path}`, { signal: AbortSignal.timeout(30000) });
-  if (!response.ok) throw new Error(`${path} returned HTTP ${response.status}`);
-  return response.json();
+  return (await getJsonWithRetry(`${baseUrl}${path}`)).payload;
 }
 
 const reference = await getJson('/api/reference-prices?symbols=AAPL,XAU,SKHYNIX,MINIMAX');

@@ -1,0 +1,36 @@
+name: RWA Data Health
+
+on:
+  schedule:
+    - cron: '20 1 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rwa-data-health
+  cancel-in-progress: false
+
+jobs:
+  production-health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Contract tests
+        run: npm test
+
+      - name: Inline JavaScript syntax
+        run: npm run check:inline
+
+      - name: Production data contracts
+        run: npm run audit:data
+
+      - name: Production health endpoint
+        run: npm run audit:health

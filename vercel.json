@@ -1,4 +1,7 @@
 {
+  "crons": [
+    { "path": "/api/health", "schedule": "0 1 * * *" }
+  ],
   "rewrites": [
     { "source": "/api/gate/:path*", "destination": "https://api.gateio.ws/api/v4/futures/usdt/:path*" },
     { "source": "/api/gate-spot/:path*", "destination": "https://api.gateio.ws/api/v4/spot/:path*" },

@@ -232,3 +232,13 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 - 长鑫科技上市状态：[上交所上市交易公告（688825，2026-07-27）](https://www.sse.com.cn/disclosure/announcement/listing/ipo/c/c_20260724_10826610.shtml)。
 - Unitree 当前阶段：[证监会 IPO 注册批复（2026-07-01）](https://www.csrc.gov.cn/csrc/c105906/c7642867/content.shtml)；注册不等于已经开始交易。
 - GigaDevice 双重上市：[GigaDevice Successfully Lists in Hong Kong](https://www.gigadevice.com/about/news-and-event/news/gigadevice-listed-on-hkex)。
+
+## 16. 健壮性与定期 Review
+
+生产运维、阈值、定时机制与发布门禁统一记录在 `OPERATIONS.md`：
+
+- Vercel 每日健康探针检查页面 shell、Reference Price 和四个合约场所的 Funding History sentinel。
+- GitHub Actions 每日执行静态语法、数据契约和生产健康检查。
+- Codex 每日生成只读健康摘要，每周重新核对完整场所 catalog、身份冲突、上市生命周期、分类标签和历史覆盖。
+- 自动检查不得直接修改 allowlist、分类、基线或生产；发现漂移时必须给出官方证据并等待人工确认。
+- 任何已知 crypto 同名资产泄漏、币种/单位错误或大面积 Reference/Funding 错误均按 P0 处理。
