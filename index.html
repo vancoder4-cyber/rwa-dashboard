@@ -2296,11 +2296,22 @@ async function fetchTradeXyz() {
   const API_URL = 'https://api.hyperliquid.xyz/info';
   logLoad('Fetching trade.xyz data...');
 
+  const useServerMarket = location.hostname !== 'localhost' && location.hostname !== '127.0.0.1';
+  let serverMarket = null;
+  if (useServerMarket) {
+    try {
+      const response = await fetch('/api/hyperliquid-market');
+      if (response.ok) serverMarket = await response.json();
+    } catch { /* retain direct fallback */ }
+  }
+
   // Hyperliquid publishes category metadata for builder-deployed perps. Use it
   // as the authoritative identity layer so a security such as xyz:QNT is not
   // confused with the unrelated Quant crypto token. Keep the local sets only
   // as a fallback for the few new markets not yet present in this endpoint.
-  const categoryPromise = fetch(API_URL, {
+  const categoryPromise = serverMarket
+    ? Promise.resolve(serverMarket.categories || [])
+    : fetch(API_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ type: 'perpCategories' })
@@ -2308,7 +2319,13 @@ async function fetchTradeXyz() {
 
   // Try dex param first, then fallback to all perps
   let meta, ctxs, source;
-  for (const dexName of ['xyz', 'XYZ', 'tradexyz']) {
+  if (Array.isArray(serverMarket?.data) && serverMarket.data.length === 2 && Array.isArray(serverMarket.data[1])) {
+    meta = serverMarket.data[0];
+    ctxs = serverMarket.data[1];
+    source = 'server_proxy';
+    logLoad(`trade.xyz: ${(meta?.universe || meta || []).length} assets via cached server snapshot`);
+  }
+  for (const dexName of meta ? [] : ['xyz', 'XYZ', 'tradexyz']) {
     try {
       const res = await fetch(API_URL, {
         method: 'POST',
