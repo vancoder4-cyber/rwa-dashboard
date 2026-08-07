@@ -195,7 +195,28 @@ Bitget 当前同时返回 `isRwa=YES` 和 `symbolType=crypto`，但该产品对�
 
 2026-08-08 抽查发现 `MUU` 的 Nasdaq 官方身份是 `Direxion Daily MU Bull 2X ETF`，因此全局类别修正为 ETF；这类纠错必须回写主分类规则，不能只在传统成交量板块临时隐藏。
 
-## 14. 主要核验来源
+## 14. Reference Price、历史覆盖与容错
+
+Reference Price 必须经过服务端归一化，前端不得直接并发抓取每个 Yahoo chart，也不得通过 URL query 传第三方 API key。
+
+- 第一层使用 Yahoo Finance 对应的传统 ticker，并保留 `asOf`、交易时段、交易所、原始币种和延迟秒数。
+- KRW、JPY、HKD、TWD、CNY、CAD、EUR、GBP/GBp 等非美元报价先用同源 FX ticker 转为 USD；换汇后的值标为 Estimated，不能标为 Full。
+- Yahoo 不可用时，可使用已通过 RWA 身份门控的跨场所 Perp Index median；至少两个现货场所一致时也可使用 Spot Median。两者都是 Estimated。
+- 没有正数参考价时显示 Unavailable；禁止把缺失价格写成 `0`。
+- 参考价请求必须覆盖所有 spot/perp 可联动 underlying，通过服务端分块和缓存控流，不能再使用任意 Top N 截断。
+
+Funding History 必须按用户选择的真实时间窗裁剪，接口为了满足最小返回条数而多取的数据不能混入 24h/3d/7d/30d 图表。
+
+- 时间戳统一成毫秒、升序并按 timestamp 去重；真实的 `0` funding 必须保留。
+- `expected = floor(windowHours / fundingIntervalHours)`；观测数达到 expected 的 80% 为 Full，至少 2 条为 Partial，否则 Unavailable。
+- Sparkline、有效费率和 modal chart 必须使用同一份裁剪后的 rows 与 coverage，避免图、分母和状态各算一套。
+- Funding 历史统一通过服务端批量接口获取，带超时、有限重试、并发上限和 CDN stale-while-revalidate 缓存。
+
+Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允许继续展示该 snapshot，但必须显式标为 `Stale cache` 并保留上次成功时间；没有任何成功快照时标为 Unavailable。上游字段缺失必须保持 `null`，禁止用 `parseFloat(value) || 0` 把缺失伪装成有效零值。
+
+架构约定：超时、重试、并发与缓存策略集中在 `api/_lib/upstream.js`；传统 ticker 与 FX 映射集中在 `api/_lib/reference-map.js`；新服务端数据源优先复用这两个模块，并为 normalization 增加 Node contract test。
+
+## 15. 主要核验来源
 
 - Hyperliquid/trade.xyz market identity：`https://api.hyperliquid.xyz/info` 的 `perpCategories` 与 `metaAndAssetCtxs`。
 - Bitget perpetual/Reality catalogs：`/api/v3/market/instruments`。

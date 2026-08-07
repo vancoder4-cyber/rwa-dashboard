@@ -808,6 +808,12 @@ td:first-child { text-align: left; }
 .market-badge.active, .market-badge.priced { color:#248A3D; background:rgba(52,199,89,.08); border-color:rgba(52,199,89,.15); }
 .market-badge.inactive, .market-badge.unpriced { color:#9A6700; background:rgba(255,184,0,.08); border-color:rgba(255,184,0,.17); }
 .field-value { display:flex; flex-direction:column; align-items:flex-end; }
+.history-value { display:flex; align-items:center; justify-content:flex-end; gap:6px; min-width:178px; }
+.history-value .data-status { margin-top:0; flex:0 0 auto; }
+.data-freshness { display:inline-flex; align-items:center; gap:5px; margin-left:8px; padding:2px 7px; border-radius:999px; font:600 10px/1.3 Inter,sans-serif; }
+.data-freshness.live { color:var(--positive); background:var(--positive-dim); }
+.data-freshness.stale { color:var(--warning); background:var(--warning-dim); }
+.data-freshness.unavailable { color:var(--foreground-dim); background:rgba(120,120,128,.08); }
 .field-status-legend { display:inline-flex; align-items:center; gap:5px; flex-wrap:wrap; }
 
 .asset-tag {
@@ -2513,6 +2519,9 @@ let refreshTimer = null;
 let spotRefreshTimer = null;
 let refreshInFlight = false;
 const lastVenueData = {};
+const venueHealth = {};
+const lastSpotVenueData = {};
+const spotVenueHealth = {};
 let globalSearchTerm = '';
 let alertsData = [];
 let tradfiActivityCache = null;
@@ -2544,7 +2553,8 @@ function fmtPrice(v) {
   return v.toFixed(4);
 }
 function fmtVolume(v) {
-  if (!v) return '—';
+  if (v === null || v === undefined || !Number.isFinite(Number(v))) return '—';
+  v = Number(v);
   if (v >= 1e9) return '$' + (v/1e9).toFixed(2) + 'B';
   if (v >= 1e6) return '$' + (v/1e6).toFixed(1) + 'M';
   if (v >= 1e3) return '$' + (v/1e3).toFixed(0) + 'K';
@@ -2567,6 +2577,20 @@ function dataStatusBadge(status, title = '') {
 
 function fieldValueWithStatus(valueHtml, status, title = '') {
   return `<span class="field-value">${valueHtml}${dataStatusBadge(status, title)}</span>`;
+}
+
+function numberOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function firstNumber(...values) {
+  for (const value of values) {
+    const parsed = numberOrNull(value);
+    if (parsed !== null) return parsed;
+  }
+  return null;
 }
 
 function normalizePerpDataState(asset) {
@@ -2594,6 +2618,10 @@ function normalizeSpotDataState(asset) {
   a.isActive = a.isActive !== undefined ? Boolean(a.isActive) : Boolean(a.isPriced || Number(a.vol) > 0);
   a.fieldStatus = a.fieldStatus || {};
   if (!a.fieldStatus.last) a.fieldStatus.last = a.isPriced ? 'full' : 'unavailable';
+  if (!a.fieldStatus.change) a.fieldStatus.change = numberOrNull(a.chg) !== null ? 'full' : 'unavailable';
+  if (!a.fieldStatus.volume) a.fieldStatus.volume = numberOrNull(a.vol) !== null ? 'full' : 'unavailable';
+  if (!a.fieldStatus.highLow) a.fieldStatus.highLow = Number(a.hi) > 0 && Number(a.lo) > 0 ? 'full' : 'unavailable';
+  if (!a.fieldStatus.bidAsk) a.fieldStatus.bidAsk = Number(a.bid) > 0 && Number(a.ask) > 0 ? 'full' : 'unavailable';
   if (!a.fieldStatus.depth2) a.fieldStatus.depth2 = a.depth2 !== null && a.depth2 !== undefined ? 'partial' : 'unavailable';
   return a;
 }
@@ -2776,25 +2804,32 @@ async function fetchTradeXyz() {
     registerRwaAsset(coin, officialName, cat);
     if (officialName) KNOWN_NAMES[coin] = escapeHtml(officialName);
 
-    const markPx = parseFloat(c.markPx) || 0;
-    const oraclePx = parseFloat(c.oraclePx) || 0;
-    const prevDayPx = parseFloat(c.prevDayPx) || 0;
-    const volume = parseFloat(c.dayNtlVlm) || 0;
-    const oiCoins = parseFloat(c.openInterest) || 0;
-    const oiUsd = oiCoins * markPx; // openInterest is in base asset units, convert to USD notional
-    const rawFunding = parseFloat(c.funding);
-    const funding = isNaN(rawFunding) ? null : rawFunding;
+    const markPx = numberOrNull(c.markPx);
+    const oraclePx = numberOrNull(c.oraclePx);
+    const prevDayPx = numberOrNull(c.prevDayPx);
+    const volume = numberOrNull(c.dayNtlVlm);
+    const oiCoins = numberOrNull(c.openInterest);
+    const oiUsd = oiCoins !== null && markPx !== null ? oiCoins * markPx : null;
+    const funding = numberOrNull(c.funding);
     // Hyperliquid's `premium` is the current premium index, not a forecast of
     // the next funding settlement. Do not present it as predicted funding.
     const predictedFunding = null;
-    const change = prevDayPx ? ((markPx - prevDayPx) / prevDayPx) * 100 : 0;
-    const isActive = volume > 0 || oiUsd > 0 || (funding !== null && funding !== 0);
+    const change = prevDayPx > 0 && markPx !== null ? ((markPx - prevDayPx) / prevDayPx) * 100 : null;
+    const isActive = Number(volume) > 0 || Number(oiUsd) > 0 || (funding !== null && funding !== 0);
 
     const fullName = officialName || KNOWN_NAMES[coin] || coin;
 
     assets.push({
       coin, symbol: rawName, venueSymbol: rawName, fullName, category: cat, venue: 'tradexyz', marketType: officialType,
       markPx, indexPx: oraclePx, change, volume, oi: oiUsd, funding, predictedFunding, isActive,
+      fieldStatus: {
+        markPx: markPx !== null ? 'full' : 'unavailable',
+        indexPx: oraclePx !== null ? 'full' : 'unavailable',
+        change: change !== null ? 'full' : 'unavailable',
+        volume: volume !== null ? 'full' : 'unavailable',
+        oi: oiUsd !== null ? 'full' : 'unavailable',
+        funding: funding !== null ? 'full' : 'unavailable',
+      },
       fundingIntervalHours: 1,
       makerFee: VENUES.tradexyz.makerFee, takerFee: VENUES.tradexyz.takerFee
     });
@@ -2868,12 +2903,15 @@ async function fetchBitget() {
     if (EXCLUDED_SYMBOLS.has(base)) continue;
     const t = tickerMap[symbol] || {};
 
-    const markPx = parseFloat(t.markPrice) || parseFloat(t.lastPr) || 0;
-    const indexPx = parseFloat(t.indexPrice) || markPx;
-    const change24h = parseFloat(t.change24h) || 0;
-    const volume = parseFloat(t.quoteVolume) || parseFloat(t.usdtVolume) || 0;
-    const holdingQty = parseFloat(t.holdingAmount) || 0;
-    const oi = holdingQty * (markPx || 1);
+    const officialMark = numberOrNull(t.markPrice);
+    const lastPrice = numberOrNull(t.lastPr);
+    const markPx = officialMark ?? lastPrice;
+    const officialIndex = numberOrNull(t.indexPrice);
+    const indexPx = officialIndex ?? markPx;
+    const change24h = numberOrNull(t.change24h);
+    const volume = firstNumber(t.quoteVolume, t.usdtVolume);
+    const holdingQty = numberOrNull(t.holdingAmount);
+    const oi = holdingQty !== null && markPx !== null ? holdingQty * markPx : null;
 
     // Parse funding: preserve null for missing data and explicit zero when returned.
     let funding = null;
@@ -2904,6 +2942,14 @@ async function fetchBitget() {
       // prediction. Keep the prediction field unavailable unless an official
       // forecast endpoint is added.
       predictedFunding: null, isActive: false,
+      fieldStatus: {
+        markPx: officialMark !== null ? 'full' : lastPrice !== null ? 'estimated' : 'unavailable',
+        indexPx: officialIndex !== null ? 'full' : markPx !== null ? 'estimated' : 'unavailable',
+        change: change24h !== null ? 'full' : 'unavailable',
+        volume: volume !== null ? 'full' : 'unavailable',
+        oi: oi !== null ? 'full' : 'unavailable',
+        funding: funding !== null ? 'full' : 'unavailable',
+      },
       fundingIntervalHours: contractInterval > 0 ? contractInterval : VENUES.bitget.fundingInterval,
       makerFee, takerFee
     });
@@ -2986,14 +3032,17 @@ async function fetchGate() {
 
     if (EXCLUDED_SYMBOLS.has(base)) continue;
 
-    const markPx = parseFloat(t.mark_price) || parseFloat(meta.mark_price) || 0;
-    const indexPx = parseFloat(t.index_price) || parseFloat(meta.index_price) || 0;
-    const lastPx = parseFloat(t.last) || parseFloat(meta.last_price) || 0;
-    const change = parseFloat(t.change_percentage) || 0;
-    const volume = parseFloat(t.volume_24h_quote) || parseFloat(t.volume_24h_usd) || 0;
-    const oi = parseFloat(t.total_size) || parseFloat(meta.position_size) || 0;
-    const quantoMult = parseFloat(meta.quanto_multiplier) || 1;
-    const oiUsd = oi * quantoMult * markPx;
+    const tickerMark = numberOrNull(t.mark_price);
+    const contractMark = numberOrNull(meta.mark_price);
+    const markPx = tickerMark ?? contractMark;
+    const indexPx = firstNumber(t.index_price, meta.index_price);
+    const lastPx = firstNumber(t.last, meta.last_price);
+    const change = numberOrNull(t.change_percentage);
+    const volume = firstNumber(t.volume_24h_quote, t.volume_24h_usd);
+    const oi = firstNumber(t.total_size, meta.position_size);
+    const quantoMult = numberOrNull(meta.quanto_multiplier) ?? 1;
+    const effectiveMark = markPx ?? lastPx;
+    const oiUsd = oi !== null && effectiveMark !== null ? oi * quantoMult * effectiveMark : null;
 
     const rawFunding = parseFloat(t.funding_rate ?? meta.funding_rate);
     const funding = isNaN(rawFunding) ? null : rawFunding;
@@ -3008,11 +3057,16 @@ async function fetchGate() {
     const cf = feeMap[contract] || {};
     assets.push({
       coin: base, symbol: contract, venueSymbol: contract, fullName, category: cat, venue: 'gate',
-      markPx: markPx || lastPx, indexPx, change, volume, oi: oiUsd, funding, predictedFunding, isActive,
-      isListed: true, isPriced: (markPx || lastPx) > 0,
+      markPx: effectiveMark, indexPx, change, volume, oi: oiUsd, funding, predictedFunding, isActive,
+      isListed: true, isPriced: Number(effectiveMark) > 0,
       fieldStatus: {
+        markPx: tickerMark !== null ? 'full' : contractMark !== null || lastPx !== null ? 'estimated' : 'unavailable',
+        indexPx: indexPx !== null ? 'full' : 'unavailable',
         change: tickerMap[contract] ? 'full' : 'unavailable',
-        volume: tickerMap[contract] ? 'full' : 'unavailable'
+        volume: volume !== null ? 'full' : 'unavailable',
+        oi: oiUsd !== null ? 'full' : 'unavailable',
+        funding: funding !== null ? 'full' : 'unavailable',
+        predictedFunding: predictedFunding !== null ? 'full' : 'unavailable',
       },
       contractMultiplier: quantoMult,
       fundingIntervalHours: cf.fundingIntervalHours || VENUES.gate.fundingInterval,
@@ -3205,16 +3259,18 @@ async function fetchBinance() {
 
     const p = premiumMap[symbol] || {};
     const t = tickerMap[symbol] || {};
-    const markPx = parseFloat(p.markPrice) || parseFloat(t.lastPrice) || 0;
-    const indexPx = parseFloat(p.indexPrice) || 0;
-    const rawFunding = parseFloat(p.lastFundingRate);
-    const funding = isNaN(rawFunding) ? null : rawFunding;
+    const premiumMark = numberOrNull(p.markPrice);
+    const tickerLast = numberOrNull(t.lastPrice);
+    const markPx = premiumMark ?? tickerLast;
+    const indexPx = numberOrNull(p.indexPrice);
+    const funding = numberOrNull(p.lastFundingRate);
 
-    const volume = parseFloat(t.quoteVolume) || 0;
-    const change = parseFloat(t.priceChangePercent) || 0;
+    const volume = numberOrNull(t.quoteVolume);
+    const change = numberOrNull(t.priceChangePercent);
 
-    // OI needs separate call per symbol — set to 0 until actual fetch
-    const oi = 0;
+    // OI needs a separate request. Null means unavailable; it must never be
+    // rendered as a real zero before the enrichment succeeds.
+    const oi = null;
 
     const cat = normalized.category;
     registerRwaAsset(base, '', cat);
@@ -3227,10 +3283,11 @@ async function fetchBinance() {
       markPx, indexPx, change, volume, oi, funding, predictedFunding: null, isActive,
       isListed: true, isPriced: markPx > 0,
       fieldStatus: {
-        markPx: markPx > 0 ? (premiumMap[symbol] ? 'full' : 'estimated') : 'unavailable',
+        markPx: markPx > 0 ? (premiumMark !== null ? 'full' : 'estimated') : 'unavailable',
         indexPx: indexPx > 0 ? 'full' : 'unavailable',
-        change: tickerMap[symbol] ? 'full' : 'unavailable',
-        volume: tickerMap[symbol] ? 'full' : 'unavailable',
+        change: change !== null ? 'full' : 'unavailable',
+        volume: volume !== null ? 'full' : 'unavailable',
+        oi: 'unavailable',
         funding: funding !== null ? 'full' : 'unavailable'
       },
       fundingIntervalHours: fundingIntervalMap[symbol] || VENUES.binance.fundingInterval,
@@ -3248,7 +3305,8 @@ async function fetchBinance() {
         const res = await fetch(`${BINANCE_API_BASE}/openInterest?symbol=${a.symbol}`);
         if (!res.ok) return;
         const data = await res.json();
-        const oiQty = parseFloat(data.openInterest) || 0;
+        const oiQty = numberOrNull(data.openInterest);
+        if (oiQty === null || !(a.markPx > 0)) return;
         a.oi = oiQty * a.markPx;
         a.fieldStatus = a.fieldStatus || {};
         a.fieldStatus.oi = 'full';
@@ -3660,11 +3718,48 @@ function setSparkRange(venue, hours, btnEl) {
   renderVenueTable(venue);
 }
 
+function fundingHistoryTime(row) {
+  const raw = numberOrNull(row?.fundingTime ?? row?.settleTime ?? row?.time ?? row?.t);
+  if (raw === null || raw <= 0) return null;
+  return raw < 1e12 ? raw * 1000 : raw;
+}
+
+function normalizeFundingHistoryWindow(raw, hours, intervalHours = 8) {
+  const startTime = Date.now() - hours * 3600 * 1000;
+  const rows = (Array.isArray(raw) ? raw : []).map(row => {
+    const fundingTime = fundingHistoryTime(row);
+    const fundingRate = numberOrNull(row?.fundingRate ?? row?.fundRate ?? row?.r);
+    return fundingTime !== null && fundingRate !== null ? { fundingTime, fundingRate } : null;
+  }).filter(Boolean)
+    .filter(row => row.fundingTime >= startTime - 15 * 60 * 1000)
+    .sort((a, b) => a.fundingTime - b.fundingTime);
+
+  const deduped = [];
+  rows.forEach(row => {
+    const previous = deduped[deduped.length - 1];
+    if (previous?.fundingTime === row.fundingTime) previous.fundingRate = row.fundingRate;
+    else deduped.push(row);
+  });
+  const expected = Math.max(1, Math.floor(hours / Math.max(intervalHours, 1)));
+  const observed = deduped.length;
+  const status = observed >= Math.max(2, Math.ceil(expected * 0.8))
+    ? 'full'
+    : observed >= 2 ? 'partial' : 'unavailable';
+  return {
+    rows: deduped,
+    coverage: {
+      status, expected, observed,
+      firstAt: deduped[0]?.fundingTime || null,
+      lastAt: deduped[deduped.length - 1]?.fundingTime || null,
+    },
+  };
+}
+
 function loadSparklinesBatched(venue, assets) {
   const generation = (sparkLoadGeneration[venue] || 0) + 1;
   sparkLoadGeneration[venue] = generation;
-  if (venue === 'tradexyz' && !_isDev) {
-    loadTradeXyzSparklinesBulk(assets, generation).catch(error => console.warn('trade.xyz funding history bulk error:', error));
+  if (!_isDev) {
+    loadFundingHistoryBulk(venue, assets, generation).catch(error => console.warn(`${venue} funding history bulk error:`, error));
     return;
   }
   const concurrency = 5;
@@ -3675,28 +3770,66 @@ function loadSparklinesBatched(venue, assets) {
   batchFetch(tasks, concurrency).catch(error => console.warn(`${venue} funding history batch error:`, error));
 }
 
-async function loadTradeXyzSparklinesBulk(assets, generation) {
-  const hours = sparkHours.tradexyz;
+async function loadFundingHistoryBulk(venue, assets, generation) {
+  const hours = sparkHours[venue];
   const chunks = [];
   for (let i = 0; i < assets.length; i += 40) chunks.push(assets.slice(i, i + 40));
   const tasks = chunks.map(chunk => async () => {
-    if (sparkLoadGeneration.tradexyz !== generation) return;
+    if (sparkLoadGeneration[venue] !== generation) return;
     const symbols = chunk.map(asset => asset.symbol || asset.coin).join(',');
-    const response = await fetch(`/api/hyperliquid-bulk?hours=${hours}&symbols=${encodeURIComponent(symbols)}`);
+    const response = await fetch(`/api/funding-history?venue=${venue}&hours=${hours}&symbols=${encodeURIComponent(symbols)}`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const histories = await response.json();
-    if (sparkLoadGeneration.tradexyz !== generation) return;
+    const payload = await response.json();
+    if (sparkLoadGeneration[venue] !== generation) return;
     for (const asset of chunk) {
       const symbol = asset.symbol || asset.coin;
-      fundingCache[`tradexyz:${asset.coin}`] = {
+      const normalized = normalizeFundingHistoryWindow(
+        payload?.results?.[symbol]?.rows || [],
         hours,
-        data: Array.isArray(histories[symbol]) ? histories[symbol] : [],
-        fetchedAt: Date.now()
+        fundingIntervalHours(venue, asset),
+      );
+      fundingCache[`${venue}:${asset.coin}`] = {
+        hours,
+        data: normalized.rows,
+        coverage: { ...normalized.coverage, reason: payload?.results?.[symbol]?.error || payload?.results?.[symbol]?.reason || null },
+        fetchedAt: Date.now(),
       };
-      await loadSparkline('tradexyz', asset);
+      await loadSparkline(venue, asset);
     }
   });
   await batchFetch(tasks, 2);
+  if (sparkLoadGeneration[venue] !== generation) return;
+
+  // A successful-but-empty response can occur during venue rate limiting.
+  // Retry only the missing subset under a distinct cache key; never refetch
+  // the full table or overwrite already valid rows.
+  const missing = assets.filter(asset => {
+    const cached = fundingCache[`${venue}:${asset.coin}`];
+    return !cached || !Array.isArray(cached.data) || cached.data.length < 2;
+  });
+  for (let i = 0; i < missing.length; i += 20) {
+    if (sparkLoadGeneration[venue] !== generation) return;
+    const chunk = missing.slice(i, i + 20);
+    const symbols = chunk.map(asset => asset.symbol || asset.coin).join(',');
+    try {
+      const response = await fetch(`/api/funding-history?venue=${venue}&hours=${hours}&retry=1&symbols=${encodeURIComponent(symbols)}`);
+      if (!response.ok) continue;
+      const payload = await response.json();
+      for (const asset of chunk) {
+        const symbol = asset.symbol || asset.coin;
+        const normalized = normalizeFundingHistoryWindow(payload?.results?.[symbol]?.rows || [], hours, fundingIntervalHours(venue, asset));
+        fundingCache[`${venue}:${asset.coin}`] = {
+          hours,
+          data: normalized.rows,
+          coverage: { ...normalized.coverage, reason: payload?.results?.[symbol]?.error || payload?.results?.[symbol]?.reason || null },
+          fetchedAt: Date.now(),
+        };
+        await loadSparkline(venue, asset);
+      }
+    } catch (error) {
+      console.warn(`${venue} funding history retry error:`, error);
+    }
+  }
 }
 
 async function loadSparkline(venue, asset) {
@@ -3727,31 +3860,29 @@ async function loadSparkline(venue, asset) {
       } else {
         raw = [];
       }
-      data = { hours, data: raw, fetchedAt: Date.now() };
+      const normalized = normalizeFundingHistoryWindow(raw, hours, fundingIntervalHours(venue, asset));
+      data = { hours, data: normalized.rows, coverage: normalized.coverage, fetchedAt: Date.now() };
       fundingCache[cacheKey] = data;
     } catch (e) {
-      cell.innerHTML = '<span style="color:var(--text-muted);font-size:11px">N/A</span>';
+      cell.innerHTML = `<span class="history-value"><span style="color:var(--text-muted);font-size:11px">N/A</span>${dataStatusBadge('unavailable', e.message)}</span>`;
       return;
     }
   }
 
   if (!data.data || data.data.length < 2) {
-    cell.innerHTML = '<span style="color:var(--text-muted);font-size:11px">N/A</span>';
+    const coverage = data.coverage || normalizeFundingHistoryWindow(data.data || [], hours, fundingIntervalHours(venue, asset)).coverage;
+    cell.innerHTML = `<span class="history-value"><span style="color:var(--text-muted);font-size:11px">N/A</span>${dataStatusBadge('unavailable', `${coverage.observed}/${coverage.expected} expected observations`)}</span>`;
     return;
   }
 
-  const rates = data.data.map(d => parseFloat(d.fundingRate || d.fundRate || 0)).filter(Number.isFinite);
+  const coverage = data.coverage || normalizeFundingHistoryWindow(data.data, hours, fundingIntervalHours(venue, asset)).coverage;
+  const rates = data.data.map(d => numberOrNull(d.fundingRate ?? d.fundRate)).filter(rate => rate !== null);
   if (rates.length < 2) {
-    cell.innerHTML = '<span style="color:var(--text-muted);font-size:11px">N/A</span>';
+    cell.innerHTML = `<span class="history-value"><span style="color:var(--text-muted);font-size:11px">N/A</span>${dataStatusBadge('unavailable', 'No valid funding observations')}</span>`;
     return;
   }
-  // Reverse if newest-first
-  if (data.data.length >= 2) {
-    const t0 = parseInt(data.data[0].fundingTime || data.data[0].settleTime || data.data[0].time || 0);
-    const t1 = parseInt(data.data[1].fundingTime || data.data[1].settleTime || data.data[1].time || 0);
-    if (t0 > t1) rates.reverse();
-  }
-  cell.innerHTML = renderSparkSVG(rates, asset.predictedFunding);
+    const coverageTitle = `${coverage.observed}/${coverage.expected} expected observations in ${hours}h window${coverage.reason ? ` · ${coverage.reason}` : ''}`;
+  cell.innerHTML = `<span class="history-value">${renderSparkSVG(rates, asset.predictedFunding)}${dataStatusBadge(coverage.status, coverageTitle)}</span>`;
 
   // Update % 有效费率 cell
   const posCell = document.getElementById(`pos_${venue}_${asset.coin}`);
@@ -3760,8 +3891,7 @@ async function loadSparkline(venue, asset) {
     const annFactor = 8760 / interval;
     const APR_THRESHOLD = 0.015; // 1.5% annualized
     // Expected periods for this time window
-    const expectedPeriods = Math.round(sparkHours[venue] / interval);
-    const total = Math.max(rates.length, expectedPeriods);
+    const total = coverage.expected;
     const validRates = rates.filter(r => Math.abs(r * annFactor) >= APR_THRESHOLD);
     if (validRates.length === 0) {
       posCell.innerHTML = `<span style="color:var(--foreground-dim);font-size:11px">—</span>`;
@@ -4132,10 +4262,17 @@ async function loadModalChart() {
   const d = modalAssetData;
   const v = modalVenue;
   const hours = modalChartHours;
+  const interval = fundingIntervalHours(v, d);
+  const historySymbol = d.symbol || (v === 'gate' ? `${d.coin}_USDT` : v === 'tradexyz' ? d.coin : `${d.coin}USDT`);
 
   let raw;
   try {
-    if (v === 'tradexyz') {
+    if (!_isDev && ['tradexyz','gate','binance','bitget'].includes(v)) {
+      const response = await fetch(`/api/funding-history?venue=${v}&hours=${hours}&symbols=${encodeURIComponent(historySymbol)}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      raw = payload?.results?.[historySymbol]?.rows || [];
+    } else if (v === 'tradexyz') {
       raw = await fetchFundingHistoryXyz(d.symbol || d.coin, hours);
     } else if (v === 'gate') {
       const contract = d.symbol || (d.coin + '_USDT');
@@ -4154,21 +4291,15 @@ async function loadModalChart() {
     return;
   }
 
-  if (!raw || raw.length < 2) {
-    area.innerHTML = '<span style="color:var(--text-muted);font-size:13px">Insufficient data for chart</span>';
+  const normalized = normalizeFundingHistoryWindow(raw, hours, interval);
+  if (normalized.rows.length < 2) {
+    area.innerHTML = `<span class="history-value"><span style="color:var(--text-muted);font-size:13px">Insufficient data for chart</span>${dataStatusBadge('unavailable', `${normalized.coverage.observed}/${normalized.coverage.expected} expected observations`)}</span>`;
     return;
   }
 
-  // Parse data
-  const points = raw.map(p => {
-    const rate = parseFloat(p.fundingRate || p.fundRate || 0);
-    return { time: parseInt(p.fundingTime || p.settleTime || p.time || 0), rate: isNaN(rate) ? 0 : rate };
-  });
-
-  // Sort by time ascending
-  points.sort((a, b) => a.time - b.time);
-
-  area.innerHTML = renderModalChart(points);
+  const points = normalized.rows.map(p => ({ time: p.fundingTime, rate: p.fundingRate }));
+  const coverageTitle = `${normalized.coverage.observed}/${normalized.coverage.expected} expected observations in ${hours}h window`;
+  area.innerHTML = `<div style="width:100%"><div style="display:flex;justify-content:flex-end;margin-bottom:6px">${dataStatusBadge(normalized.coverage.status, coverageTitle)}</div>${renderModalChart(points)}</div>`;
 }
 
 function renderModalChart(points) {
@@ -4263,11 +4394,20 @@ async function fetchVenueWithFallback(key, fetcher, timeoutMs = 45000) {
       })
     ]);
     const normalized = Array.isArray(data) ? data.map(normalizePerpDataState) : [];
-    if (normalized.length) lastVenueData[key] = normalized;
+    if (!normalized.length) throw new Error('Venue returned no RWA rows');
+    normalized.forEach(row => { row.dataFreshness = 'live'; });
+    lastVenueData[key] = normalized;
+    venueHealth[key] = { status: 'live', lastSuccessAt: Date.now(), error: null };
     return normalized;
   } catch (error) {
     console.error(`${VENUES[key]?.name || key} error:`, error);
-    return lastVenueData[key] || [];
+    const fallback = lastVenueData[key] || [];
+    venueHealth[key] = {
+      status: fallback.length ? 'stale' : 'unavailable',
+      lastSuccessAt: venueHealth[key]?.lastSuccessAt || null,
+      error: error.message,
+    };
+    return fallback.map(row => ({ ...row, dataFreshness: 'stale' }));
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
   }
@@ -4290,9 +4430,11 @@ async function refresh(isFirst) {
     SPOT_PERP = _buildSpotPerpFromAllData();
 
     const venueCount = new Set(allData.map(d => d.venue)).size;
+    const liveCount = ENABLED_PERP_VENUES.filter(venue => venueHealth[venue]?.status === 'live').length;
+    const staleCount = ENABLED_PERP_VENUES.filter(venue => venueHealth[venue]?.status === 'stale').length;
     const now = new Date().toLocaleTimeString();
     document.getElementById('statusText').textContent =
-      `${venueCount} Venues · ${allData.length} Assets · ${now}`;
+      `${venueCount} Venues · ${allData.length} Assets · ${liveCount} live${staleCount ? ` · ${staleCount} stale` : ''} · ${now}`;
     const ft = document.getElementById('footerTime');
     if (ft) ft.textContent = now;
 
@@ -5634,6 +5776,17 @@ function renderVenueTable(venue) {
     legend.innerHTML = `${dataStatusBadge('full','Complete official field')} ${dataStatusBadge('partial','Only a documented subset/level range is covered')} ${dataStatusBadge('estimated','Derived or fallback value')} ${dataStatusBadge('unavailable','Unsupported, not returned, or not fetched')}`;
     infoBar.appendChild(legend);
   }
+  if (infoBar) {
+    let freshness = infoBar.querySelector('.venue-freshness');
+    if (!freshness) {
+      freshness = document.createElement('span');
+      freshness.className = 'venue-freshness';
+      infoBar.appendChild(freshness);
+    }
+    const health = venueHealth[venue] || { status: 'unavailable' };
+    const age = health.lastSuccessAt ? `${Math.max(0, Math.round((Date.now() - health.lastSuccessAt) / 1000))}s since last success` : 'No successful refresh';
+    freshness.innerHTML = `<span class="data-freshness ${health.status}" title="${escapeHtml(health.error || age)}">${health.status === 'live' ? 'Live' : health.status === 'stale' ? 'Stale cache' : 'Unavailable'}</span>`;
+  }
   const catCounts = { all: allVenueData.length, equity: 0, commodity: 0, index: 0, etf: 0, 'pre-ipo': 0, fx: 0 };
   allVenueData.forEach(d => { if (catCounts[d.category] !== undefined) catCounts[d.category]++; });
   Object.entries(catCounts).forEach(([cat, count]) => {
@@ -5668,9 +5821,9 @@ function renderVenueTable(venue) {
           if (!c || !c.data) return -1;
           const intv = fundingIntervalHours(venue, asset);
           const af = 8760 / intv;
-          const ep = Math.round(sparkHours[venue] / intv);
-          const allR = c.data.map(d=>parseFloat(d.fundingRate||d.fundRate||0));
-          const total = Math.max(allR.length, ep);
+          const coverage = c.coverage || normalizeFundingHistoryWindow(c.data, sparkHours[venue], intv).coverage;
+          const allR = c.data.map(d=>numberOrNull(d.fundingRate ?? d.fundRate)).filter(r=>r!==null);
+          const total = coverage.expected;
           const rs = allR.filter(r=>Math.abs(r*af)>=0.015);
           if (rs.length === 0) return -1;
           const pos = rs.filter(r=>r>0).length, neg = rs.filter(r=>r<0).length;
@@ -6053,40 +6206,8 @@ let spotArbErrors = [];
 let spotArbLastUpdate = null;
 
 // ═══════════════════════════════════════════════
-// REFERENCE PRICING (Yahoo Finance)
+// REFERENCE PRICING (server-normalized Yahoo + explicit fallbacks)
 // ═══════════════════════════════════════════════
-const YAHOO_SYMBOL_MAP = {
-  // Commodities
-  WTI: 'CL=F', BRENTOIL: 'BZ=F', NATGAS: 'NG=F', COFFEE: 'KC=F', COTTON: 'CT=F',
-  CORN: 'ZC=F', WHEAT: 'ZW=F', URANIUM: 'URA', SOYBEAN: 'ZS=F', SUGAR: 'SB=F',
-  ALUMINIUM: 'ALI=F', COPPER: 'HG=F', OIL: 'CL=F', BRN: 'BZ=F', COP: 'COP',
-  XAU: 'GC=F', XAG: 'SI=F', XCU: 'HG=F', XPT: 'PL=F', XPD: 'PA=F',
-  PLAT: 'PL=F', TTF: 'TTF=F',
-  // Indices
-  SPX: '^GSPC', VIX: '^VIX', JP225: '^N225', KR200: '^KS200', KRCOMP: '^KS11',
-  DXY: 'DX-Y.NYB', DAX: '^GDAXI', FTSE: '^FTSE', DJI: '^DJI',
-  NDX: '^NDX', NQ100: '^NDX', NASDAQ: '^IXIC',
-  // Korea / Japan
-  SAMSUNG: '005930.KS', SMSN: '005930.KS', SKHYNIX: '000660.KS', HYUNDAI: '005380.KS',
-  SOFTBANK: '9984.T', KIOXIA: '285A.T', SKHX: '000660.KS',
-  // ETFs
-  SPY: 'SPY', QQQ: 'QQQ', IWM: 'IWM', DIA: 'DIA', GLD: 'GLD', SLV: 'SLV', USO: 'USO', TLT: 'TLT',
-  URA: 'URA', URNM: 'URNM', EWY: 'EWY', EWJ: 'EWJ', XLE: 'XLE', BOTZ: 'BOTZ', MAGS: 'MAGS',
-  IAU: 'IAU', IVV: 'IVV', ITOT: 'ITOT', KWEB: 'KWEB', EWT: 'EWT',
-  TQQQ: 'TQQQ', SQQQ: 'SQQQ',
-  // Equities (explicit Yahoo tickers for clarity)
-  TSLA: 'TSLA', AAPL: 'AAPL', NVDA: 'NVDA', AMZN: 'AMZN', GOOGL: 'GOOGL',
-  META: 'META', MSFT: 'MSFT', COIN: 'COIN', MSTR: 'MSTR', AMD: 'AMD',
-  PLTR: 'PLTR', HOOD: 'HOOD', INTC: 'INTC', ORCL: 'ORCL', NFLX: 'NFLX',
-  BABA: 'BABA', GME: 'GME', RIVN: 'RIVN', CRWV: 'CRWV', USAR: 'USAR',
-  AVGO: 'AVGO', CRM: 'CRM', QCOM: 'QCOM', ASML: 'ASML', ARM: 'ARM',
-  UBER: 'UBER', PYPL: 'PYPL', SNAP: 'SNAP', SHOP: 'SHOP', SQ: 'SQ',
-  NIO: 'NIO', LCID: 'LCID', FUTU: 'FUTU', PDD: 'PDD', JD: 'JD',
-};
-// These equities are quoted in KRW/JPY by Yahoo while venue perps are USD.
-// Until an FX conversion layer exists, prefer the venue index median instead
-// of displaying a numerically incomparable local-currency reference.
-const NON_USD_YAHOO_EQUITIES = new Set(['SAMSUNG','SMSN','SKHYNIX','HYUNDAI','SOFTBANK','KIOXIA']);
 const REFERENCE_SYMBOL_ALIASES = {
   // Gold tokenized → XAU
   XAUT: 'XAU', PAXG: 'XAU', XAUM: 'XAU', KAU: 'XAU', PGOLD: 'XAU', GGBR: 'XAU',
@@ -6117,61 +6238,45 @@ function perpMarkInSpotUnits(mark, spotCoin) {
   return mark * adjustment;
 }
 
-function assetToYahoo(symbol) {
-  const canonical = canonicalSymbol(symbol);
-  // 1) Explicit alias (e.g. XAUT→XAU, AAPLX→AAPL)
-  if (REFERENCE_SYMBOL_ALIASES[canonical]) {
-    const ref = REFERENCE_SYMBOL_ALIASES[canonical];
-    return YAHOO_SYMBOL_MAP[ref] ?? ref;
-  }
-  // 2) Heuristic underlying via suffix strip (e.g. CSCOX→CSCO, TSLAon→TSLA)
-  if (typeof _arbUnderlyingKey === 'function') {
-    const underlying = _arbUnderlyingKey(canonical);
-    if (underlying !== canonical) return YAHOO_SYMBOL_MAP[underlying] ?? underlying;
-  }
-  // 3) Fallback: use canonical as-is
-  return YAHOO_SYMBOL_MAP[canonical] ?? canonical;
-}
-
 let REF_PRICES = {};       // canonical → price
-let REF_SOURCES = {};      // canonical → source label ('Yahoo','Perp Index','Spot Median','Finnhub')
+let REF_SOURCES = {};      // canonical → source label
+let REF_META = {};         // canonical → status/session/as-of/currency metadata
 let REF_UPDATED_AT = {};   // canonical → epoch ms
 const REF_PRICE_TTL = 300000;
 let refPriceLoading = false;
 
-function hasFreshReference(symbol) {
-  return !!REF_PRICES[symbol] && Date.now() - (REF_UPDATED_AT[symbol] || 0) < REF_PRICE_TTL;
+function hasFreshReference(symbol, requirePrice = true) {
+  const fresh = Date.now() - (REF_UPDATED_AT[symbol] || 0) < REF_PRICE_TTL;
+  return fresh && (!requirePrice || Number(REF_PRICES[symbol]) > 0);
 }
 
-// ── Tier 1: Yahoo Finance ──
-async function _fetchRefYahoo(symbols) {
-  const YAHOO_HOSTS = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com'];
-  const useProxy = !_isDev;
-  const tasks = symbols.map(sym => async () => {
-    if (hasFreshReference(sym)) return;
-    if (NON_USD_YAHOO_EQUITIES.has(sym)) return;
-    const yahooSym = assetToYahoo(sym);
-    for (const host of YAHOO_HOSTS) {
-      try {
-        const url = useProxy
-          ? `/api/yahoo/chart/${encodeURIComponent(yahooSym)}?interval=1d&range=1d&includePrePost=false`
-          : `https://${host}/v8/finance/chart/${encodeURIComponent(yahooSym)}?interval=1d&range=1d&includePrePost=false`;
-        const res = await fetch(url, useProxy ? {} : { headers: { referer: 'https://finance.yahoo.com/' } });
-        if (!res.ok) continue;
-        const json = await res.json();
-        const result = json?.chart?.result?.[0];
-        const price = parseFloat(result?.meta?.regularMarketPrice);
-        if (price > 0) { REF_PRICES[sym] = price; REF_SOURCES[sym] = 'Yahoo'; REF_UPDATED_AT[sym] = Date.now(); return; }
-        const closes = result?.indicators?.quote?.[0]?.close ?? [];
-        for (let i = closes.length - 1; i >= 0; i--) {
-          const c = parseFloat(closes[i]);
-          if (c > 0) { REF_PRICES[sym] = c; REF_SOURCES[sym] = 'Yahoo'; REF_UPDATED_AT[sym] = Date.now(); return; }
-        }
-      } catch { /* try next host */ }
+function setReferenceValue(symbol, price, meta = {}) {
+  const numeric = numberOrNull(price);
+  if (numeric !== null && numeric > 0) REF_PRICES[symbol] = numeric;
+  else delete REF_PRICES[symbol];
+  REF_SOURCES[symbol] = meta.source || 'Unavailable';
+  REF_META[symbol] = { status: numeric > 0 ? 'full' : 'unavailable', ...meta };
+  REF_UPDATED_AT[symbol] = Date.now();
+}
+
+// ── Tier 1: server-normalized Yahoo Finance, including local-currency FX ──
+async function _fetchRefServer(symbols) {
+  const pending = symbols.filter(sym => !hasFreshReference(sym, false));
+  for (let i = 0; i < pending.length; i += 60) {
+    const chunk = pending.slice(i, i + 60);
+    try {
+      const response = await fetch(`/api/reference-prices?symbols=${encodeURIComponent(chunk.join(','))}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      chunk.forEach(sym => {
+        const row = payload?.rows?.[sym] || { status: 'unavailable', source: 'Yahoo Finance', reason: 'No response row' };
+        setReferenceValue(sym, row.price, row);
+      });
+    } catch (error) {
+      chunk.forEach(sym => setReferenceValue(sym, null, {
+        status: 'unavailable', source: 'Yahoo Finance', reason: error.message,
+      }));
     }
-  });
-  for (let i = 0; i < tasks.length; i += 8) {
-    await Promise.allSettled(tasks.slice(i, i + 8).map(fn => fn()));
   }
 }
 
@@ -6195,7 +6300,10 @@ function _fillRefFromPerpIndex(symbols) {
       const median = prices.length % 2 === 0
         ? (prices[prices.length / 2 - 1] + prices[prices.length / 2]) / 2
         : prices[Math.floor(prices.length / 2)];
-      if (median > 0) { REF_PRICES[sym] = median; REF_SOURCES[sym] = 'Perp Index'; REF_UPDATED_AT[sym] = Date.now(); }
+      if (median > 0) setReferenceValue(sym, median, {
+        source: 'Perp Index', status: 'estimated', derived: true,
+        asOf: new Date().toISOString(), venueCount: prices.length,
+      });
     }
   });
 }
@@ -6222,30 +6330,12 @@ function _fillRefFromSpotMedian(symbols) {
       const median = prices.length % 2 === 0
         ? (prices[prices.length / 2 - 1] + prices[prices.length / 2]) / 2
         : prices[Math.floor(prices.length / 2)];
-      if (median > 0) { REF_PRICES[sym] = median; REF_SOURCES[sym] = 'Spot Median'; REF_UPDATED_AT[sym] = Date.now(); }
+      if (median > 0) setReferenceValue(sym, median, {
+        source: 'Spot Median', status: 'estimated', derived: true,
+        asOf: new Date().toISOString(), venueCount: prices.length,
+      });
     }
   });
-}
-
-// ── Tier 4: Finnhub (optional, if API key set via URL param ?finnhub_key=...) ──
-async function _fetchRefFinnhub(symbols) {
-  const params = new URLSearchParams(location.search);
-  const apiKey = params.get('finnhub_key');
-  if (!apiKey) return;
-  const missing = symbols.filter(s => !hasFreshReference(s));
-  if (missing.length === 0) return;
-  const tasks = missing.map(sym => async () => {
-    try {
-      const res = await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(sym)}&token=${apiKey}`);
-      if (!res.ok) return;
-      const data = await res.json();
-      const price = parseFloat(data.c);
-      if (price > 0) { REF_PRICES[sym] = price; REF_SOURCES[sym] = 'Finnhub'; REF_UPDATED_AT[sym] = Date.now(); }
-    } catch {}
-  });
-  for (let i = 0; i < tasks.length; i += 4) {
-    await Promise.allSettled(tasks.slice(i, i + 4).map(fn => fn()));
-  }
 }
 
 // ── Main orchestrator: multi-source ref price fetch ──
@@ -6266,18 +6356,16 @@ async function fetchReferencePrices(symbols) {
     });
     const unique = [...resolvedSet];
 
-    await _fetchRefYahoo(unique);
-    const afterYahoo = Object.keys(REF_PRICES).length;
+    await _fetchRefServer(unique);
+    const afterYahoo = unique.filter(sym => REF_SOURCES[sym] === 'Yahoo Finance' && REF_PRICES[sym]).length;
     _fillRefFromPerpIndex(unique);
-    const afterPerp = Object.keys(REF_PRICES).length;
+    const afterPerp = unique.filter(sym => REF_PRICES[sym]).length;
     _fillRefFromSpotMedian(unique);
-    const afterSpot = Object.keys(REF_PRICES).length;
-    await _fetchRefFinnhub(unique);
-    const afterFinnhub = Object.keys(REF_PRICES).length;
+    const afterSpot = unique.filter(sym => REF_PRICES[sym]).length;
 
     const missing = unique.filter(s => !hasFreshReference(s));
     const missingPreview = missing.slice(0, 20).join(', ') + (missing.length > 20 ? ` … +${missing.length-20}` : '');
-    console.log(`[Ref] ${afterYahoo} Yahoo · +${afterPerp-afterYahoo} Perp Index · +${afterSpot-afterPerp} Spot Median · +${afterFinnhub-afterSpot} Finnhub | ${Object.keys(REF_PRICES).length}/${unique.length} total` + (missing.length > 0 ? ` | Missing: ${missingPreview}` : ''));
+    console.log(`[Ref] ${afterYahoo} Yahoo · +${afterPerp-afterYahoo} Perp Index · +${afterSpot-afterPerp} Spot Median | ${afterSpot}/${unique.length} total` + (missing.length > 0 ? ` | Missing: ${missingPreview}` : ''));
   } finally {
     refPriceLoading = false;
   }
@@ -6318,6 +6406,19 @@ function getRefSource(coin) {
   if (underlying !== canonical) {
     const uRef = REFERENCE_SYMBOL_ALIASES[underlying] ?? underlying;
     return REF_SOURCES[uRef] ?? REF_SOURCES[underlying] ?? null;
+  }
+  return null;
+}
+
+function getRefMeta(coin) {
+  const canonical = canonicalSymbol(coin);
+  const ref = REFERENCE_SYMBOL_ALIASES[canonical] ?? canonical;
+  if (REF_META[ref]) return REF_META[ref];
+  if (REF_META[canonical]) return REF_META[canonical];
+  const underlying = _arbUnderlyingKey(canonical);
+  if (underlying !== canonical) {
+    const uRef = REFERENCE_SYMBOL_ALIASES[underlying] ?? underlying;
+    return REF_META[uRef] ?? REF_META[underlying] ?? null;
   }
   return null;
 }
@@ -6482,16 +6583,18 @@ async function fetchSpotRwaGate() {
       const gateCategory = securityCategoryForUnderlying(gateUnderlying);
       registerSpotAssetMeta(base, gateUnderlying, base.endsWith('ON') ? 'Ondo Finance' : 'xStocks', gateCategory, 'gate');
     }
-    const last = parseFloat(t.last) || 0;
+    const last = numberOrNull(t.last);
+    const quoteVolume = numberOrNull(t.quote_volume);
+    const baseVolume = numberOrNull(t.base_volume);
     assets.push({
       coin: base, pair,
       last,
-      chg: parseFloat(t.change_percentage) || 0,
-      vol: parseFloat(t.quote_volume) || parseFloat(t.base_volume) * last || 0,
-      hi: parseFloat(t.high_24h) || 0,
-      lo: parseFloat(t.low_24h) || 0,
-      bid: parseFloat(t.highest_bid) || 0,
-      ask: parseFloat(t.lowest_ask) || 0,
+      chg: numberOrNull(t.change_percentage),
+      vol: quoteVolume ?? (baseVolume !== null && last !== null ? baseVolume * last : null),
+      hi: numberOrNull(t.high_24h),
+      lo: numberOrNull(t.low_24h),
+      bid: numberOrNull(t.highest_bid),
+      ask: numberOrNull(t.lowest_ask),
       isListed: true,
       isActive: entry.trade_status === 'tradable',
       isPriced: last > 0,
@@ -6559,18 +6662,18 @@ async function fetchSpotRwaKraken() {
           }
         }
         if (!base) continue;
-        const last = parseFloat(t.c?.[0]) || 0;
-        const open = parseFloat(t.o) || last;
-        const vol24 = parseFloat(t.v?.[1]) || 0;
+        const last = numberOrNull(t.c?.[0]);
+        const open = firstNumber(t.o, last);
+        const vol24 = numberOrNull(t.v?.[1]);
         assets.push({
           coin: base, pair: pairKey,
           last,
-          chg: open > 0 ? ((last - open) / open * 100) : 0,
-          vol: vol24 * last,
-          hi: parseFloat(t.h?.[1]) || 0,
-          lo: parseFloat(t.l?.[1]) || 0,
-          bid: parseFloat(t.b?.[0]) || 0,
-          ask: parseFloat(t.a?.[0]) || 0,
+          chg: open > 0 && last !== null ? ((last - open) / open * 100) : null,
+          vol: vol24 !== null && last !== null ? vol24 * last : null,
+          hi: numberOrNull(t.h?.[1]),
+          lo: numberOrNull(t.l?.[1]),
+          bid: numberOrNull(t.b?.[0]),
+          ask: numberOrNull(t.a?.[0]),
         });
       }
     } catch (e) { console.warn('[Spot] Kraken ticker batch error:', e); }
@@ -6651,21 +6754,21 @@ async function _fetchKrakenXStocks() {
           pairInfo = chunk.find(p => pairKey.includes(p.base));
         }
         if (!pairInfo) continue;
-        const last = parseFloat(t.c?.[0]) || 0;
-        const open = parseFloat(t.o) || last;
-        const vol24 = parseFloat(t.v?.[1]) || 0;
+        const last = numberOrNull(t.c?.[0]);
+        const open = firstNumber(t.o, last);
+        const vol24 = numberOrNull(t.v?.[1]);
         const tokenCoin = `${pairInfo.underlying}X`;
         const category = ETF_SYMBOLS.has(pairInfo.underlying) ? 'etf' : 'equity';
         registerSpotAssetMeta(tokenCoin, pairInfo.underlying, 'xStocks', category, 'kraken');
         assets.push({
           coin: tokenCoin, pair: pairKey, underlyingSymbol: pairInfo.underlying,
           last,
-          chg: open > 0 ? ((last - open) / open * 100) : 0,
-          vol: vol24 * last,
-          hi: parseFloat(t.h?.[1]) || 0,
-          lo: parseFloat(t.l?.[1]) || 0,
-          bid: parseFloat(t.b?.[0]) || 0,
-          ask: parseFloat(t.a?.[0]) || 0,
+          chg: open > 0 && last !== null ? ((last - open) / open * 100) : null,
+          vol: vol24 !== null && last !== null ? vol24 * last : null,
+          hi: numberOrNull(t.h?.[1]),
+          lo: numberOrNull(t.l?.[1]),
+          bid: numberOrNull(t.b?.[0]),
+          ask: numberOrNull(t.a?.[0]),
           xstock: true, isListed: true, isActive: true, isPriced: last > 0,
         });
       }
@@ -6735,21 +6838,21 @@ async function fetchSpotRwaBitget() {
     const underlying = canonicalSymbolForCategory(rawUnderlying, category);
     if (!pair || !underlying) continue;
     const t = realityTickerMap[pair] || {};
-    const last = parseFloat(t.lastPrice) || 0;
+    const last = numberOrNull(t.lastPrice);
     const coin = venueBase || `R${underlying}`;
     registerSpotAssetMeta(coin, underlying, 'Reality', category, 'bitget');
     const platformTurnover = parseFloat(t.platformTurnover24h);
     assets.push({
       coin, pair, venueSymbol: pair, underlyingSymbol: underlying,
       last,
-      chg: (parseFloat(t.price24hPcnt) || 0) * 100,
+      chg: numberOrNull(t.price24hPcnt) !== null ? numberOrNull(t.price24hPcnt) * 100 : null,
       // Reality exposes both underlying-market turnover and actual platform
       // turnover. Use the latter so dashboard volume is not overstated.
-      vol: Number.isFinite(platformTurnover) ? platformTurnover : (parseFloat(t.turnover24h) || 0),
-      hi: parseFloat(t.highPrice24h) || 0,
-      lo: parseFloat(t.lowPrice24h) || 0,
-      bid: parseFloat(t.bid1Price) || 0,
-      ask: parseFloat(t.ask1Price) || 0,
+      vol: Number.isFinite(platformTurnover) ? platformTurnover : numberOrNull(t.turnover24h),
+      hi: numberOrNull(t.highPrice24h),
+      lo: numberOrNull(t.lowPrice24h),
+      bid: numberOrNull(t.bid1Price),
+      ask: numberOrNull(t.ask1Price),
       depth2: null,
       reality: true, marketType: instrument.symbolType, isListed: true, isActive: true, isPriced: last > 0,
     });
@@ -6769,16 +6872,17 @@ async function fetchSpotRwaBitget() {
     if (!symbol.endsWith('USDT') && !symbol.endsWith('USD')) continue;
     const base = symbol.replace(/(USDT|USD)$/, '');
     if (!_isRwaSpotBase(base, 'bitget')) continue;
-    const last = parseFloat(t.lastPr) || 0;
+    const last = numberOrNull(t.lastPr);
+    const change24h = numberOrNull(t.change24h);
     legacyAssets.push({
       coin: base, pair: symbol,
       last,
-      chg: (parseFloat(t.change24h) || 0) * 100,
-      vol: parseFloat(t.quoteVolume) || 0,
-      hi: parseFloat(t.high24h) || 0,
-      lo: parseFloat(t.low24h) || 0,
-      bid: parseFloat(t.bidPr) || 0,
-      ask: parseFloat(t.askPr) || 0,
+      chg: change24h !== null ? change24h * 100 : null,
+      vol: numberOrNull(t.quoteVolume),
+      hi: numberOrNull(t.high24h),
+      lo: numberOrNull(t.low24h),
+      bid: numberOrNull(t.bidPr),
+      ask: numberOrNull(t.askPr),
     });
   }
   // Fetch orderbook depth
@@ -6861,16 +6965,16 @@ async function fetchSpotRwaBinance() {
       registerSpotAssetMeta(base, bStockUnderlying, 'Binance bStocks', bStockCategory, 'binance');
     }
     const t = tickerMap[symbol] || {};
-    const last = parseFloat(t.lastPrice) || 0;
+    const last = numberOrNull(t.lastPrice);
     assets.push({
       coin: base, pair: symbol, underlyingSymbol: isBStock ? bStockUnderlying : undefined,
       last,
-      chg: parseFloat(t.priceChangePercent) || 0,
-      vol: parseFloat(t.quoteVolume) || 0,
-      hi: parseFloat(t.highPrice) || 0,
-      lo: parseFloat(t.lowPrice) || 0,
-      bid: parseFloat(t.bidPrice) || 0,
-      ask: parseFloat(t.askPrice) || 0,
+      chg: numberOrNull(t.priceChangePercent),
+      vol: numberOrNull(t.quoteVolume),
+      hi: numberOrNull(t.highPrice),
+      lo: numberOrNull(t.lowPrice),
+      bid: numberOrNull(t.bidPrice),
+      ask: numberOrNull(t.askPrice),
       bstock: isBStock, marketType: bStockMeta?.underlyingType,
       isListed: true, isActive: info.status === 'TRADING', isPriced: last > 0,
     });
@@ -7061,15 +7165,23 @@ function _buildSpotPerpFromAllData() {
 
 function updateSpotStatusLine(statusEl = document.getElementById('spotArbStatus')) {
   if (!statusEl) return;
-  const totalSpot = Object.values(SPOT_DATA).reduce((s, a) => s + a.length, 0);
-  const pricedSpot = Object.values(SPOT_DATA).flat().filter(a => Number(a.last) > 0).length;
+  const spotArrays = Object.values(SPOT_DATA).filter(Array.isArray);
+  const totalSpot = spotArrays.reduce((s, a) => s + a.length, 0);
+  const pricedSpot = spotArrays.flat().filter(a => Number(a.last) > 0).length;
   const totalPerp = Object.values(SPOT_PERP).reduce((s, o) => s + Object.keys(o).length, 0);
   const totalRef = Object.keys(REF_PRICES).length;
   const srcCounts = {};
   Object.values(REF_SOURCES).forEach(s => { srcCounts[s] = (srcCounts[s] || 0) + 1; });
   const srcSummary = Object.entries(srcCounts).map(([k, v]) => `${v} ${k}`).join(' · ');
+  const refStatusCounts = { full: 0, partial: 0, estimated: 0, unavailable: 0 };
+  Object.values(REF_META).forEach(meta => {
+    const status = refStatusCounts[meta?.status] === undefined ? 'unavailable' : meta.status;
+    refStatusCounts[status] += 1;
+  });
+  const liveVenues = ENABLED_SPOT_VENUES.filter(venue => spotVenueHealth[venue]?.status === 'live').length;
+  const staleVenues = ENABLED_SPOT_VENUES.filter(venue => spotVenueHealth[venue]?.status === 'stale').length;
   const timeStr = (spotArbLastUpdate || new Date()).toLocaleTimeString();
-  let html = `<span style="color:var(--foreground-dim);font-size:10.5px">${totalSpot} spot listed · ${pricedSpot} priced · ${totalPerp} perps · ${totalRef} ref${srcSummary ? ` (${srcSummary})` : ''} · ${timeStr}</span>`;
+  let html = `<span style="color:var(--foreground-dim);font-size:10.5px">${totalSpot} spot listed · ${pricedSpot} priced · ${totalPerp} perps · ${liveVenues} live${staleVenues ? ` · ${staleVenues} stale` : ''} · ${totalRef} ref (${refStatusCounts.full} Full · ${refStatusCounts.estimated} Estimated · ${refStatusCounts.unavailable} Unavailable)${srcSummary ? ` · ${srcSummary}` : ''} · ${timeStr}</span>`;
   if (spotArbErrors.length > 0) {
     html += ` <span style="color:var(--negative);font-size:10px;cursor:help" title="${escapeHtml(spotArbErrors.join('\n'))}">⚠ ${spotArbErrors.length} venue(s) failed</span>`;
   }
@@ -7101,9 +7213,23 @@ async function refreshSpotArbData() {
     results.forEach((r, i) => {
       const venue = venueKeys[i];
       if (r.status === 'fulfilled') {
-        nextSpotData[venue] = Array.isArray(r.value) ? r.value.map(normalizeSpotDataState) : [];
+        const normalized = Array.isArray(r.value) ? r.value.map(normalizeSpotDataState) : [];
+        if (normalized.length) {
+          lastSpotVenueData[venue] = normalized;
+          spotVenueHealth[venue] = { status: 'live', lastSuccessAt: Date.now(), error: null };
+          nextSpotData[venue] = normalized.map(row => ({ ...row, dataFreshness: 'live' }));
+        } else {
+          const fallback = lastSpotVenueData[venue] || [];
+          const err = 'Venue returned no RWA rows';
+          spotVenueHealth[venue] = { status: fallback.length ? 'stale' : 'unavailable', lastSuccessAt: spotVenueHealth[venue]?.lastSuccessAt || null, error: err };
+          nextSpotData[venue] = fallback.map(row => ({ ...row, dataFreshness: 'stale' }));
+          spotArbErrors.push(`${SPOT_VENUE_NAMES[venue] || venue}: ${err}`);
+        }
       } else {
         const err = r.reason?.message || 'No RWA assets found';
+        const fallback = lastSpotVenueData[venue] || [];
+        spotVenueHealth[venue] = { status: fallback.length ? 'stale' : 'unavailable', lastSuccessAt: spotVenueHealth[venue]?.lastSuccessAt || null, error: err };
+        nextSpotData[venue] = fallback.map(row => ({ ...row, dataFreshness: 'stale' }));
         spotArbErrors.push(`${SPOT_VENUE_NAMES[venue] || venue}: ${err}`);
         console.warn(`[Spot] ${venue} error:`, err);
       }
@@ -7121,10 +7247,9 @@ async function refreshSpotArbData() {
       .filter(a => perpUnderlyings.has(a.underlying))
       .sort((a, b) => (b.vol || 0) - (a.vol || 0))
       .map(a => a.underlying)
-      .filter((underlying, index, arr) => arr.indexOf(underlying) === index)
-      .slice(0, 150);
+      .filter((underlying, index, arr) => arr.indexOf(underlying) === index);
     // Reference enrichment should not block the live market tables. Re-render
-    // the active spot views when the capped background batch completes.
+    // the active spot views when the chunked background batch completes.
     fetchReferencePrices(referenceCoins).then(() => {
       renderSpotArbRank();
       if (spotSubView === 'allAssets') renderSpotAllAssets();
@@ -7387,7 +7512,10 @@ function renderSpotVenueTable(venue) {
   const listedCount = assets.filter(a => a.isListed).length;
   const activeCount = assets.filter(a => a.isActive).length;
   const pricedCount = assets.filter(a => a.isPriced).length;
-  document.getElementById('spotVenueTitle').innerHTML = '<svg class="ic ic-18" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>' + (SPOT_VENUE_NAMES[venue]||venue) + ' Spot <span class="market-state-summary" title="Listed = official venue catalog · Active = venue trading status/activity · Priced = usable positive last price">Listed <strong>'+listedCount+'</strong> · Active <strong>'+activeCount+'</strong> · Priced <strong>'+pricedCount+'</strong></span>';
+  const health = spotVenueHealth[venue] || { status: 'unavailable' };
+  const freshnessTitle = health.error || (health.lastSuccessAt ? `Last success ${new Date(health.lastSuccessAt).toLocaleTimeString()}` : 'No successful refresh');
+  const freshnessLabel = health.status === 'live' ? 'Live' : health.status === 'stale' ? 'Stale cache' : 'Unavailable';
+  document.getElementById('spotVenueTitle').innerHTML = '<svg class="ic ic-18" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>' + (SPOT_VENUE_NAMES[venue]||venue) + ' Spot <span class="market-state-summary" title="Listed = official venue catalog · Active = venue trading status/activity · Priced = usable positive last price">Listed <strong>'+listedCount+'</strong> · Active <strong>'+activeCount+'</strong> · Priced <strong>'+pricedCount+'</strong></span><span class="data-freshness '+health.status+'" title="'+escapeHtml(freshnessTitle)+'">'+freshnessLabel+'</span>';
 
   // Pre-compute sort values
   const rows = assets.map(a => {
@@ -7429,8 +7557,10 @@ function renderSpotVenueTable(venue) {
     const ref = getRefPrice(a.coin);
     const dev = ref && a.isPriced ? priceDeviation(a.last, ref) : null;
     const refSrc = getRefSource(a.coin);
-    const srcTag = refSrc && refSrc !== 'Yahoo' ? '<span style="font-size:9px;color:var(--foreground-dim);display:block;margin-top:1px">'+refSrc+'</span>' : '';
-    const refH = ref ? spotFP(ref) + srcTag : '<span class="dim">—</span>';
+    const refMeta = getRefMeta(a.coin) || { status: 'unavailable', source: refSrc || 'Unavailable' };
+    const refDetails = [refMeta.source, refMeta.session, refMeta.asOf ? `as of ${new Date(refMeta.asOf).toLocaleString()}` : '', refMeta.nativeCurrency && refMeta.nativeCurrency !== 'USD' ? `${refMeta.nativeCurrency}→USD via ${refMeta.fxSymbol || 'FX'}` : ''].filter(Boolean).join(' · ');
+    const srcTag = refSrc ? '<span style="font-size:9px;color:var(--foreground-dim);display:block;margin-top:1px">'+escapeHtml(refSrc)+'</span>' : '';
+    const refH = fieldValueWithStatus(ref ? spotFP(ref) + srcTag : '<span class="dim">—</span>', refMeta.status, refDetails);
     const devH = dev !== null
       ? '<span class="'+(Math.abs(dev)>0.005?'neg':'dim')+'" style="font-weight:600">'+(dev>=0?'+':'')+(dev*100).toFixed(2)+'%</span>'
       : '<span class="dim">—</span>';
@@ -7475,10 +7605,13 @@ function renderSpotVenueTable(venue) {
     const spotState = '<div class="market-state-row"><span class="market-badge">Listed</span><span class="market-badge '+(a.isActive?'active':'inactive')+'">'+(a.isActive?'Active':'Inactive')+'</span><span class="market-badge '+(a.isPriced?'priced':'unpriced')+'">'+(a.isPriced?'Priced':'Unpriced')+'</span></div>';
     const lastH = a.isPriced ? spotFP(a.last) : '<span class="dim">—</span>';
     const hiLoH = a.isPriced && a.hi > 0 && a.lo > 0 ? spotFP(a.hi)+' / '+spotFP(a.lo) : '<span class="dim">—</span>';
+    const changeH = numberOrNull(a.chg) !== null ? cs+a.chg.toFixed(2)+'%' : '<span class="dim">—</span>';
+    const volumeH = numberOrNull(a.vol) !== null ? '$'+spotFV(a.vol) : '<span class="dim">—</span>';
+    const spreadH = spBps === '—' ? '<span class="dim">—</span>' : spBps+' bps';
     h += '<tr><td style="text-align:left;font-family:Inter,sans-serif;font-weight:600">'+a.coin+renderMarketTags(a)+spotState+'</td><td>'+fieldValueWithStatus(lastH,a.fieldStatus.last,'Official last-price coverage')+'</td><td>'+refH+'</td><td>'+devH+'</td><td>'+markH+'</td><td>'+basisH+'</td>';
-    h += '<td class="'+cc+'">'+(a.isPriced?cs+a.chg.toFixed(2)+'%':'<span class="dim">—</span>')+'</td><td>$'+spotFV(a.vol)+'</td>';
-    h += '<td style="font-size:11px;color:var(--foreground-sec)">'+hiLoH+'</td>';
-    h += '<td>'+spBps+(spBps==='—'?'':' bps')+'</td><td class="'+depthCls+'">'+fieldValueWithStatus(depthH,a.fieldStatus.depth2,'Partial = up to 50 order-book levels; Unavailable = not fetched or unsupported')+'</td><td>'+fundH+'</td><td>'+arbH+'</td></tr>';
+    h += '<td class="'+cc+'">'+fieldValueWithStatus(changeH,a.fieldStatus.change,'24h change coverage')+'</td><td>'+fieldValueWithStatus(volumeH,a.fieldStatus.volume,'24h volume coverage')+'</td>';
+    h += '<td style="font-size:11px;color:var(--foreground-sec)">'+fieldValueWithStatus(hiLoH,a.fieldStatus.highLow,'24h high/low coverage')+'</td>';
+    h += '<td>'+fieldValueWithStatus(spreadH,a.fieldStatus.bidAsk,'Best bid/ask coverage')+'</td><td class="'+depthCls+'">'+fieldValueWithStatus(depthH,a.fieldStatus.depth2,'Partial = up to 50 order-book levels; Unavailable = not fetched or unsupported')+'</td><td>'+fundH+'</td><td>'+arbH+'</td></tr>';
   });
   document.getElementById('spotVenueBody').innerHTML = h;
 }
@@ -7728,6 +7861,7 @@ function renderSpotArbRank() {
           coin: a.coin, sVenue, pVenue, marketTags: marketTagsForAsset(a),
           spot: a.last, mark: comparableMark, basis, fAnn, costAnn, netFund, dir, ref,
           refSrc: getRefSource(a.coin),
+          refMeta: getRefMeta(a.coin),
           depthSpot: a.depth2 || null, depthPerp: p.depth2 || null
         });
       });
@@ -7775,8 +7909,10 @@ function renderSpotArbRank() {
     const basisDirRaw = r.dir==='long' ? r.basis : -r.basis;
     const ref = r.ref;
     const dev = ref ? (r.spot - ref) / ref : null;
-    const arbRefSrc = r.refSrc && r.refSrc !== 'Yahoo' ? '<span style="font-size:9px;color:var(--foreground-dim);display:block;margin-top:1px">'+r.refSrc+'</span>' : '';
-    const refH = ref ? spotFP(ref) + arbRefSrc : '<span class="dim">—</span>';
+    const arbRefSrc = r.refSrc ? '<span style="font-size:9px;color:var(--foreground-dim);display:block;margin-top:1px">'+escapeHtml(r.refSrc)+'</span>' : '';
+    const refMeta = r.refMeta || { status: 'unavailable', source: r.refSrc || 'Unavailable' };
+    const refTitle = [refMeta.source, refMeta.session, refMeta.asOf ? `as of ${new Date(refMeta.asOf).toLocaleString()}` : ''].filter(Boolean).join(' · ');
+    const refH = fieldValueWithStatus(ref ? spotFP(ref) + arbRefSrc : '<span class="dim">—</span>', refMeta.status, refTitle);
     const devH = dev !== null ? '<span class="'+(Math.abs(dev)>0.005?'neg':'dim')+'">'+(dev>=0?'+':'')+(dev*100).toFixed(2)+'%</span>' : '<span class="dim">—</span>';
     h += '<tr>'
        + '<td style="text-align:left;color:var(--foreground-dim);font-size:11px">'+(i+1)+'</td>'

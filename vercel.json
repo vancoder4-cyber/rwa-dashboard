@@ -1,10 +1,7 @@
 {
   "rewrites": [
-    { "source": "/api/yahoo/:path*", "destination": "https://query1.finance.yahoo.com/v8/finance/:path*" },
     { "source": "/api/gate/:path*", "destination": "https://api.gateio.ws/api/v4/futures/usdt/:path*" },
     { "source": "/api/gate-spot/:path*", "destination": "https://api.gateio.ws/api/v4/spot/:path*" },
-    { "source": "/api/vest/:path*", "destination": "https://server-prod.hz.vestmarkets.com/v2/:path*" },
-    { "source": "/api/cbintx/:path*", "destination": "https://api.coinbase.com/api/v3/brokerage/:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [
@@ -23,24 +20,6 @@
     },
     {
       "source": "/api/gate-spot/:path*",
-      "headers": [
-        { "key": "Vercel-CDN-Cache-Control", "value": "max-age=30, stale-while-revalidate=60" }
-      ]
-    },
-    {
-      "source": "/api/vest/:path*",
-      "headers": [
-        { "key": "Vercel-CDN-Cache-Control", "value": "max-age=30, stale-while-revalidate=60" }
-      ]
-    },
-    {
-      "source": "/api/yahoo/:path*",
-      "headers": [
-        { "key": "Vercel-CDN-Cache-Control", "value": "max-age=120, stale-while-revalidate=300" }
-      ]
-    },
-    {
-      "source": "/api/cbintx/:path*",
       "headers": [
         { "key": "Vercel-CDN-Cache-Control", "value": "max-age=30, stale-while-revalidate=60" }
       ]
