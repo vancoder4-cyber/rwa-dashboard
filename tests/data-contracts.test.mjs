@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 
 import { historyCoverage, normalizeHistoryRows } from '../api/funding-history.js';
 import { assessChecks } from '../api/_lib/health.js';
@@ -47,4 +48,16 @@ test('health assessment distinguishes degraded from unhealthy', () => {
   assert.equal(assessChecks([{ status: 'fail', critical: false }]).status, 'degraded');
   assert.equal(assessChecks([{ status: 'fail', critical: true }]).status, 'unhealthy');
   assert.equal(assessChecks([{ status: 'fail' }, { status: 'fail' }]).status, 'unhealthy');
+});
+
+test('traditional activity is a standalone top-level page', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  assert.match(html, /data-p="traditional" onclick="switchTopPage\('traditional'\)"/);
+  assert.match(html, /<div class="page-container" id="page-traditional">[\s\S]*?id="tradfiActivitySection"/);
+  assert.equal((html.match(/id="tradfiActivitySection"/g) || []).length, 1);
+  assert.doesNotMatch(
+    html,
+    /function renderOverview\(\) \{[^}]*renderTraditionalActivity\(\)/,
+  );
+  assert.match(html, /\['perps','spot','traditional','cross'\]/);
 });

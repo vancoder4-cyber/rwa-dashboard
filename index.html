@@ -357,7 +357,7 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════
-   TOP-LEVEL PAGE TABS (Perpetuals / Spot / Cross-Analysis)
+   TOP-LEVEL PAGE TABS (Perpetuals / Spot / Traditional / Cross-Analysis)
    ═══════════════════════════════════════════════════ */
 .top-nav { display:flex; gap:2px; padding:6px 28px; background:rgba(255,255,255,0.40); border-bottom:1px solid rgba(0,0,0,0.05); backdrop-filter:blur(16px) saturate(1.5) brightness(1.03); -webkit-backdrop-filter:blur(16px) saturate(1.5) brightness(1.03); }
 .top-tab { position:relative; padding:10px 22px; font-size:13px; font-weight:700; color:var(--foreground-dim); cursor:pointer; user-select:none; transition:all .2s ease-out; letter-spacing:-0.01em; border-radius:var(--radius); }
@@ -365,11 +365,13 @@ body {
 .top-tab.active { color:var(--foreground); }
 .top-tab[data-p="perps"].active { background:rgba(0,122,255,0.12); color:var(--accent); }
 .top-tab[data-p="spot"].active { background:rgba(52,199,89,0.12); color:#248A3D; }
+.top-tab[data-p="traditional"].active { background:rgba(175,82,222,0.12); color:#8944AB; }
 .top-tab[data-p="cross"].active { background:rgba(199,148,42,0.12); color:#8A6D12; }
 .top-tab::after { content:''; position:absolute; bottom:2px; left:16px; right:16px; height:2px; border-radius:2px; transform:scaleX(0); transition:transform .2s ease-out; }
 .top-tab.active::after { transform:scaleX(1); }
 .top-tab[data-p="perps"]::after { background:var(--accent); }
 .top-tab[data-p="spot"]::after { background:var(--positive); }
+.top-tab[data-p="traditional"]::after { background:#AF52DE; }
 .top-tab[data-p="cross"]::after { background:var(--gold); }
 .top-tab .t-icon { margin-right:7px; display:inline-flex; vertical-align:-3px; }
 .ic { display:inline-block; vertical-align:-0.18em; stroke:currentColor; stroke-width:1.75; fill:none; stroke-linecap:round; stroke-linejoin:round; }
@@ -1250,6 +1252,7 @@ input[type="checkbox"] {
 <div class="top-nav" id="topNav">
   <div class="top-tab active" data-p="perps" onclick="switchTopPage('perps')"><span class="t-icon"><svg class="ic ic-16" viewBox="0 0 24 24"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg></span>Perpetuals</div>
   <div class="top-tab" data-p="spot" onclick="switchTopPage('spot')"><span class="t-icon"><svg class="ic ic-16" viewBox="0 0 24 24"><circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="M16.71 13.88l.7.71-2.82 2.82"/></svg></span>Spot</div>
+  <div class="top-tab" data-p="traditional" onclick="switchTopPage('traditional')"><span class="t-icon"><svg class="ic ic-16" viewBox="0 0 24 24"><path d="M3 21h18"/><path d="M5 21V10h14v11"/><path d="M4 10l8-6 8 6"/><path d="M8 14h2"/><path d="M14 14h2"/><path d="M8 18h2"/><path d="M14 18h2"/></svg></span>Traditional Market</div>
   <div class="top-tab" data-p="cross" onclick="switchTopPage('cross')"><span class="t-icon"><svg class="ic ic-16" viewBox="0 0 24 24"><circle cx="5" cy="6" r="3"/><circle cx="19" cy="18" r="3"/><path d="M12 6h2a2 2 0 0 1 2 2v7"/><path d="M12 18h-2a2 2 0 0 1-2-2V9"/><polyline points="15 9 12 6 15 3"/><polyline points="9 15 12 18 9 21"/></svg></span>Cross-Analysis</div>
 </div>
 
@@ -1281,7 +1284,6 @@ input[type="checkbox"] {
       <div class="kpi-strip" id="kpiStrip"></div>
       <div class="venue-cards-grid" id="venueCardsGrid"></div>
       <div class="section-card" id="top30VolSection" style="margin-top:16px"></div>
-      <div class="section-card" id="tradfiActivitySection"></div>
       <div class="section-card" id="coverageSection"></div>
       <div class="section-card" id="divSection"></div>
     </div>
@@ -1603,6 +1605,15 @@ input[type="checkbox"] {
 
 
 </div><!-- END page-perps -->
+
+<!-- ═══════════════════════════════════════════
+     PAGE: TRADITIONAL MARKET
+     ═══════════════════════════════════════════ -->
+<div class="page-container" id="page-traditional">
+  <div class="summary-page">
+    <div class="section-card" id="tradfiActivitySection"></div>
+  </div>
+</div><!-- END page-traditional -->
 
 <!-- ═══════════════════════════════════════════
      PAGE: SPOT
@@ -4680,7 +4691,7 @@ function switchSubTab(sub, tabEl) {
 // VIEW 1: ALL VENUES OVERVIEW
 // ═══════════════════════════════════════════════
 
-function renderOverview() { renderKPIs(); renderVenueCards(); renderTop30Volume(); renderTraditionalActivity(); renderCoverage(); renderDivergence(); }
+function renderOverview() { renderKPIs(); renderVenueCards(); renderTop30Volume(); renderCoverage(); renderDivergence(); }
 
 // ═══════════════════════════════════════════════
 // KPI TREND SNAPSHOTS (localStorage)
@@ -6183,15 +6194,16 @@ function renderHeatmap() {
 }
 
 // ═══════════════════════════════════════════════
-// TOP-LEVEL PAGE SWITCH (Perpetuals / Spot / Cross)
+// TOP-LEVEL PAGE SWITCH (Perpetuals / Spot / Traditional / Cross)
 // ═══════════════════════════════════════════════
 
 function switchTopPage(page) {
   document.querySelectorAll('.top-tab').forEach(t => t.classList.toggle('active', t.dataset.p === page));
-  ['perps','spot','cross'].forEach(p => {
+  ['perps','spot','traditional','cross'].forEach(p => {
     const el = document.getElementById('page-'+p);
     if (el) el.classList.toggle('active', p === page);
   });
+  if (page === 'traditional') renderTraditionalActivity();
 }
 
 // ═══════════════════════════════════════════════
