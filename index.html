@@ -1997,14 +1997,131 @@ const TOKENIZED_ETF_WRAPPERS = Object.freeze({
   QQQX:'QQQ', SPYX:'SPY', TQQQX:'TQQQ', SLVON:'SLV'
 });
 
-// Audited public listings override stale venue pre-market flags.
-const PUBLIC_LISTED_EQUITIES = new Set([
-  'SPCX','SPACEX','CBRS','MINIMAX','ZHIPU','CXMT','QNT','QNTX','QNTSTOCK'
-]);
+// One audited lifecycle registry owns the public-vs-pre-IPO decision. Venue
+// metadata is still required to admit an instrument as an RWA/security; this
+// registry must never turn a same-ticker crypto product into a security.
+// `listedOn` means the first day of public trading, not filing/approval date.
+const SECURITY_LISTING_REGISTRY = Object.freeze({
+  SPCX: Object.freeze({
+    category:'equity', status:'public', name:'SpaceX', exchange:'NASDAQ', listedOn:'2026-06-12',
+    aliases:Object.freeze(['SPACEX','SPCXB','SPCXON','SPCXX'])
+  }),
+  CBRS: Object.freeze({
+    category:'equity', status:'public', name:'Cerebras Systems', exchange:'NASDAQ', listedOn:'2026-05-14',
+    aliases:Object.freeze(['CBRSB','CBRSON','CBRSX','SCBRS'])
+  }),
+  MINIMAX: Object.freeze({
+    category:'equity', status:'public', name:'MiniMax Group', exchange:'HKEX', listedOn:'2026-01-09',
+    aliases:Object.freeze([])
+  }),
+  ZHIPU: Object.freeze({
+    category:'equity', status:'public', name:'Z.AI (Zhipu AI)', exchange:'HKEX', listedOn:'2026-01-08',
+    aliases:Object.freeze([])
+  }),
+  CXMT: Object.freeze({
+    category:'equity', status:'public', name:'ChangXin Memory Technologies', exchange:'SSE STAR', listedOn:'2026-07-27',
+    aliases:Object.freeze([])
+  }),
+  QNT: Object.freeze({
+    category:'equity', status:'public', name:'Quantinuum Inc.', exchange:'NASDAQ', listedOn:'2026-06-04',
+    aliases:Object.freeze(['QNTX','QNTSTOCK','QNTB'])
+  }),
+  OPENAI: Object.freeze({
+    category:'pre-ipo', status:'pre-ipo', name:'OpenAI (Pre-IPO)', exchange:'', listedOn:'',
+    aliases:Object.freeze([])
+  }),
+  ANTHROPIC: Object.freeze({
+    category:'pre-ipo', status:'pre-ipo', name:'Anthropic (Pre-IPO)', exchange:'', listedOn:'',
+    aliases:Object.freeze([])
+  }),
+  ANDURIL: Object.freeze({
+    category:'pre-ipo', status:'pre-ipo', name:'Anduril Industries (Pre-IPO)', exchange:'', listedOn:'',
+    aliases:Object.freeze([])
+  }),
+  KALSHI: Object.freeze({
+    category:'pre-ipo', status:'pre-ipo', name:'Kalshi (Pre-IPO)', exchange:'', listedOn:'',
+    aliases:Object.freeze([])
+  }),
+  KIMI: Object.freeze({
+    category:'pre-ipo', status:'pre-ipo', name:'Moonshot AI / Kimi (Pre-IPO)', exchange:'', listedOn:'',
+    aliases:Object.freeze([])
+  }),
+  NEURALINK: Object.freeze({
+    category:'pre-ipo', status:'pre-ipo', name:'Neuralink (Pre-IPO)', exchange:'', listedOn:'',
+    aliases:Object.freeze([])
+  }),
+  POLYMARKET: Object.freeze({
+    category:'pre-ipo', status:'pre-ipo', name:'Polymarket (Pre-IPO)', exchange:'', listedOn:'',
+    aliases:Object.freeze([])
+  }),
+  UNITREE: Object.freeze({
+    category:'pre-ipo', status:'ipo-registered', name:'Unitree Robotics (Pre-IPO)', exchange:'SSE STAR', listedOn:'',
+    aliases:Object.freeze([])
+  })
+});
 
-// Audited 2026-08-07. Keep this list limited to companies that have not begun
-// public trading; it is a cross-venue fallback for generic `stock` metadata.
-const PRE_IPO_SYMBOLS = new Set(['ANTHROPIC','OPENAI','UNITREE']);
+const SECURITY_LISTING_ALIAS_MAP = Object.freeze(Object.fromEntries(
+  Object.entries(SECURITY_LISTING_REGISTRY).flatMap(([canonical, record]) =>
+    [canonical, ...record.aliases].map(alias => [alias, canonical])
+  )
+));
+const PRE_IPO_SYMBOLS = new Set(Object.entries(SECURITY_LISTING_REGISTRY)
+  .filter(([, record]) => record.category === 'pre-ipo')
+  .map(([symbol]) => symbol));
+
+function securityListingForSymbol(symbol) {
+  const raw = String(symbol || '').trim().toUpperCase();
+  const canonical = SECURITY_LISTING_ALIAS_MAP[raw];
+  if (!canonical) return null;
+  return { canonical, ...SECURITY_LISTING_REGISTRY[canonical] };
+}
+
+function securityCategoryForUnderlying(symbol, fallback = 'equity') {
+  const raw = String(symbol || '').trim().toUpperCase();
+  const listing = securityListingForSymbol(raw);
+  if (listing) return listing.category;
+  const etfUnderlying = TOKENIZED_ETF_WRAPPERS[raw];
+  if (etfUnderlying || ETF_SYMBOLS.has(raw) || ETF_SYMBOLS.has(EQUITY_SYMBOL_ALIASES[raw])) return 'etf';
+  return fallback;
+}
+
+function normalizedOfficialType(type) {
+  return String(type || '').trim().toUpperCase().replace(/[^A-Z0-9]+/g, '');
+}
+
+const OFFICIAL_TYPE_CATEGORIES = Object.freeze({
+  PREIPO:'pre-ipo', PREMARKET:'pre-ipo',
+  ETF:'etf', EQUITYETF:'etf', STOCKETF:'etf',
+  COMMODITY:'commodity', COMMODITIES:'commodity', COMMOD:'commodity', METAL:'commodity', METALS:'commodity',
+  INDEX:'index', INDICES:'index', FOREX:'fx', FX:'fx',
+  STOCK:'equity', STOCKS:'equity', EQUITY:'equity', EQUITIES:'equity', SHARE:'equity', SHARES:'equity',
+  PREFERREDSTOCK:'equity'
+});
+const OFFICIAL_NON_RWA_TYPES = new Set(['CRYPTO','COIN','TOKEN','MEME','MEMECOIN']);
+
+function categoryForOfficialType(type) {
+  const raw = String(type || '').trim().toUpperCase();
+  const normalized = normalizedOfficialType(raw);
+  if (!normalized) return '';
+  if (OFFICIAL_NON_RWA_TYPES.has(normalized)) return 'other';
+  if (OFFICIAL_TYPE_CATEGORIES[normalized]) return OFFICIAL_TYPE_CATEGORIES[normalized];
+  const tokens = raw.split(/[^A-Z0-9]+/).filter(Boolean);
+  if (tokens.some(token => OFFICIAL_NON_RWA_TYPES.has(token))) return 'other';
+  if (tokens.includes('ETF')) return 'etf';
+  if (tokens.some(token => ['COMMODITY','COMMODITIES','COMMOD','METAL','METALS'].includes(token))) return 'commodity';
+  if (tokens.some(token => ['INDEX','INDICES'].includes(token))) return 'index';
+  if (tokens.some(token => ['FOREX','FX'].includes(token))) return 'fx';
+  if (tokens.some(token => ['STOCK','STOCKS','EQUITY','EQUITIES','SHARE','SHARES'].includes(token))) return 'equity';
+  return '';
+}
+
+function hasExplicitPreIpoLabel(name) {
+  return /\bPRE(?:[\s_-]?IPO|MARKET)\b/i.test(String(name || ''));
+}
+
+function isExplicitTrue(value) {
+  return value === true || value === 1 || ['1','true','yes'].includes(String(value || '').trim().toLowerCase());
+}
 
 function canonicalSymbol(symbol) {
   const normalized = String(symbol || '').trim().toUpperCase();
@@ -2017,12 +2134,16 @@ function canonicalSymbolForCategory(symbol, category) {
   if (category === 'commodity') return COMMODITY_SYMBOL_ALIASES[normalized] ?? normalized;
   if (category === 'index') return INDEX_SYMBOL_ALIASES[normalized] ?? normalized;
   if (category === 'equity' || category === 'etf' || category === 'pre-ipo') {
+    const listing = securityListingForSymbol(normalized);
+    if (listing) return listing.canonical;
     return EQUITY_SYMBOL_ALIASES[normalized] ?? normalized;
   }
   return canonicalSymbol(normalized);
 }
 
 function inferCategory(symbol, name = '') {
+  const listing = securityListingForSymbol(symbol);
+  if (listing) return listing.category;
   const canonical = canonicalSymbol(symbol);
   const manual = RWA_ASSETS[canonical];
   if (manual?.category) return manual.category;
@@ -2030,7 +2151,7 @@ function inferCategory(symbol, name = '') {
   if (KNOWN_CATEGORIES[canonical]) return KNOWN_CATEGORIES[canonical];
   const upperName = name.toUpperCase();
   const upperSym = canonical.toUpperCase();
-  if (PRE_IPO_SYMBOLS.has(canonical) || /PRE[ -]?IPO|PREMARKET/.test(upperName)) return 'pre-ipo';
+  if (hasExplicitPreIpoLabel(upperName)) return 'pre-ipo';
   if (ETF_SYMBOLS.has(canonical)) return 'etf';
   // FX pairs
   if (canonical.endsWith('USD') && canonical.length >= 6) return 'fx';
@@ -2046,20 +2167,21 @@ function inferCategory(symbol, name = '') {
 }
 
 function categoryFromOfficial(type, symbol, name = '') {
-  const official = String(type || '').toUpperCase();
   const raw = String(symbol || '').trim().toUpperCase();
-  if (PUBLIC_LISTED_EQUITIES.has(raw)) return 'equity';
+  const officialCategory = categoryForOfficialType(type);
+  // A lifecycle match never overrules an explicit crypto identity. In normal
+  // fetchers this is a second line of defence after the venue admission gate.
+  if (officialCategory === 'other') return 'other';
   if (TOKENIZED_ETF_WRAPPERS[raw]) return 'etf';
-  if (official.includes('PRE')) return 'pre-ipo';
-  if (official.includes('ETF')) return 'etf';
-  if (['COMMODITY','COMMODITIES','METAL','METALS','COMMOD'].includes(official)) return 'commodity';
-  if (['INDEX','INDICES'].includes(official)) return 'index';
-  if (official === 'FOREX' || official === 'FX') return 'fx';
-  if (/STOCK|EQUITY|SHARE/.test(official)) {
-    if (PRE_IPO_SYMBOLS.has(raw)) return 'pre-ipo';
-    return ETF_SYMBOLS.has(raw) ? 'etf' : 'equity';
+  const listing = securityListingForSymbol(raw);
+  // Public-vs-pre-IPO only refines a security type; it never overrides an
+  // explicit commodity/index/FX identity with a same-looking ticker.
+  if (listing && (!officialCategory || ['equity','pre-ipo'].includes(officialCategory))) return listing.category;
+  if (officialCategory) {
+    return ['equity','pre-ipo'].includes(officialCategory)
+      ? securityCategoryForUnderlying(raw, officialCategory)
+      : officialCategory;
   }
-  if (PRE_IPO_SYMBOLS.has(raw)) return 'pre-ipo';
   if (ETF_SYMBOLS.has(raw)) return 'etf';
   return inferCategory(raw, name);
 }
@@ -2104,13 +2226,23 @@ for (const [alias, canonical] of Object.entries(SYMBOL_ALIASES)) {
     KNOWN_NAMES[alias] = RWA_ASSETS[canonical].name;
   }
 }
+// Only canonical lifecycle symbols are globally registered. Wrapper/alternate
+// symbols remain usable after a venue has independently identified the product
+// as a security, so this table cannot whitelist a same-ticker crypto asset.
+for (const [symbol, record] of Object.entries(SECURITY_LISTING_REGISTRY)) {
+  KNOWN_CATEGORIES[symbol] = record.category;
+  KNOWN_NAMES[symbol] = record.name;
+}
 
 function registerRwaAsset(symbol, name = '', category = '') {
-  const canonical = category
-    ? canonicalSymbolForCategory(symbol, category)
+  const listing = securityListingForSymbol(symbol);
+  const requestedCategory = listing?.category || category;
+  const canonical = requestedCategory
+    ? canonicalSymbolForCategory(symbol, requestedCategory)
     : canonicalSymbol(symbol);
   if (!canonical) return canonical;
-  const resolvedCategory = category || inferCategory(canonical, name);
+  const canonicalListing = securityListingForSymbol(canonical) || listing;
+  const resolvedCategory = canonicalListing?.category || category || inferCategory(canonical, name);
   const priorCategory = KNOWN_CATEGORIES[canonical];
   if (AMBIGUOUS_SHORT_SYMBOLS.has(canonical) && priorCategory && resolvedCategory !== priorCategory) {
     // Drop the name copied from the opposite alias family (e.g. PL=platinum)
@@ -2118,7 +2250,8 @@ function registerRwaAsset(symbol, name = '', category = '') {
     delete KNOWN_NAMES[canonical];
   }
   if (resolvedCategory) KNOWN_CATEGORIES[canonical] = resolvedCategory;
-  if (name && name !== symbol && !KNOWN_NAMES[canonical]) KNOWN_NAMES[canonical] = escapeHtml(name);
+  if (canonicalListing?.name) KNOWN_NAMES[canonical] = canonicalListing.name;
+  else if (name && name !== symbol && !KNOWN_NAMES[canonical]) KNOWN_NAMES[canonical] = escapeHtml(name);
   return canonical;
 }
 // Dashboard-specific extras (not in rwa-cli's RWA_ASSETS)
@@ -2238,15 +2371,6 @@ KNOWN_CATEGORIES['NDX100'] = 'index'; // NASDAQ 100 Index
 KNOWN_CATEGORIES['US100'] = 'index';  // US 100 (NASDAQ 100)
 KNOWN_CATEGORIES['US500'] = 'index';  // US 500 (S&P 500)
 KNOWN_CATEGORIES['IBOV'] = 'index';   // Bovespa Index (Brazil)
-// ── Listing-status fixes (audited 2026-08-07) ──
-KNOWN_CATEGORIES['SPCX'] = 'equity';       // SpaceX began Nasdaq trading in June 2026
-KNOWN_CATEGORIES['SPACEX'] = 'equity';     // SpaceX alternate venue ticker
-KNOWN_CATEGORIES['CBRS'] = 'equity';       // Cerebras began Nasdaq trading in May 2026
-KNOWN_CATEGORIES['MINIMAX'] = 'equity';    // MiniMax HKEX 0100
-KNOWN_CATEGORIES['ZHIPU'] = 'equity';      // Z.ai / Zhipu HKEX 2513
-KNOWN_CATEGORIES['CXMT'] = 'equity';       // ChangXin Memory STAR Market
-KNOWN_CATEGORIES['OPENAI'] = 'pre-ipo';    // OpenAI pre-IPO synthetic
-KNOWN_CATEGORIES['ANTHROPIC'] = 'pre-ipo'; // Anthropic pre-IPO synthetic
 KNOWN_CATEGORIES['KUAISHOU'] = 'equity';
 KNOWN_CATEGORIES['QQQX'] = 'etf';
 KNOWN_CATEGORIES['SPYX'] = 'etf';
@@ -2269,13 +2393,6 @@ KNOWN_NAMES['EWH'] = 'iShares MSCI Hong Kong ETF';
 KNOWN_NAMES['EWZ'] = 'iShares MSCI Brazil ETF';
 KNOWN_NAMES['INDA'] = 'iShares MSCI India ETF';
 KNOWN_NAMES['GDX'] = 'VanEck Gold Miners ETF';
-KNOWN_NAMES['SPCX'] = 'SpaceX';
-KNOWN_NAMES['SPACEX'] = 'SpaceX';
-KNOWN_NAMES['OPENAI'] = 'OpenAI (Pre-IPO)';
-KNOWN_NAMES['ANTHROPIC'] = 'Anthropic (Pre-IPO)';
-KNOWN_NAMES['MINIMAX'] = 'MiniMax Group';
-KNOWN_NAMES['ZHIPU'] = 'Z.ai (Zhipu AI)';
-KNOWN_NAMES['CXMT'] = 'ChangXin Memory Technologies';
 KNOWN_NAMES['KUAISHOU'] = 'Kuaishou Technology';
 KNOWN_NAMES['QQQX'] = 'Invesco QQQ Trust (tokenized)';
 KNOWN_NAMES['SPYX'] = 'SPDR S&P 500 ETF Trust (tokenized)';
@@ -2286,6 +2403,36 @@ KNOWN_NAMES['COP'] = 'ConocoPhillips';
 KNOWN_NAMES['GEV'] = 'GE Vernova';
 KNOWN_NAMES['CBRS'] = 'Cerebras Systems';
 KNOWN_NAMES['SKHY'] = 'SK hynix ADR';
+
+function assertSecurityListingRegistry() {
+  const issues = [];
+  const aliases = new Map();
+  for (const [canonical, record] of Object.entries(SECURITY_LISTING_REGISTRY)) {
+    if (record.status === 'public' && (!record.listedOn || record.category !== 'equity')) {
+      issues.push(`${canonical}: public listing must have listedOn and equity category`);
+    }
+    if (record.category === 'pre-ipo' && record.listedOn) {
+      issues.push(`${canonical}: pre-IPO record cannot have a public trading date`);
+    }
+    for (const alias of [canonical, ...record.aliases]) {
+      const owner = aliases.get(alias);
+      if (owner && owner !== canonical) issues.push(`${alias}: alias belongs to both ${owner} and ${canonical}`);
+      aliases.set(alias, canonical);
+    }
+    const staleVenueCategory = categoryFromOfficial('PREMARKET', canonical);
+    if (staleVenueCategory !== record.category) {
+      issues.push(`${canonical}: stale PREMARKET metadata resolved to ${staleVenueCategory}`);
+    }
+  }
+  if (categoryFromOfficial('PREFERRED_STOCK', 'STRC') === 'pre-ipo') {
+    issues.push('PREFERRED_STOCK must not match the PRE-IPO taxonomy');
+  }
+  if (categoryFromOfficial('crypto', 'QNT') !== 'other') {
+    issues.push('an explicit QNT crypto product must not inherit Quantinuum listing status');
+  }
+  if (issues.length) throw new Error(`Security listing registry invalid: ${issues.join('; ')}`);
+}
+assertSecurityListingRegistry();
 
 // Market/origin tags are intentionally separate from asset category. Official
 // venue metadata wins; the static map fills gaps on venues that only say stock.
@@ -2525,7 +2672,6 @@ function tradeXyzCategory(symbol, name = '', officialType = '') {
   if (TRADE_XYZ_COMMODITY_SYMBOLS.has(raw)) return 'commodity';
   if (TRADE_XYZ_INDEX_SYMBOLS.has(raw)) return 'index';
   if (ETF_SYMBOLS.has(raw)) return 'etf';
-  if (PRE_IPO_SYMBOLS.has(raw)) return 'pre-ipo';
   return inferCategory(raw, name);
 }
 
@@ -2835,7 +2981,7 @@ async function fetchGate() {
     const contract = meta.name || '';
     const t = tickerMap[contract] || {};
     const venueBase = contract.replace(/_USDT$/i, '').toUpperCase();
-    const normalized = normalizeOfficialRwaSymbol(venueBase, meta.is_pre_market ? 'PREMARKET' : meta.contract_type);
+    const normalized = normalizeOfficialRwaSymbol(venueBase, isExplicitTrue(meta.is_pre_market) ? 'PREMARKET' : meta.contract_type);
     const base = normalized.symbol;
 
     if (EXCLUDED_SYMBOLS.has(base)) continue;
@@ -2925,7 +3071,9 @@ async function fetchGate() {
 const BINANCE_API_BASE = 'https://fapi.binance.com/fapi/v1';
 // Official Binance catalog snapshot captured 2026-08-07. Live exchangeInfo is
 // always preferred; this prevents a temporary Binance block from deleting the
-// venue. Duplicate canonical names preserve separately listed contracts.
+// venue. Group labels reproduce the venue snapshot only: every row still passes
+// through SECURITY_LISTING_REGISTRY, so a stale PRE-IPO group cannot override a
+// verified public listing. Duplicate canonical names preserve separate contracts.
 const BINANCE_TRADIFI_SNAPSHOT_GROUPS = {
   EQUITY: ['AAOI','AAPL','ADBE','ALAB','AMAT','AMD','AMZN','APP','ARM','ASML','ASTS','AVGO','AXTI','BABA','BB','BE','BMNR','BNC','BOT','BRK-B','BSP','BX','CAT','CBRS','CIEN','COHR','COIN','COST','CRCL','CRDO','CRM','CRWD','CRWV','CSCO','DELL','DIS','DKNG','EBAY','FLEX','FLNC','FWDI','GEV','GIGADEV','GLW','GME','GOOGL','GS','HD','HIMS','HOOD','HPE','HYUNDAI','IBM','INTC','INTW','IREN','JPM','KLAC','KO','LITE','LLY','LRCX','META','MINIMAX','MRVL','MSFT','MSTR','MU','MUU','MVLL','NBIS','NFLX','NOK','NOW','NVDA','NVO','ONDS','ORCL','PANW','PAYP','PENG','PLTR','POPMART','PYPL','QCOM','QNTX','RDDT','RIVN','RKLB','SAMSUNG','SHAZ','SKHY','SKHYNIX','SMCI','SNDK','SNOW','SOFI','SONY','SPCX','SPCX','STRC','STXX','TBT','TENCENT','TENCENT','TER','TMF','TSLA','TSM','TTWO','TXN','UBER','USAR','V','VRT','WDC','WEN','WMT','XBI','XIAOMI','ZHIPU','ZM'],
   'PRE-IPO': ['ANTHROPIC','OPENAI'],
@@ -3047,7 +3195,11 @@ async function fetchBinance() {
     const isOfficialRwa = meta.contractType === 'TRADIFI_PERPETUAL' ||
       (meta.contractType === 'PERPETUAL' && ['PAXG', 'XAUT'].includes(venueBase));
     if (!isOfficialRwa) continue;
-    const normalized = normalizeOfficialRwaSymbol(venueBase, meta.underlyingType);
+    // PAXG/XAUT are the only audited Binance COIN-underlying exceptions. Their
+    // contract identity gate above is explicit, so classify them as commodities
+    // without weakening the global COIN/crypto collision guard (notably QNT).
+    const officialAssetType = ['PAXG', 'XAUT'].includes(venueBase) ? 'COMMODITY' : meta.underlyingType;
+    const normalized = normalizeOfficialRwaSymbol(venueBase, officialAssetType);
     const base = normalized.symbol;
     if (EXCLUDED_SYMBOLS.has(base)) continue;
 
@@ -6327,7 +6479,7 @@ async function fetchSpotRwaGate() {
     const t = tickerMap[pair] || {};
     const gateUnderlying = _arbUnderlyingKey(base);
     if (gateUnderlying !== base) {
-      const gateCategory = ETF_SYMBOLS.has(gateUnderlying) ? 'etf' : (PRE_IPO_SYMBOLS.has(gateUnderlying) ? 'pre-ipo' : 'equity');
+      const gateCategory = securityCategoryForUnderlying(gateUnderlying);
       registerSpotAssetMeta(base, gateUnderlying, base.endsWith('ON') ? 'Ondo Finance' : 'xStocks', gateCategory, 'gate');
     }
     const last = parseFloat(t.last) || 0;
@@ -6785,7 +6937,7 @@ async function fetchSpotRwaBybit() {
     const base = (entry.baseCoin || '').toUpperCase();
     const underlying = _arbUnderlyingKey(base);
     if (underlying !== base) {
-      const bybitCategory = ETF_SYMBOLS.has(underlying) ? 'etf' : (PRE_IPO_SYMBOLS.has(underlying) ? 'pre-ipo' : 'equity');
+      const bybitCategory = securityCategoryForUnderlying(underlying);
       registerSpotAssetMeta(base, underlying, 'xStocks', bybitCategory, 'bybit');
     }
     const last = parseFloat(t.lastPrice) || 0;
@@ -7065,7 +7217,7 @@ const OFFICIAL_TOKENIZED_UNDERLYINGS = new Set([
 function registerSpotAssetMeta(token, underlyingSymbol, issuer, category, venue = '') {
   const tokenKey = String(token || '').toUpperCase();
   const rawUnderlying = String(underlyingSymbol || '').toUpperCase();
-  const resolvedCategory = category || (ETF_SYMBOLS.has(rawUnderlying) ? 'etf' : (PRE_IPO_SYMBOLS.has(rawUnderlying) ? 'pre-ipo' : 'equity'));
+  const resolvedCategory = securityCategoryForUnderlying(rawUnderlying, category || 'equity');
   const underlying = canonicalSymbolForCategory(rawUnderlying, resolvedCategory);
   if (!tokenKey || !underlying) return;
   if (['bitget','kraken','binance'].includes(venue)) OFFICIAL_TOKENIZED_UNDERLYINGS.add(underlying);

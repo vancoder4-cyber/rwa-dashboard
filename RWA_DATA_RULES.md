@@ -78,19 +78,33 @@
 
 类别优先级：
 
-1. 已审计的上市状态/ETF wrapper override。
-2. 官方细分类别。
-3. 静态 ETF/Pre-IPO 集合。
-4. 名称推断，仅作为最后 fallback。
+1. 已审计的 ETF wrapper override。
+2. `SECURITY_LISTING_REGISTRY` 中的公司上市生命周期。
+3. 交易所官方细分类别的精确映射。
+4. 静态 ETF 集合。
+5. 名称推断，仅作为最后 fallback。
 
 当前重要 override：
 
-- `QNT/QNTX/QNTSTOCK`：Equity。
+- `SPCX/SPACEX/SPCXB/SPCXON/SPCXX`：统一为已上市的 SpaceX Equity。
+- `CBRS/CBRSB/CBRSON/CBRSX/sCBRS`：统一为已上市的 Cerebras Equity。
+- `QNT/QNTX/QNTSTOCK/QNTB`：统一为已上市的 Quantinuum Equity，但只有场所先确认 security 后才应用 alias。
+- `MINIMAX/ZHIPU/CXMT`：已上市 Equity。
+- `OPENAI/ANTHROPIC/ANDURIL/KALSHI/KIMI/NEURALINK/POLYMARKET`：Pre-IPO；后五项由 Gate 官方 `stocks + is_pre_market=true` catalog 交叉审计纳入。
+- `UNITREE`：已获 IPO 注册、尚未找到开始交易公告，因此仍为 Pre-IPO。
 - `EWH/DFEN/QQQX/SPYX/TQQQX/SLVON`：ETF。
 - `H100`：计算资源类 Commodity，不是股票指数。
 - 已公开上市的公司不能因为场所残留 `is_pre_market` 就继续显示为 Pre-IPO。
 
-Pre-IPO 集合应保持小而明确，并定期核对上市事件。任何公司上市后，要同时更新 canonical category、名称、alias 和所有场所 fallback。
+“已上市”以交易所开始公开交易为准；递表、审核通过或发行注册都不等于已经上市。Pre-IPO 集合应保持小而明确，并定期核对上市事件。
+
+上市状态只能在 `SECURITY_LISTING_REGISTRY` 更新一次，由它统一派生 canonical category、名称和 aliases。场所 snapshot 的 `PRE-IPO` 分组只是当时的产品目录，不拥有最终分类权；即使 fallback 分组过期，也必须经过 registry 再分类。
+
+官方类型只允许精确归一化映射，例如 `PRE-IPO/PRE_IPO/PREIPO -> PREIPO`、`PRE-MARKET -> PREMARKET`。禁止用 `includes('PRE')` 判断，否则 `PREFERRED_STOCK` 等无关类型也可能被误判为 Pre-IPO。布尔字段也必须显式解析，字符串 `"false"` 不能按 JavaScript truthy 值处理。
+
+Registry 只纠正“已经由场所确认是 security”的产品；显式 `crypto/coin/token/meme` 类型永远先返回 Other/拒绝，不能因为 ticker 命中 `QNT` 等已上市公司 alias 而被 registry 反向放行。
+
+Gate 当前另有 `BP + is_pre_market=true`，但其 `contract_type` 为空，未通过 RWA 身份门控，所以不能仅凭 premarket flag 纳入 registry 或页面。
 
 ## 7. Market tags
 
@@ -120,7 +134,7 @@ Pre-IPO 集合应保持小而明确，并定期核对上市事件。任何公司
 2. 明确断言普通 QNT crypto 等已知冲突不会进入结果。
 3. 检查所有 canonical ticker 是否存在跨 venue 类别冲突。
 4. 检查 Equity 名称中是否出现 ETF/Fund/Trust/Index 等明显错标。
-5. 检查 Pre-IPO 集合是否包含已经上市的公司。
+5. 检查 `SECURITY_LISTING_REGISTRY`：public 必须有开始交易日期；Pre-IPO 不得有开始交易日期；alias 不得跨公司冲突。
 6. 检查 spot 是否存在裸股票 ticker、普通 crypto ticker 或未经确认的 suffix wrapper。
 7. 对现货价格与股票参考价做异常比率扫描；异常只触发复核，不自动决定身份。
 8. Preview 中核对 venue counts、目标资产标签、Top 30 和 Cross-Venue Coverage。
@@ -158,7 +172,8 @@ Bitget 当前同时返回 `isRwa=YES` 和 `symbolType=crypto`，但该产品对�
 - 新规则优先写成 venue-specific identity gate，不要继续扩大全局 symbol 白名单。
 - 所有人工 exception 必须精确到 symbol、说明原因并记录审计日期。
 - Snapshot 只用于接口故障时维持可用性，正常情况下始终优先 live catalog。
-- 修改本文件时，应同步检查 `index.html` 中对应的 allowlist、alias、category override、market tags 和 spot wrapper 规则。
+- 上市状态只修改 `SECURITY_LISTING_REGISTRY`；venue allowlist/snapshot 只描述产品覆盖，不能重复拥有 public-vs-pre-IPO 结论。
+- 修改本文件时，应同步检查 `index.html` 中对应的 allowlist、market tags 和 spot wrapper 规则。
 - Git 历史保留旧规则，生产发布必须从已验证的 Preview promote，避免本地与线上规则漂移。
 
 ## 13. 传统市场成交量与期权异动
@@ -189,4 +204,10 @@ Bitget 当前同时返回 `isRwa=YES` 和 `symbolType=crypto`，但该产品对�
 - Nasdaq Market Activity（股票/ETF Share Volume、Average Volume）：<https://www.nasdaq.com/market-activity>。
 - OCC Volume Query / batch processing（期权成交量）：<https://www.theocc.com/market-data/market-data-reports/volume-and-open-interest/volume-query>。
 - Quantinuum 上市状态：[Quantinuum Announces Closing of Upsized Initial Public Offering](https://ir.quantinuum.com/news-releases/news-release-details/quantinuum-announces-closing-upsized-initial-public-offering)。
+- SpaceX 上市状态：[SEC free-writing prospectus（SPCX，2026-06-12 开始交易）](https://www.sec.gov/Archives/edgar/data/1181412/000162828026042466/spaceexplorationtechnologi.htm)。
+- Cerebras 上市状态：[SEC Form 10-Q（CBRS，2026-05-14 开始交易）](https://www.sec.gov/Archives/edgar/data/2021728/000162828026044981/cbrs-20260331.htm)。
+- MiniMax 上市状态：[HKEX allotment results（0100，2026-01-09 开始交易）](https://www1.hkexnews.hk/listedco/listconews/sehk/2026/0108/2026010801342.pdf)。
+- Z.AI / Zhipu 上市身份：[HKEX issuer announcement（2513）](https://www.hkexnews.hk/listedco/listconews/sehk/2026/0112/2026011201131.pdf)。
+- 长鑫科技上市状态：[上交所上市交易公告（688825，2026-07-27）](https://www.sse.com.cn/disclosure/announcement/listing/ipo/c/c_20260724_10826610.shtml)。
+- Unitree 当前阶段：[证监会 IPO 注册批复（2026-07-01）](https://www.csrc.gov.cn/csrc/c105906/c7642867/content.shtml)；注册不等于已经开始交易。
 - GigaDevice 双重上市：[GigaDevice Successfully Lists in Hong Kong](https://www.gigadevice.com/about/news-and-event/news/gigadevice-listed-on-hkex)。
