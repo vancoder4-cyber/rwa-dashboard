@@ -2895,10 +2895,18 @@ const BINANCE_TRADIFI_SNAPSHOT = (() => {
 })();
 
 async function fetchBinancePublic(path, optional = false) {
+  const endpointByPath = {
+    '/exchangeInfo': 'exchangeInfo',
+    '/premiumIndex': 'premiumIndex',
+    '/ticker/24hr': 'ticker24hr',
+    '/fundingInfo': 'fundingInfo'
+  };
   let lastError = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const response = await fetch(`${BINANCE_API_BASE}${path}`, { cache: 'no-store', signal: AbortSignal.timeout(3500) });
+      const endpoint = endpointByPath[path];
+      const url = endpoint ? `/api/binance-public?endpoint=${endpoint}` : `${BINANCE_API_BASE}${path}`;
+      const response = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(endpoint ? 12000 : 3500) });
       if (response.ok) return response;
       lastError = new Error(`HTTP ${response.status}`);
       const retryAfter = parseFloat(response.headers.get('Retry-After'));
