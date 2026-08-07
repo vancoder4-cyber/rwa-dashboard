@@ -45,8 +45,13 @@ In Vercel Dashboard → Project Settings → Domains → add your domain.
 ## File Structure
 ```
 deploy/
-├── index.html      ← production dashboard (single-file app)
-├── vercel.json     ← Vercel routing & security headers
+├── index.html          ← production dashboard (single-file app)
+├── vercel.json         ← Vercel routing & security headers
+├── RWA_DATA_RULES.md   ← asset identity, labels, and audit rules
 ├── .gitignore
-└── DEPLOY.md       ← this file
+└── DEPLOY.md           ← this file
 ```
+
+Before changing venue catalogs, symbol aliases, category overrides, market
+tags, or spot wrapper discovery, review [RWA_DATA_RULES.md](./RWA_DATA_RULES.md)
+and complete its pre-release audit checklist.
