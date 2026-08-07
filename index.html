@@ -1160,9 +1160,6 @@ input[type="checkbox"] {
     <div class="sub-tab" onclick="switchSubTab('bitget', this)"><span class="venue-dot bitget"></span>Bitget</div>
     <div class="sub-tab" onclick="switchSubTab('gate', this)"><span class="venue-dot gate"></span>Gate.io</div>
     <div class="sub-tab" onclick="switchSubTab('binance', this)"><span class="venue-dot binance"></span>Binance</div>
-    <div class="sub-tab" onclick="switchSubTab('lighter', this)"><span class="venue-dot lighter"></span>Lighter</div>
-    <div class="sub-tab" onclick="switchSubTab('vest', this)"><span class="venue-dot vest"></span>Vest</div>
-    <div class="sub-tab" onclick="switchSubTab('cbintx', this)"><span class="venue-dot cbintx"></span>Coinbase INTX</div>
   </div>
 
   <!-- Aggregator -->
@@ -1481,8 +1478,6 @@ input[type="checkbox"] {
     <div class="spot-sub-tab" onclick="switchSpotSub('binance',this)"><span class="venue-dot binance"></span> Binance <span class="spot-cnt">2</span></div>
     <div class="spot-sub-tab" onclick="switchSpotSub('bitget',this)"><span class="venue-dot bitget"></span> Bitget <span class="spot-cnt">5</span></div>
     <div class="spot-sub-tab" onclick="switchSpotSub('kraken',this)"><span class="venue-dot kraken"></span> Kraken <span class="spot-cnt">5</span></div>
-    <div class="spot-sub-tab" onclick="switchSpotSub('bybit',this)"><span class="venue-dot bybit"></span> Bybit <span class="spot-cnt">0</span></div>
-    <div class="spot-sub-tab" onclick="switchSpotSub('bit',this)"><span class="venue-dot bit"></span> Bit.com <span class="spot-cnt">0</span></div>
   </div>
 
   <!-- SPOT OVERVIEW -->
@@ -1608,8 +1603,6 @@ input[type="checkbox"] {
               <option value="binance">Binance Perp</option>
               <option value="bitget">Bitget Perp</option>
               <option value="tradexyz">trade.xyz Perp</option>
-              <option value="lighter">Lighter Perp</option>
-              <option value="vest">Vest Perp</option>
             </select>
           </div>
           <div class="spot-perp-sel">
@@ -1714,10 +1707,9 @@ const VENUES = {
   bitget:   { name: 'Bitget',    color: '#00B74F', fundingInterval: 8, makerFee: 0.0002, takerFee: 0.0006 },
   gate:     { name: 'Gate.io',   color: '#2B5FE0', fundingInterval: 8, makerFee: 0.00015, takerFee: 0.0005 },
   binance:  { name: 'Binance',   color: '#C99400', fundingInterval: 8, makerFee: 0.0002, takerFee: 0.0005 },
-  lighter:  { name: 'Lighter',   color: '#00B74F', fundingInterval: 1, makerFee: 0.00004, takerFee: 0.00028 },
-  vest:     { name: 'Vest',      color: '#E0246A', fundingInterval: 1, makerFee: 0.0002, takerFee: 0.0006 },
-  cbintx:   { name: 'Coinbase INTX', color: '#0052FF', fundingInterval: 1, makerFee: 0.0004, takerFee: 0.0008 },
 };
+const ENABLED_PERP_VENUES = Object.freeze(Object.keys(VENUES));
+const ENABLED_SPOT_VENUES = Object.freeze(['gate', 'kraken', 'bitget', 'binance']);
 
 const CAT_COLORS = { index:'#007AFF', equity:'#AF52DE', commodity:'#C7942A', etf:'#32ADE6', 'pre-ipo':'#FF9500', fx:'#FF2D55', other:'#98989D' };
 const CAT_LABELS = { index:'Index', equity:'Equity', commodity:'Commodity', etf:'ETF', 'pre-ipo':'Pre-IPO', fx:'FX', other:'Other' };
@@ -2194,7 +2186,7 @@ function renderMarketTags(assetOrTags) {
 // allData: array of { coin, fullName, category, venue, markPx, indexPx, change, volume, oi, funding }
 let allData = [];
 // Volume growth: venue → { coin: { prevVol, currVol, growth% } }
-let volumeGrowthData = { tradexyz: {}, bitget: {}, gate: {}, binance: {}, lighter: {}, vest: {}, cbintx: {} };
+let volumeGrowthData = { tradexyz: {}, bitget: {}, gate: {}, binance: {} };
 const VENUES_WITH_GROWTH = new Set(['tradexyz', 'bitget', 'gate']); // Only these venues have volume growth fetchers
 let lastGrowthFetch = 0;
 const GROWTH_FETCH_INTERVAL = 300000; // re-fetch every 5 min
@@ -2213,16 +2205,16 @@ let globalSearchTerm = '';
 let alertsData = [];
 
 // Per-venue table state
-let venueTableCatFilter = { tradexyz: 'all', bitget: 'all', gate: 'all', binance: 'all', lighter: 'all', vest: 'all', cbintx: 'all' };
-let venueTableSearch = { tradexyz: '', bitget: '', gate: '', binance: '', lighter: '', vest: '', cbintx: '' };
-let venueTableSort = { tradexyz: { key: 'volume', dir: -1 }, bitget: { key: 'volume', dir: -1 }, gate: { key: 'volume', dir: -1 }, binance: { key: 'volume', dir: -1 }, lighter: { key: 'volume', dir: -1 }, vest: { key: 'volume', dir: -1 }, cbintx: { key: 'volume', dir: -1 } };
+let venueTableCatFilter = { tradexyz: 'all', bitget: 'all', gate: 'all', binance: 'all' };
+let venueTableSearch = { tradexyz: '', bitget: '', gate: '', binance: '' };
+let venueTableSort = { tradexyz: { key: 'volume', dir: -1 }, bitget: { key: 'volume', dir: -1 }, gate: { key: 'volume', dir: -1 }, binance: { key: 'volume', dir: -1 } };
 let assetSort = { key: 'volume', dir: -1 };
 
 // Sparkline state
-let sparkHours = { tradexyz: 24, bitget: 24, gate: 24, binance: 24, lighter: 24, vest: 24, cbintx: 24 };
+let sparkHours = { tradexyz: 24, bitget: 24, gate: 24, binance: 24 };
 let divHoldDays = 0; // 0 = no fee deduction
 let fundingCache = {}; // key: "venue:coin" → { hours, data }
-let sparkLoadGeneration = { tradexyz:0, bitget:0, gate:0, binance:0, lighter:0, vest:0, cbintx:0 };
+let sparkLoadGeneration = { tradexyz:0, bitget:0, gate:0, binance:0 };
 
 // ═══════════════════════════════════════════════
 // HELPERS
@@ -3933,17 +3925,12 @@ async function refresh(isFirst) {
   if (refreshInFlight) return;
   refreshInFlight = true;
   try {
-    const [xyzAssets, bitgetAssets, gateAssets, binanceAssets, lighterAssets, vestAssets, cbintxAssets] = await Promise.all([
-      fetchVenueWithFallback('tradexyz', fetchTradeXyz),
-      fetchVenueWithFallback('bitget', fetchBitget),
-      fetchVenueWithFallback('gate', fetchGate),
-      fetchVenueWithFallback('binance', fetchBinance),
-      fetchVenueWithFallback('lighter', fetchLighter),
-      fetchVenueWithFallback('vest', fetchVest),
-      fetchVenueWithFallback('cbintx', fetchCoinbaseIntx)
-    ]);
+    const perpFetchers = { tradexyz:fetchTradeXyz, bitget:fetchBitget, gate:fetchGate, binance:fetchBinance };
+    const venueDatasets = await Promise.all(
+      ENABLED_PERP_VENUES.map(venue => fetchVenueWithFallback(venue, perpFetchers[venue]))
+    );
 
-    allData = [...xyzAssets, ...bitgetAssets, ...gateAssets, ...binanceAssets, ...lighterAssets, ...vestAssets, ...cbintxAssets]
+    allData = venueDatasets.flat()
       .filter(d => !EXCLUDED_SYMBOLS.has(canonicalSymbolForCategory(d.coin, d.category)));
 
     // Perp quotes are refreshed every 30 seconds; keep spot/perp matching in
@@ -4032,7 +4019,7 @@ function computeAlerts() {
   alertsData = [];
 
   // 1. Extreme funding rates — interval-aware thresholds
-  // 1h venues (trade.xyz, vest, cbintx): small per-hour rates annualize aggressively, use higher thresholds
+  // 1h venue (trade.xyz): small per-hour rates annualize aggressively, use higher thresholds
   // 8h venues (binance, bitget, gate): standard thresholds
   allData.forEach(d => {
     if (d.funding === null || d.funding === 0) return;
@@ -4167,9 +4154,6 @@ function renderCurrentView() {
     else if (currentSubTab === 'bitget') renderVenueTable('bitget');
     else if (currentSubTab === 'gate') renderVenueTable('gate');
     else if (currentSubTab === 'binance') renderVenueTable('binance');
-    else if (currentSubTab === 'lighter') renderVenueTable('lighter');
-    else if (currentSubTab === 'vest') renderVenueTable('vest');
-    else if (currentSubTab === 'cbintx') renderVenueTable('cbintx');
   }
   else if (currentView === 'asset') renderAssetView();
   else if (currentView === 'heatmap') renderHeatmap();
@@ -5117,7 +5101,7 @@ function renderTop30Volume() {
       <div class="section-subtitle">Fetching klines for the highest-current-volume candidates; remaining listings use 24h×30 estimates…</div>
       <div style="text-align:center;padding:40px;color:var(--foreground-dim)">
         <div class="spin" style="display:inline-block;width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite"></div>
-        <div style="margin-top:12px;font-size:12px">Loading 30-day kline data from Binance, Bitget, Gate.io, trade.xyz, Coinbase INTX…</div>
+        <div style="margin-top:12px;font-size:12px">Loading 30-day kline data from Binance, Bitget, Gate.io, and trade.xyz…</div>
       </div>`;
     // Kick off the fetch, then re-render
     fetchReal30DayVolume().then(() => renderTop30Volume()).catch(e => {
@@ -5302,10 +5286,7 @@ function renderVenueTable(venue) {
     tradexyz: { tbodyId: 'xyzTableBody', prefix: 'xyz', hideId: 'xyzHideInactive' },
     bitget:   { tbodyId: 'bgTableBody',  prefix: 'bg',  hideId: 'bgHideInactive' },
     gate:     { tbodyId: 'gateTableBody', prefix: 'gate', hideId: 'gateHideInactive' },
-    binance:  { tbodyId: 'bnTableBody',  prefix: 'bn',  hideId: 'bnHideInactive' },
-    lighter:  { tbodyId: 'ltTableBody',  prefix: 'lt',  hideId: 'ltHideInactive' },
-    vest:     { tbodyId: 'vstTableBody', prefix: 'vst', hideId: 'vstHideInactive' },
-    cbintx:   { tbodyId: 'cbiTableBody', prefix: 'cbi', hideId: 'cbiHideInactive' }
+    binance:  { tbodyId: 'bnTableBody',  prefix: 'bn',  hideId: 'bnHideInactive' }
   };
   const vm = venueMap[venue] || venueMap.bitget;
   const tbodyId = vm.tbodyId;
@@ -6675,19 +6656,17 @@ async function refreshSpotArbData() {
   if (refreshBtn) { refreshBtn.disabled = true; refreshBtn.textContent = '⟳ Loading…'; }
   try {
     // Load the authoritative Reality catalog first. It registers hundreds of
-    // underlyings used by suffix-based discovery on Gate/Bybit and removes a
-    // timing race where those venues could miss newly listed tokenized stocks.
+    // underlyings used by suffix-based discovery on Gate and removes a timing
+    // race where the venue could miss newly listed tokenized stocks.
     const bitgetResult = (await Promise.allSettled([fetchSpotRwaBitget()]))[0];
     const otherResults = await Promise.allSettled([
       fetchSpotRwaGate(),
       fetchSpotRwaKraken(),
       fetchSpotRwaBinance(),
-      fetchSpotRwaBybit(),
-      fetchSpotRwaBit(),
     ]);
-    const results = [otherResults[0], otherResults[1], bitgetResult, otherResults[2], otherResults[3], otherResults[4]];
-    const venueKeys = ['gate', 'kraken', 'bitget', 'binance', 'bybit', 'bit'];
-    const nextSpotData = { ...SPOT_DATA };
+    const results = [otherResults[0], otherResults[1], bitgetResult, otherResults[2]];
+    const venueKeys = ENABLED_SPOT_VENUES;
+    const nextSpotData = {};
     results.forEach((r, i) => {
       const venue = venueKeys[i];
       if (r.status === 'fulfilled') {
@@ -6748,8 +6727,8 @@ async function refreshSpotArbData() {
   }
 }
 
-const SPOT_VENUE_NAMES = { gate:'Gate.io', binance:'Binance', bitget:'Bitget', kraken:'Kraken', bybit:'Bybit', bit:'Bit.com' };
-const SPOT_PERP_VENUES = { gate:{name:'Gate.io',settlesPerDay:3}, binance:{name:'Binance',settlesPerDay:3}, bitget:{name:'Bitget',settlesPerDay:3}, tradexyz:{name:'trade.xyz',settlesPerDay:24}, lighter:{name:'Lighter',settlesPerDay:24}, vest:{name:'Vest',settlesPerDay:24}, cbintx:{name:'Coinbase INTX',settlesPerDay:24} };
+const SPOT_VENUE_NAMES = { gate:'Gate.io', binance:'Binance', bitget:'Bitget', kraken:'Kraken' };
+const SPOT_PERP_VENUES = { gate:{name:'Gate.io',settlesPerDay:3}, binance:{name:'Binance',settlesPerDay:3}, bitget:{name:'Bitget',settlesPerDay:3}, tradexyz:{name:'trade.xyz',settlesPerDay:24} };
 
 const ASSET_META = {
   // ── Tokenized Gold ──
@@ -6827,8 +6806,8 @@ const ISSUER_SHORT = { 'Paxos':'Paxos','Tether':'Tether','Backed Finance':'Backe
 function issuerShort(n) { return ISSUER_SHORT[n] || n; }
 
 const SPOT_FEES = {
-  spot:  { gate:{maker:0.001,taker:0.001}, binance:{maker:0.001,taker:0.001}, bitget:{maker:0.001,taker:0.001}, kraken:{maker:0.0016,taker:0.0026}, bybit:{maker:0.001,taker:0.001} },
-  perp:  { gate:{maker:0.0002,taker:0.0005}, binance:{maker:0.0002,taker:0.0005}, bitget:{maker:0.0002,taker:0.0006}, tradexyz:{maker:0.0003,taker:0.0009}, lighter:{maker:0.00004,taker:0.00028}, vest:{maker:0.0002,taker:0.0006} },
+  spot:  { gate:{maker:0.001,taker:0.001}, binance:{maker:0.001,taker:0.001}, bitget:{maker:0.001,taker:0.001}, kraken:{maker:0.0016,taker:0.0026} },
+  perp:  { gate:{maker:0.0002,taker:0.0005}, binance:{maker:0.0002,taker:0.0005}, bitget:{maker:0.0002,taker:0.0006}, tradexyz:{maker:0.0003,taker:0.0009} },
 };
 let SPOT_HOLD_DAYS = 0; // 0 = "No Fees" mode (show gross funding APR)
 
@@ -7204,7 +7183,7 @@ const _CAT_COLORS = {equity:'#AF52DE',commodity:'var(--gold)',index:'#007AFF',et
 function renderSpotVenueGrid() {
   const grid = document.getElementById('spotVenueGrid');
   if (!grid) return;
-  const venueOrder = ['gate','kraken','bitget','binance','bybit'];
+  const venueOrder = ENABLED_SPOT_VENUES;
   let html = '';
   for (const v of venueOrder) {
     const assets = SPOT_DATA[v];
