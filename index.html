@@ -2151,6 +2151,7 @@ let assetSort = { key: 'volume', dir: -1 };
 let sparkHours = { tradexyz: 24, bitget: 24, gate: 24, binance: 24, lighter: 24, vest: 24, cbintx: 24 };
 let divHoldDays = 0; // 0 = no fee deduction
 let fundingCache = {}; // key: "venue:coin" → { hours, data }
+let sparkLoadGeneration = { tradexyz:0, bitget:0, gate:0, binance:0, lighter:0, vest:0, cbintx:0 };
 
 // ═══════════════════════════════════════════════
 // HELPERS
@@ -2525,72 +2526,76 @@ const GATE_API_BASE = location.hostname === 'localhost' || location.hostname ===
 async function fetchGate() {
   logLoad('Fetching Gate.io data...');
 
-  // Fetch tickers + contracts in parallel for fee data
+  // Contracts are the authoritative listed catalog. Tickers are optional
+  // enrichment: a transient ticker failure must not empty the whole venue.
   const [tickersRes, contractsRes] = await Promise.all([
-    fetch(`${GATE_API_BASE}/tickers`),
-    fetch(`${GATE_API_BASE}/contracts`).catch(() => null)
+    fetch(`${GATE_API_BASE}/tickers`).catch(() => null),
+    fetch(`${GATE_API_BASE}/contracts`)
   ]);
-  if (!tickersRes.ok) throw new Error(`Gate HTTP ${tickersRes.status}`);
-  const tickers = await tickersRes.json();
+  if (!contractsRes.ok) throw new Error(`Gate contracts HTTP ${contractsRes.status}`);
+  const contracts = await contractsRes.json();
+  const tickers = tickersRes?.ok ? await tickersRes.json() : [];
 
   // Contract metadata is the authoritative allowlist and also carries contract
   // multipliers/funding intervals needed for notional calculations.
   const feeMap = {};
   const contractMap = {};
-  if (contractsRes && contractsRes.ok) {
-    try {
-      const contracts = await contractsRes.json();
-      contracts.forEach(c => {
-        contractMap[c.name] = c;
-        feeMap[c.name] = {
-          maker: parseFloat(c.maker_fee_rate) || VENUES.gate.makerFee,
-          taker: parseFloat(c.taker_fee_rate) || VENUES.gate.takerFee,
-          quantoMultiplier: parseFloat(c.quanto_multiplier) || 1,
-          fundingIntervalHours: (parseFloat(c.funding_interval) || 0) / 3600,
-          contractType: c.contract_type || ''
-        };
-      });
-      logLoad(`Gate.io: fee data for ${Object.keys(feeMap).length} contracts`);
-    } catch(e) { /* use defaults */ }
-  }
+  contracts.forEach(c => {
+    contractMap[c.name] = c;
+    feeMap[c.name] = {
+      maker: parseFloat(c.maker_fee_rate) || VENUES.gate.makerFee,
+      taker: parseFloat(c.taker_fee_rate) || VENUES.gate.takerFee,
+      quantoMultiplier: parseFloat(c.quanto_multiplier) || 1,
+      fundingIntervalHours: (parseFloat(c.funding_interval) || 0) / 3600,
+      contractType: c.contract_type || ''
+    };
+  });
+  const tickerMap = {};
+  (Array.isArray(tickers) ? tickers : []).forEach(t => { tickerMap[t.contract] = t; });
+  logLoad(`Gate.io: ${contracts.length} contracts · ${Object.keys(tickerMap).length} tickers`);
 
-  const allowedTypes = new Set(['stocks', 'metals', 'commodities', 'indices']);
+  const allowedTypes = new Set(['stocks', 'metals', 'commodities', 'indices', 'forex']);
+  const rwaContracts = contracts.filter(c => c.status === 'trading' && allowedTypes.has(c.contract_type));
   const assets = [];
 
-  for (const t of tickers) {
+  for (const meta of rwaContracts) {
     // contract format: "BTC_USDT" → base = "BTC"
-    const contract = t.contract || '';
-    const meta = contractMap[contract];
-    if (!meta || meta.status !== 'trading' || !allowedTypes.has(meta.contract_type)) continue;
+    const contract = meta.name || '';
+    const t = tickerMap[contract] || {};
     const venueBase = contract.replace(/_USDT$/i, '').toUpperCase();
     const normalized = normalizeOfficialRwaSymbol(venueBase, meta.is_pre_market ? 'PREMARKET' : meta.contract_type);
     const base = normalized.symbol;
 
     if (EXCLUDED_SYMBOLS.has(base)) continue;
 
-    const markPx = parseFloat(t.mark_price) || 0;
-    const indexPx = parseFloat(t.index_price) || 0;
-    const lastPx = parseFloat(t.last) || 0;
+    const markPx = parseFloat(t.mark_price) || parseFloat(meta.mark_price) || 0;
+    const indexPx = parseFloat(t.index_price) || parseFloat(meta.index_price) || 0;
+    const lastPx = parseFloat(t.last) || parseFloat(meta.last_price) || 0;
     const change = parseFloat(t.change_percentage) || 0;
     const volume = parseFloat(t.volume_24h_quote) || parseFloat(t.volume_24h_usd) || 0;
-    const oi = parseFloat(t.total_size) || 0;
+    const oi = parseFloat(t.total_size) || parseFloat(meta.position_size) || 0;
     const quantoMult = parseFloat(meta.quanto_multiplier) || 1;
     const oiUsd = oi * quantoMult * markPx;
 
-    const rawFunding = parseFloat(t.funding_rate);
+    const rawFunding = parseFloat(t.funding_rate ?? meta.funding_rate);
     const funding = isNaN(rawFunding) ? null : rawFunding;
-    const rawIndicative = parseFloat(t.funding_rate_indicative);
+    const rawIndicative = parseFloat(t.funding_rate_indicative ?? meta.funding_rate_indicative);
     const predictedFunding = isNaN(rawIndicative) ? null : rawIndicative;
 
     const cat = normalized.category;
     registerRwaAsset(base, '', cat);
     const fullName = KNOWN_NAMES[base] || base;
-    const isActive = volume > 0 || oiUsd > 0 || (funding !== null && funding !== 0);
+    const isActive = meta.status === 'trading';
 
     const cf = feeMap[contract] || {};
     assets.push({
       coin: base, symbol: contract, venueSymbol: contract, fullName, category: cat, venue: 'gate',
       markPx: markPx || lastPx, indexPx, change, volume, oi: oiUsd, funding, predictedFunding, isActive,
+      isListed: true, isPriced: (markPx || lastPx) > 0,
+      fieldStatus: {
+        change: tickerMap[contract] ? 'full' : 'unavailable',
+        volume: tickerMap[contract] ? 'full' : 'unavailable'
+      },
       contractMultiplier: quantoMult,
       fundingIntervalHours: cf.fundingIntervalHours || VENUES.gate.fundingInterval,
       makerFee: cf.maker || VENUES.gate.makerFee, takerFee: cf.taker || VENUES.gate.takerFee
@@ -3165,6 +3170,45 @@ function setSparkRange(venue, hours, btnEl) {
   renderVenueTable(venue);
 }
 
+function loadSparklinesBatched(venue, assets) {
+  const generation = (sparkLoadGeneration[venue] || 0) + 1;
+  sparkLoadGeneration[venue] = generation;
+  if (venue === 'tradexyz' && !_isDev) {
+    loadTradeXyzSparklinesBulk(assets, generation).catch(error => console.warn('trade.xyz funding history bulk error:', error));
+    return;
+  }
+  const concurrency = 5;
+  const tasks = assets.map(asset => async () => {
+    if (sparkLoadGeneration[venue] !== generation) return;
+    await loadSparkline(venue, asset);
+  });
+  batchFetch(tasks, concurrency).catch(error => console.warn(`${venue} funding history batch error:`, error));
+}
+
+async function loadTradeXyzSparklinesBulk(assets, generation) {
+  const hours = sparkHours.tradexyz;
+  const chunks = [];
+  for (let i = 0; i < assets.length; i += 40) chunks.push(assets.slice(i, i + 40));
+  const tasks = chunks.map(chunk => async () => {
+    if (sparkLoadGeneration.tradexyz !== generation) return;
+    const symbols = chunk.map(asset => asset.symbol || asset.coin).join(',');
+    const response = await fetch(`/api/hyperliquid-bulk?hours=${hours}&symbols=${encodeURIComponent(symbols)}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const histories = await response.json();
+    if (sparkLoadGeneration.tradexyz !== generation) return;
+    for (const asset of chunk) {
+      const symbol = asset.symbol || asset.coin;
+      fundingCache[`tradexyz:${asset.coin}`] = {
+        hours,
+        data: Array.isArray(histories[symbol]) ? histories[symbol] : [],
+        fetchedAt: Date.now()
+      };
+      await loadSparkline('tradexyz', asset);
+    }
+  });
+  await batchFetch(tasks, 2);
+}
+
 async function loadSparkline(venue, asset) {
   const cellId = `spark_${venue}_${asset.coin}`;
   const cell = document.getElementById(cellId);
@@ -3174,7 +3218,8 @@ async function loadSparkline(venue, asset) {
   const cacheKey = `${venue}:${asset.coin}`;
   let data = fundingCache[cacheKey];
 
-  if (!data || data.hours !== hours) {
+  const shouldRetryEmpty = data && (!Array.isArray(data.data) || data.data.length < 2) && Date.now() - (data.fetchedAt || 0) > 15000;
+  if (!data || data.hours !== hours || shouldRetryEmpty) {
     cell.innerHTML = '<span style="color:var(--text-muted);font-size:11px">loading...</span>';
     try {
       let raw;
@@ -3192,7 +3237,7 @@ async function loadSparkline(venue, asset) {
       } else {
         raw = [];
       }
-      data = { hours, data: raw };
+      data = { hours, data: raw, fetchedAt: Date.now() };
       fundingCache[cacheKey] = data;
     } catch (e) {
       cell.innerHTML = '<span style="color:var(--text-muted);font-size:11px">N/A</span>';
@@ -3205,7 +3250,11 @@ async function loadSparkline(venue, asset) {
     return;
   }
 
-  const rates = data.data.map(d => parseFloat(d.fundingRate || d.fundRate || 0));
+  const rates = data.data.map(d => parseFloat(d.fundingRate || d.fundRate || 0)).filter(Number.isFinite);
+  if (rates.length < 2) {
+    cell.innerHTML = '<span style="color:var(--text-muted);font-size:11px">N/A</span>';
+    return;
+  }
   // Reverse if newest-first
   if (data.data.length >= 2) {
     const t0 = parseInt(data.data[0].fundingTime || data.data[0].settleTime || data.data[0].time || 0);
@@ -5238,7 +5287,7 @@ function renderVenueTable(venue) {
     tbody.appendChild(tr);
   });
 
-  data.forEach(d => loadSparkline(venue, d));
+  loadSparklinesBatched(venue, data);
 }
 
 // ═══════════════════════════════════════════════════
@@ -5841,18 +5890,28 @@ const GATE_SPOT_BASE   = _isDev ? 'https://api.gateio.ws/api/v4/spot'   : '/api/
 const KRAKEN_SPOT_BASE = 'https://api.kraken.com/0/public';
 const BINANCE_SPOT_BASE= 'https://api.binance.com/api/v3';
 const BITGET_SPOT_BASE = 'https://api.bitget.com';
+const BINANCE_BSTOCK_SPECIAL_UNDERLYINGS = new Set(['QNT']); // Quantinuum; QNT perp ticker collides with Quant crypto
 
 // ── Gate.io Spot Fetch ──
 async function fetchSpotRwaGate() {
-  const res = await fetch(`${GATE_SPOT_BASE}/tickers`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const tickers = await res.json();
+  const [tickersRes, pairsRes] = await Promise.all([
+    fetch(`${GATE_SPOT_BASE}/tickers`).catch(() => null),
+    fetch(`${GATE_SPOT_BASE}/currency_pairs`).catch(() => null),
+  ]);
+  if (!tickersRes?.ok && !pairsRes?.ok) throw new Error('Gate spot catalog and tickers unavailable');
+  const tickers = tickersRes?.ok ? await tickersRes.json() : [];
+  const pairs = pairsRes?.ok ? await pairsRes.json() : [];
+  const tickerMap = {};
+  (Array.isArray(tickers) ? tickers : []).forEach(t => { tickerMap[t.currency_pair] = t; });
+  const catalog = Array.isArray(pairs) && pairs.length
+    ? pairs.filter(p => ['USDT','USD'].includes(String(p.quote || '').toUpperCase()) && p.trade_status === 'tradable')
+    : (Array.isArray(tickers) ? tickers : []).map(t => ({ id:t.currency_pair, base:String(t.currency_pair || '').replace(/_(USDT|USD)$/i,''), quote:String(t.currency_pair || '').split('_').pop(), trade_status:'tradable' }));
   const assets = [];
-  for (const t of tickers) {
-    const pair = t.currency_pair || '';
-    if (!pair.endsWith('_USDT') && !pair.endsWith('_USD')) continue;
-    const base = pair.replace(/_(USDT|USD)$/, '').toUpperCase();
+  for (const entry of catalog) {
+    const pair = entry.id || '';
+    const base = String(entry.base || pair.replace(/_(USDT|USD)$/i, '')).toUpperCase();
     if (!_isRwaSpotBase(base, 'gate')) continue;
+    const t = tickerMap[pair] || {};
     const gateUnderlying = _arbUnderlyingKey(base);
     if (gateUnderlying !== base) {
       const gateCategory = ETF_SYMBOLS.has(gateUnderlying) ? 'etf' : (PRE_IPO_SYMBOLS.has(gateUnderlying) ? 'pre-ipo' : 'equity');
@@ -5868,6 +5927,9 @@ async function fetchSpotRwaGate() {
       lo: parseFloat(t.low_24h) || 0,
       bid: parseFloat(t.highest_bid) || 0,
       ask: parseFloat(t.lowest_ask) || 0,
+      isListed: true,
+      isActive: entry.trade_status === 'tradable',
+      isPriced: last > 0,
     });
   }
   // Fetch orderbook depth for the most liquid assets (parallel, max 5 concurrent)
@@ -5882,7 +5944,7 @@ async function fetchSpotRwaGate() {
   for (let i = 0; i < depthTasks.length; i += 5) {
     await Promise.allSettled(depthTasks.slice(i, i + 5).map(fn => fn()));
   }
-  console.log(`[Spot] Gate.io: ${assets.length} RWA spot assets discovered`);
+  console.log(`[Spot] Gate.io: ${assets.length} listed · ${assets.filter(a=>a.last>0).length} priced`);
   return assets;
 }
 
@@ -6178,24 +6240,43 @@ async function fetchSpotRwaBitget() {
 async function fetchSpotRwaBinance() {
   // exchangeInfo supplies authoritative baseAsset/quoteAsset fields. Parsing a
   // concatenated symbol by suffix misread RENBUSD as base RENB + quote USD.
-  const [tickerRes, infoRes] = await Promise.all([
+  const [tickerRes, infoRes, tradfiInfoRes] = await Promise.all([
     fetch(`${BINANCE_SPOT_BASE}/ticker/24hr`),
-    fetch(`${BINANCE_SPOT_BASE}/exchangeInfo`)
+    fetch(`${BINANCE_SPOT_BASE}/exchangeInfo`),
+    fetch(`${BINANCE_API_BASE}/exchangeInfo`).catch(() => null)
   ]);
   if (!tickerRes.ok || !infoRes.ok) throw new Error(`HTTP ${!tickerRes.ok ? tickerRes.status : infoRes.status}`);
   const [tickers, infoJson] = await Promise.all([tickerRes.json(), infoRes.json()]);
   const symbolInfo = {};
   (infoJson.symbols || []).forEach(s => { symbolInfo[String(s.symbol || '').toUpperCase()] = s; });
+  const officialTradFi = {};
+  if (tradfiInfoRes?.ok) {
+    try {
+      const tradfiInfo = await tradfiInfoRes.json();
+      (tradfiInfo.symbols || []).forEach(s => {
+        if (s.status === 'TRADING' && s.contractType === 'TRADIFI_PERPETUAL') {
+          officialTradFi[String(s.baseAsset || '').toUpperCase()] = s;
+        }
+      });
+    } catch { /* retain the explicit collision-safe special set */ }
+  }
   const assets = [];
   for (const t of tickers) {
     const symbol = (t.symbol || '').toUpperCase();
     const info = symbolInfo[symbol];
     if (!info || info.status !== 'TRADING' || !['USDT', 'USD'].includes(String(info.quoteAsset || '').toUpperCase())) continue;
     const base = String(info.baseAsset || '').toUpperCase();
-    if (!_isRwaSpotBase(base, 'binance')) continue;
+    const bStockUnderlying = base.length >= 3 && base.endsWith('B') ? base.slice(0, -1) : '';
+    const bStockMeta = bStockUnderlying ? officialTradFi[bStockUnderlying] : null;
+    const isBStock = Boolean(bStockUnderlying && (bStockMeta || BINANCE_BSTOCK_SPECIAL_UNDERLYINGS.has(bStockUnderlying)));
+    if (!isBStock && !_isRwaSpotBase(base, 'binance')) continue;
+    if (isBStock) {
+      const bStockCategory = categoryFromOfficial(bStockMeta?.underlyingType || 'EQUITY', bStockUnderlying);
+      registerSpotAssetMeta(base, bStockUnderlying, 'Binance bStocks', bStockCategory, 'binance');
+    }
     const last = parseFloat(t.lastPrice) || 0;
     assets.push({
-      coin: base, pair: symbol,
+      coin: base, pair: symbol, underlyingSymbol: isBStock ? bStockUnderlying : undefined,
       last,
       chg: parseFloat(t.priceChangePercent) || 0,
       vol: parseFloat(t.quoteVolume) || 0,
@@ -6203,6 +6284,8 @@ async function fetchSpotRwaBinance() {
       lo: parseFloat(t.lowPrice) || 0,
       bid: parseFloat(t.bidPrice) || 0,
       ask: parseFloat(t.askPrice) || 0,
+      bstock: isBStock,
+      isListed: true, isActive: info.status === 'TRADING', isPriced: last > 0,
     });
   }
   // Fetch orderbook depth
@@ -6217,7 +6300,7 @@ async function fetchSpotRwaBinance() {
   for (let i = 0; i < depthTasks.length; i += 5) {
     await Promise.allSettled(depthTasks.slice(i, i + 5).map(fn => fn()));
   }
-  console.log(`[Spot] Binance: ${assets.length} RWA spot assets discovered`);
+  console.log(`[Spot] Binance: ${assets.length} RWA spot assets · ${assets.filter(a=>a.bstock).length} bStocks`);
   return assets;
 }
 
@@ -6563,8 +6646,9 @@ const ISSUER_STYLES = {
   'Ondo Finance':   { bg:'rgba(175,82,222,0.08)', color:'#8944AB', border:'rgba(175,82,222,0.18)' },
   'Reality':        { bg:'rgba(255,149,0,0.08)', color:'#B35F00', border:'rgba(255,149,0,0.18)' },
   'xStocks':        { bg:'rgba(50,173,230,0.08)', color:'#1677A3', border:'rgba(50,173,230,0.18)' },
+  'Binance bStocks':{ bg:'rgba(240,185,11,0.10)', color:'#8A6D00', border:'rgba(240,185,11,0.22)' },
 };
-const ISSUER_SHORT = { 'Paxos':'Paxos','Tether':'Tether','Backed Finance':'Backed','Ondo Finance':'Ondo','Reality':'Reality','xStocks':'xStocks' };
+const ISSUER_SHORT = { 'Paxos':'Paxos','Tether':'Tether','Backed Finance':'Backed','Ondo Finance':'Ondo','Reality':'Reality','xStocks':'xStocks','Binance bStocks':'bStocks' };
 function issuerShort(n) { return ISSUER_SHORT[n] || n; }
 
 const SPOT_FEES = {
