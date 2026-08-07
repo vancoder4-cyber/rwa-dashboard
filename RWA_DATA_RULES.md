@@ -161,11 +161,32 @@ Bitget 当前同时返回 `isRwa=YES` 和 `symbolType=crypto`，但该产品对�
 - 修改本文件时，应同步检查 `index.html` 中对应的 allowlist、alias、category override、market tags 和 spot wrapper 规则。
 - Git 历史保留旧规则，生产发布必须从已验证的 Preview promote，避免本地与线上规则漂移。
 
-## 13. 主要核验来源
+## 13. 传统市场成交量与期权异动
+
+`Traditional Market Activity Monitor` 只对已经通过本文身份规则的 canonical underlying 做传统市场匹配，不能反向用 Nasdaq/OCC 的同名 ticker 证明某个场所资产是 RWA。
+
+- 首版覆盖美国上市的 Equity、ETF 与 ADR；纯 HK/KR/TW/JP/CN 本地上市、Pre-IPO、现货商品、商品期货和指数不拿同名美股代替，官方源不支持时显示 Unavailable。
+- 传统数据也必须做身份门控：除 ticker 外同时读取 Nasdaq `companyName` 和 `assetClass`。当前 Nasdaq 证券类别与 RWA canonical category 不一致时，Nasdaq 与 OCC 两侧都拒绝，避免把同名 ETF/股票期权量挂到错误资产。
+- 股票/ETF 当前成交股数和 Nasdaq 展示的 Average Volume 来自 Nasdaq Market Activity 官方同源接口。它属于公开展示的 delayed/intraday 或最近完成交易日数据，不等于持牌 SIP 实时全市场 feed。
+- 期权成交合约数来自 OCC 官方 batch-processing report。当前值使用最近完成交易日（通常 T+1）；基线使用此前四周同一星期几的四个日度报告取平均。OCC 的 weekly download 当前只返回日期区间、没有逐标数据行，因此不能假装成 20 日均量。
+- Cboe delayed quote table 明确禁止自动抓取，因此生产代码不得调用其网页/JSON 端点。需要真正实时期权时，应采购 OPRA 授权数据或合规的数据供应商。
+- `Trad RelVol = Nasdaq Share Volume / Nasdaq Average Volume`。它不按当日交易时段进度归一，盘中早段只能理解为累计量相对整日均量。
+- `Options RelVol = OCC latest completed-day contracts / prior four same-weekday observations average`。
+- High：`Trad RelVol >= 2.0` 或 `Options RelVol >= 2.5`；Watch：`Trad RelVol >= 1.5` 或 `Options RelVol >= 1.75`。阈值只是监控提示，不构成交易建议。
+- 每行的 Perp/Spot 24h 美元量来自当前页面已经通过准入的场所数据，按 canonical underlying 联结；传统 shares、options contracts 与 crypto USD volume 不得相加成一个“总成交量”。
+- 真正实时版本需要 Nasdaq Basic/NLS（或 SIP 授权）和 OPRA 授权。未配置授权数据前，页面必须明确标注公开源的延迟，不得显示 `Real-time`。
+
+字段状态：Nasdaq 与 OCC 都有完整字段和基线时为 Full；只有一侧、历史不足或部分字段可用时为 Partial；公式投影才是 Estimated；官方源没有匹配时为 Unavailable。
+
+2026-08-08 抽查发现 `MUU` 的 Nasdaq 官方身份是 `Direxion Daily MU Bull 2X ETF`，因此全局类别修正为 ETF；这类纠错必须回写主分类规则，不能只在传统成交量板块临时隐藏。
+
+## 14. 主要核验来源
 
 - Hyperliquid/trade.xyz market identity：`https://api.hyperliquid.xyz/info` 的 `perpCategories` 与 `metaAndAssetCtxs`。
 - Bitget perpetual/Reality catalogs：`/api/v3/market/instruments`。
 - Gate futures/spot catalogs：`/api/v4/futures/usdt/contracts` 与 `/api/v4/spot/currency_pairs`。
 - Binance futures/spot catalogs：`/fapi/v1/exchangeInfo` 与 `/api/v3/exchangeInfo`。
+- Nasdaq Market Activity（股票/ETF Share Volume、Average Volume）：<https://www.nasdaq.com/market-activity>。
+- OCC Volume Query / batch processing（期权成交量）：<https://www.theocc.com/market-data/market-data-reports/volume-and-open-interest/volume-query>。
 - Quantinuum 上市状态：[Quantinuum Announces Closing of Upsized Initial Public Offering](https://ir.quantinuum.com/news-releases/news-release-details/quantinuum-announces-closing-upsized-initial-public-offering)。
 - GigaDevice 双重上市：[GigaDevice Successfully Lists in Hong Kong](https://www.gigadevice.com/about/news-and-event/news/gigadevice-listed-on-hkex)。

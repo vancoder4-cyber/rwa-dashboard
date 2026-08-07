@@ -788,6 +788,22 @@ td:first-child { text-align: left; }
 .data-status.partial { color:#9A6700; background:rgba(255,184,0,.10); border-color:rgba(255,184,0,.20); }
 .data-status.estimated { color:#0055CC; background:rgba(0,122,255,.09); border-color:rgba(0,122,255,.17); }
 .data-status.unavailable { color:var(--foreground-dim); background:rgba(120,120,128,.08); border-color:rgba(120,120,128,.13); }
+.tradfi-controls { display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+.tradfi-filter { border:1px solid rgba(0,0,0,.07); background:rgba(255,255,255,.6); color:var(--foreground-sec); border-radius:999px; padding:5px 10px; font:600 10px/1 Inter,sans-serif; cursor:pointer; }
+.tradfi-filter.active { color:var(--accent); border-color:rgba(0,122,255,.2); background:rgba(0,122,255,.08); }
+.tradfi-source-strip { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin:8px 0 12px; font-size:10px; color:var(--foreground-dim); }
+.tradfi-source-strip a { color:var(--accent); text-decoration:none; }
+.tradfi-source-strip a:hover { text-decoration:underline; }
+.tradfi-signal { display:inline-flex; align-items:center; gap:4px; padding:3px 7px; border-radius:999px; font:700 9px/1 Inter,sans-serif; letter-spacing:.02em; }
+.tradfi-signal.high { color:#B42318; background:rgba(255,59,48,.09); border:1px solid rgba(255,59,48,.17); }
+.tradfi-signal.watch { color:#9A6700; background:rgba(255,184,0,.10); border:1px solid rgba(255,184,0,.20); }
+.tradfi-signal.normal { color:#248A3D; background:rgba(52,199,89,.08); border:1px solid rgba(52,199,89,.16); }
+.tradfi-route { display:inline-flex; align-items:center; gap:3px; margin-left:4px; padding:2px 6px; border-radius:4px; border:1px solid rgba(0,0,0,.07); color:var(--foreground-sec); background:rgba(255,255,255,.55); font:600 9px/1 Inter,sans-serif; cursor:pointer; }
+.tradfi-route:hover { color:var(--accent); border-color:rgba(0,122,255,.22); background:rgba(0,122,255,.06); }
+.tradfi-rel { font-family:'JetBrains Mono',monospace; font-weight:700; }
+.tradfi-rel.high { color:var(--negative); }
+.tradfi-rel.watch { color:#9A6700; }
+.tradfi-rel.normal { color:var(--foreground-sec); }
 .market-badge { display:inline-flex; align-items:center; padding:1px 5px; border-radius:4px; font:600 9px/1.35 Inter,sans-serif; background:rgba(120,120,128,.08); color:var(--foreground-dim); border:1px solid rgba(120,120,128,.12); }
 .market-badge.active, .market-badge.priced { color:#248A3D; background:rgba(52,199,89,.08); border-color:rgba(52,199,89,.15); }
 .market-badge.inactive, .market-badge.unpriced { color:#9A6700; background:rgba(255,184,0,.08); border-color:rgba(255,184,0,.17); }
@@ -1259,6 +1275,7 @@ input[type="checkbox"] {
       <div class="kpi-strip" id="kpiStrip"></div>
       <div class="venue-cards-grid" id="venueCardsGrid"></div>
       <div class="section-card" id="top30VolSection" style="margin-top:16px"></div>
+      <div class="section-card" id="tradfiActivitySection"></div>
       <div class="section-card" id="coverageSection"></div>
       <div class="section-card" id="divSection"></div>
     </div>
@@ -1864,6 +1881,7 @@ const RWA_ASSETS = {
   ORCL: { name: "Oracle", category: "equity" },
   AMD: { name: "Advanced Micro Devices", category: "equity" },
   MU: { name: "Micron", category: "equity" },
+  MUU: { name: "Direxion Daily MU Bull 2X ETF", category: "etf" },
   MSTR: { name: "Strategy Inc.", category: "equity" },
   CRCL: { name: "Circle Internet Group", category: "equity" },
   NFLX: { name: "Netflix", category: "equity" },
@@ -1969,6 +1987,9 @@ const ETF_SYMBOLS = new Set([
   'XLE','XLU','XLV','YANG','YINN'
 ]);
 ['EWT','DRAM','KORU','KSTR','LYTE','NCLD','EWH','DFEN'].forEach(symbol => ETF_SYMBOLS.add(symbol));
+// Nasdaq official identity check: MUU is Direxion Daily MU Bull 2X ETF, not
+// Micron common equity. Keep the wrapper category aligned across all venues.
+ETF_SYMBOLS.add('MUU');
 
 // Venue wrapper tickers whose underlying is an ETF even when the venue's broad
 // product class says stock or metal.
@@ -2347,6 +2368,11 @@ let refreshInFlight = false;
 const lastVenueData = {};
 let globalSearchTerm = '';
 let alertsData = [];
+let tradfiActivityCache = null;
+let tradfiActivityLoading = false;
+let tradfiActivityError = '';
+let tradfiActivityFilter = 'all';
+const TRADFI_ACTIVITY_TTL = 15 * 60 * 1000;
 
 // Per-venue table state
 let venueTableCatFilter = { tradexyz: 'all', bitget: 'all', gate: 'all', binance: 'all' };
@@ -4360,7 +4386,7 @@ function switchSubTab(sub, tabEl) {
 // VIEW 1: ALL VENUES OVERVIEW
 // ═══════════════════════════════════════════════
 
-function renderOverview() { renderKPIs(); renderVenueCards(); renderTop30Volume(); renderCoverage(); renderDivergence(); }
+function renderOverview() { renderKPIs(); renderVenueCards(); renderTop30Volume(); renderTraditionalActivity(); renderCoverage(); renderDivergence(); }
 
 // ═══════════════════════════════════════════════
 // KPI TREND SNAPSHOTS (localStorage)
@@ -5097,6 +5123,303 @@ function renderTop30Volume() {
       </table>
     </div>
   `;
+}
+
+// ═══════════════════════════════════════════════════
+// TRADITIONAL MARKET + OPTIONS ACTIVITY
+// ═══════════════════════════════════════════════════
+
+function traditionalActivityUniverse() {
+  const universe = new Map();
+  const nonUsTags = new Set(['HK','KR','TW','JP','CN']);
+
+  function upsert(rawSymbol, category, name, volume, venue, side, asset) {
+    if (!['equity','etf'].includes(category)) return;
+    const canonical = canonicalSymbolForCategory(rawSymbol, category);
+    const underlying = _arbUnderlyingKey(canonical);
+    if (!underlying || !/^[A-Z][A-Z0-9.-]{0,9}$/.test(underlying)) return;
+
+    // Nasdaq/OCC cover U.S.-listed securities. A home-market tag without ADR
+    // means the underlying belongs to a non-U.S. primary listing and must not
+    // be silently represented by a similarly named U.S. ticker.
+    const tags = marketTagsForAsset(asset || underlying);
+    if (tags.some(tag => nonUsTags.has(tag)) && !tags.includes('ADR')) return;
+
+    if (!universe.has(underlying)) {
+      universe.set(underlying, {
+        symbol: underlying,
+        name: name || KNOWN_NAMES[underlying] || underlying,
+        category,
+        tags,
+        perpVolume: 0,
+        spotVolume: 0,
+        perpVenues: new Set(),
+        spotVenues: new Set(),
+      });
+    }
+    const row = universe.get(underlying);
+    if (name && (!row.name || row.name === row.symbol)) row.name = name;
+    if (category === 'etf') row.category = 'etf';
+    tags.forEach(tag => { if (!row.tags.includes(tag)) row.tags.push(tag); });
+    if (side === 'perp') {
+      row.perpVolume += Number(volume) || 0;
+      if (venue) row.perpVenues.add(venue);
+    } else {
+      row.spotVolume += Number(volume) || 0;
+      if (venue) row.spotVenues.add(venue);
+    }
+  }
+
+  allData.forEach(asset => upsert(
+    asset.coin,
+    asset.category,
+    asset.fullName,
+    asset.volume,
+    asset.venue,
+    'perp',
+    asset,
+  ));
+
+  Object.entries(SPOT_DATA || {}).forEach(([venue, assets]) => {
+    (assets || []).forEach(asset => {
+      const underlying = _arbUnderlyingKey(asset.coin);
+      const category = asset.category || inferCategory(underlying, asset.fullName || asset.name || '');
+      upsert(
+        underlying,
+        category,
+        asset.fullName || asset.name || KNOWN_NAMES[underlying] || underlying,
+        asset.vol,
+        asset.venue || venue,
+        'spot',
+        asset,
+      );
+    });
+  });
+
+  return [...universe.values()]
+    .sort((a, b) => (b.perpVolume + b.spotVolume) - (a.perpVolume + a.spotVolume))
+    .slice(0, 30);
+}
+
+function fmtTradfiCount(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '—';
+  const number = Number(value);
+  if (number >= 1e9) return (number / 1e9).toFixed(2) + 'B';
+  if (number >= 1e6) return (number / 1e6).toFixed(1) + 'M';
+  if (number >= 1e3) return (number / 1e3).toFixed(number >= 1e5 ? 0 : 1) + 'K';
+  return number.toLocaleString('en-US', { maximumFractionDigits: 0 });
+}
+
+function tradfiRelClass(value, high = 2) {
+  if (!Number.isFinite(value)) return 'normal';
+  if (value >= high) return 'high';
+  if (value >= 1.5) return 'watch';
+  return 'normal';
+}
+
+function tradfiMetricNumber(value) {
+  return value === null || value === undefined || value === '' ? NaN : Number(value);
+}
+
+function traditionalActivitySignal(row) {
+  const marketRel = tradfiMetricNumber(row.market?.relativeVolume);
+  const optionsRel = tradfiMetricNumber(row.options?.relativeVolume);
+  if (marketRel >= 2 || optionsRel >= 2.5) {
+    const leader = marketRel >= 2 && marketRel >= optionsRel ? `Market ${marketRel.toFixed(1)}×` : `Options ${optionsRel.toFixed(1)}×`;
+    return { level:'high', label:'High', detail:leader, score:3 + Math.max(marketRel || 0, optionsRel || 0) };
+  }
+  if (marketRel >= 1.5 || optionsRel >= 1.75) {
+    const leader = marketRel >= 1.5 && marketRel >= optionsRel ? `Market ${marketRel.toFixed(1)}×` : `Options ${optionsRel.toFixed(1)}×`;
+    return { level:'watch', label:'Watch', detail:leader, score:2 + Math.max(marketRel || 0, optionsRel || 0) };
+  }
+  return { level:'normal', label:'Normal', detail:'Within baseline', score:1 + Math.max(marketRel || 0, optionsRel || 0) };
+}
+
+function formatOccDate(raw) {
+  const value = String(raw || '');
+  if (!/^\d{8}$/.test(value)) return 'Unavailable';
+  return `${value.slice(0,4)}-${value.slice(4,6)}-${value.slice(6,8)}`;
+}
+
+async function loadTraditionalActivity(force = false) {
+  if (tradfiActivityLoading) return;
+  const universe = traditionalActivityUniverse();
+  const symbols = universe.map(row => row.symbol);
+  const etfSymbols = universe.filter(row => row.category === 'etf').map(row => row.symbol);
+  if (!symbols.length) return;
+  const symbolsKey = symbols.join(',');
+  const cacheFresh = tradfiActivityCache && Date.now() - tradfiActivityCache.ts < TRADFI_ACTIVITY_TTL;
+  if (!force && cacheFresh && tradfiActivityCache.symbolsKey === symbolsKey) return;
+
+  tradfiActivityLoading = true;
+  tradfiActivityError = '';
+  renderTraditionalActivity();
+  try {
+    const response = await fetch(`/api/tradfi-activity?symbols=${encodeURIComponent(symbolsKey)}&etfs=${encodeURIComponent(etfSymbols.join(','))}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    tradfiActivityCache = { ts:Date.now(), symbolsKey, payload };
+  } catch (error) {
+    tradfiActivityError = error.message || 'Traditional data unavailable';
+    console.error('[TradFi] activity load failed:', error);
+  } finally {
+    tradfiActivityLoading = false;
+    renderTraditionalActivity();
+  }
+}
+
+function refreshTraditionalActivity() {
+  loadTraditionalActivity(true);
+}
+
+function setTraditionalActivityFilter(filter, button) {
+  tradfiActivityFilter = filter;
+  document.querySelectorAll('#tradfiActivitySection .tradfi-filter').forEach(item => item.classList.remove('active'));
+  if (button) button.classList.add('active');
+  renderTraditionalActivity();
+}
+
+function renderTraditionalActivity() {
+  const section = document.getElementById('tradfiActivitySection');
+  if (!section) return;
+
+  const universe = traditionalActivityUniverse();
+  const symbolsKey = universe.map(row => row.symbol).join(',');
+  const cacheFresh = tradfiActivityCache && Date.now() - tradfiActivityCache.ts < TRADFI_ACTIVITY_TTL;
+  if ((!tradfiActivityCache || !cacheFresh || tradfiActivityCache.symbolsKey !== symbolsKey) && !tradfiActivityLoading) {
+    setTimeout(() => loadTraditionalActivity(false), 0);
+  }
+
+  const payload = tradfiActivityCache?.payload;
+  if (!payload) {
+    section.innerHTML = `
+      <div class="section-title">Traditional Market Activity Monitor</div>
+      <div class="section-subtitle">Linking verified RWA underlyings to official U.S. share and listed-options volume.</div>
+      <div style="text-align:center;padding:34px;color:var(--foreground-dim)">
+        <div class="spin" style="display:inline-block;width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite"></div>
+        <div style="margin-top:10px;font-size:12px">Loading Nasdaq market activity and OCC completed-session options volume…</div>
+        ${tradfiActivityError ? `<div style="margin-top:8px;color:var(--negative)">${escapeHtml(tradfiActivityError)}</div>` : ''}
+      </div>`;
+    return;
+  }
+
+  const apiRows = Object.fromEntries((payload.rows || []).map(row => [row.symbol, row]));
+  let rows = universe.map(link => ({ ...link, ...(apiRows[link.symbol] || {}), link }));
+  rows.forEach(row => { row.signal = traditionalActivitySignal(row); });
+  rows.sort((a, b) => b.signal.score - a.signal.score || (b.perpVolume + b.spotVolume) - (a.perpVolume + a.spotVolume));
+
+  if (globalSearchTerm) {
+    rows = rows.filter(row => row.symbol.toLowerCase().includes(globalSearchTerm) || row.name.toLowerCase().includes(globalSearchTerm));
+  }
+  if (tradfiActivityFilter === 'unusual') rows = rows.filter(row => row.signal.level !== 'normal');
+  if (tradfiActivityFilter === 'optionable') rows = rows.filter(row => row.options?.status !== 'unavailable');
+
+  const signalCounts = universe.reduce((counts, link) => {
+    const api = apiRows[link.symbol] || {};
+    const signal = traditionalActivitySignal(api);
+    counts[signal.level] += 1;
+    return counts;
+  }, { high:0, watch:0, normal:0 });
+
+  const htmlRows = rows.map(row => {
+    const market = row.market || {};
+    const options = row.options || {};
+    const marketRel = tradfiMetricNumber(market.relativeVolume);
+    const optionsRel = tradfiMetricNumber(options.relativeVolume);
+    const marketRelHtml = Number.isFinite(marketRel)
+      ? `<span class="tradfi-rel ${tradfiRelClass(marketRel, 2)}">${marketRel.toFixed(2)}×</span>`
+      : '<span style="color:var(--foreground-dim)">—</span>';
+    const optionsRelHtml = Number.isFinite(optionsRel)
+      ? `<span class="tradfi-rel ${tradfiRelClass(optionsRel, 2.5)}">${optionsRel.toFixed(2)}×</span>`
+      : '<span style="color:var(--foreground-dim)">—</span>';
+    const marketAvailable = market.status && market.status !== 'unavailable';
+    const optionsAvailable = options.status && options.status !== 'unavailable';
+    const overallStatus = marketAvailable && optionsAvailable
+      ? (market.status === 'full' && options.status === 'full' ? 'full' : 'partial')
+      : (marketAvailable || optionsAvailable ? 'partial' : 'unavailable');
+    const statusTitle = market.identityStatus === 'mismatch'
+      ? `Nasdaq identity mismatch: ${market.officialName || row.symbol} is ${market.assetClass || 'a different asset class'}`
+      : market.identityStatus === 'unavailable'
+        ? 'Nasdaq could not confirm the current listed-security identity; ticker-based volume was rejected'
+        : overallStatus === 'full'
+      ? 'Nasdaq share volume and OCC options volume both available'
+      : overallStatus === 'partial'
+        ? 'Only one official market layer or an incomplete baseline is available'
+        : 'No official Nasdaq/OCC match for this canonical ticker';
+    const categoryTag = `<span class="asset-tag tag-${row.category}">${escapeHtml(row.category)}</span>`;
+    const linkMeta = row.link || row;
+    const perpVenues = linkMeta.perpVenues?.size || 0;
+    const spotVenues = linkMeta.spotVenues?.size || 0;
+    const identityLine = market.identityStatus === 'confirmed' && market.officialName
+      ? `<div style="font-size:9px;color:var(--foreground-dim)">Nasdaq: ${escapeHtml(market.officialName)}</div>`
+      : market.identityStatus === 'mismatch'
+        ? `<div style="font-size:9px;color:var(--negative)">Rejected ticker collision: ${escapeHtml(market.officialName || market.assetClass || 'identity mismatch')}</div>`
+        : '';
+
+    return `<tr>
+      <td style="text-align:left">
+        <div style="font-weight:700;font-size:13px">${escapeHtml(row.symbol)} ${categoryTag}${renderMarketTags(row.tags || [])}</div>
+        <div style="font-size:10px;color:var(--foreground-dim);max-width:260px;overflow:hidden;text-overflow:ellipsis">${escapeHtml(row.name || row.symbol)}</div>
+        ${identityLine}
+        <div style="margin-top:3px"><span class="tradfi-route" title="Linked perpetual venues">Perp ${perpVenues}</span><span class="tradfi-route" title="Linked spot venues">Spot ${spotVenues}</span></div>
+      </td>
+      <td><div class="mono">${fmtTradfiCount(market.volume)}</div><div style="font-size:9px;color:var(--foreground-dim)">shares</div></td>
+      <td><div class="mono">${fmtTradfiCount(market.averageVolume)}</div><div style="font-size:9px;color:var(--foreground-dim)">Nasdaq avg</div></td>
+      <td>${marketRelHtml}</td>
+      <td><div class="mono">${fmtTradfiCount(options.volume)}</div><div style="font-size:9px;color:var(--foreground-dim)">contracts</div></td>
+      <td><div class="mono">${fmtTradfiCount(options.averageVolume)}</div><div style="font-size:9px;color:var(--foreground-dim)">4-week same day</div></td>
+      <td>${optionsRelHtml}</td>
+      <td class="mono">${fmtVolume(linkMeta.perpVolume || 0)}</td>
+      <td class="mono">${fmtVolume(linkMeta.spotVolume || 0)}</td>
+      <td><span class="tradfi-signal ${row.signal.level}" title="${escapeHtml(row.signal.detail)}">${row.signal.label}</span><div style="font-size:9px;color:var(--foreground-dim);margin-top:3px">${escapeHtml(row.signal.detail)}</div></td>
+      <td>${dataStatusBadge(overallStatus, statusTitle)}</td>
+    </tr>`;
+  }).join('');
+
+  const optionsAsOf = formatOccDate(payload.sources?.options?.asOf);
+  const marketSource = payload.sources?.market?.url || 'https://www.nasdaq.com/market-activity';
+  const optionsSource = payload.sources?.options?.url || 'https://www.theocc.com/market-data/market-data-reports/volume-and-open-interest/volume-query';
+  const empty = `<tr><td colspan="11" style="text-align:center;padding:30px;color:var(--foreground-dim)">No assets match this filter.</td></tr>`;
+
+  section.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+      <div>
+        <div class="section-title">Traditional Market Activity Monitor</div>
+        <div class="section-subtitle">Traditional shares + listed options, joined to live Perpetual and Spot 24h USD volume by canonical underlying. RelVol is not adjusted for intraday session progress.</div>
+      </div>
+      <div class="tradfi-controls">
+        <button class="tradfi-filter ${tradfiActivityFilter === 'all' ? 'active' : ''}" onclick="setTraditionalActivityFilter('all',this)">All ${universe.length}</button>
+        <button class="tradfi-filter ${tradfiActivityFilter === 'unusual' ? 'active' : ''}" onclick="setTraditionalActivityFilter('unusual',this)">Unusual ${signalCounts.high + signalCounts.watch}</button>
+        <button class="tradfi-filter ${tradfiActivityFilter === 'optionable' ? 'active' : ''}" onclick="setTraditionalActivityFilter('optionable',this)">Optionable</button>
+        <button class="sr-btn" onclick="refreshTraditionalActivity()" ${tradfiActivityLoading ? 'disabled' : ''}>${tradfiActivityLoading ? '⟳ Loading' : '⟳ Refresh'}</button>
+      </div>
+    </div>
+    <div class="tradfi-source-strip">
+      <span class="tradfi-signal high">High ${signalCounts.high}</span>
+      <span class="tradfi-signal watch">Watch ${signalCounts.watch}</span>
+      <span>Market: <a href="${escapeHtml(marketSource)}" target="_blank" rel="noopener">Nasdaq official</a> · public display, delayed/intraday</span>
+      <span>Options: <a href="${escapeHtml(optionsSource)}" target="_blank" rel="noopener">OCC official</a> · T+1 as of ${optionsAsOf}</span>
+      <span>Updated ${new Date(tradfiActivityCache.ts).toLocaleTimeString()}${tradfiActivityLoading ? ' · Refreshing…' : ''}</span>
+      ${tradfiActivityError ? `<span style="color:var(--negative)">Last refresh failed: ${escapeHtml(tradfiActivityError)}</span>` : ''}
+    </div>
+    <div class="table-wrap" style="padding:0;overflow-x:auto">
+      <table style="min-width:1180px">
+        <thead><tr>
+          <th style="text-align:left">Underlying</th>
+          <th>Trad Volume</th>
+          <th>Trad Baseline</th>
+          <th>Trad RelVol</th>
+          <th>Options Volume</th>
+          <th>Options Baseline</th>
+          <th>Options RelVol</th>
+          <th>Perp 24h</th>
+          <th>Spot 24h</th>
+          <th>Signal</th>
+          <th>Data Status</th>
+        </tr></thead>
+        <tbody>${htmlRows || empty}</tbody>
+      </table>
+    </div>`;
 }
 
 // ═══════════════════════════════════════════════════
@@ -6663,6 +6986,10 @@ async function refreshSpotArbData() {
     renderSpotVenueGrid();
     renderSpotArbRank();
     updateSpotKpis();
+    // Keep the traditional-market bridge synchronized with the slower spot
+    // catalog refresh; the section itself owns its 15-minute official-source
+    // cache and will only refetch if the linked symbol set changed.
+    renderTraditionalActivity();
 
     document.querySelectorAll('#spotSubNav .spot-sub-tab').forEach(tab => {
       const onclick = tab.getAttribute('onclick') || '';
