@@ -577,7 +577,31 @@
     }]
   ];
 
+  var ENGLISH_MONTHS = Object.freeze({
+    Jan:1, Feb:2, Mar:3, Apr:4, May:5, Jun:6,
+    Jul:7, Aug:8, Sep:9, Oct:10, Nov:11, Dec:12
+  });
+
+  function zhClock(hourValue, minute, second, meridiem) {
+    var hour = Number(hourValue);
+    if (meridiem === 'PM' && hour < 12) hour += 12;
+    if (meridiem === 'AM' && hour === 12) hour = 0;
+    var clock = String(hour).padStart(2, '0') + ':' + minute;
+    return second ? clock + ':' + second : clock;
+  }
+
   var PATTERNS = [
+    [/^(\d{1,2}):(\d{2})(?::(\d{2}))?[\s\u202f]+(AM|PM)$/, function (m) {
+      return zhClock(m[1], m[2], m[3], m[4]);
+    }],
+    [/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),\s+(\d{4})(?:,?\s+(?:at\s+)?(\d{1,2}):(\d{2})(?::(\d{2}))?[\s\u202f]+(AM|PM)(?:\s+([A-Z]{2,4}))?)?$/, function (m) {
+      var localized = m[3] + '年' + ENGLISH_MONTHS[m[1]] + '月' + Number(m[2]) + '日';
+      if (m[4]) localized += ' ' + zhClock(m[4], m[5], m[6], m[7]) + (m[8] ? ' ' + m[8] : '');
+      return localized;
+    }],
+    [/^(\d{1,2})\/(\d{1,2})\/(\d{4}),\s+(\d{1,2}):(\d{2})(?::(\d{2}))?[\s\u202f]+(AM|PM)$/, function (m) {
+      return m[3] + '年' + Number(m[1]) + '月' + Number(m[2]) + '日 ' + zhClock(m[4], m[5], m[6], m[7]);
+    }],
     [/^(\d[\d,]*) Venues$/, function (m) { return m[1] + ' 个交易场所'; }],
     [/^(\d[\d,]*) Assets$/, function (m) { return m[1] + ' 个资产'; }],
     [/^(\d[\d,]*) assets$/, function (m) { return m[1] + ' 个资产'; }],
@@ -597,7 +621,7 @@
     [/^(\d[\d,]*) Spot listings?$/, function (m) { return m[1] + ' 个现货标的'; }],
     [/^(\d[\d,]*) market routes?$/, function (m) { return m[1] + ' 条市场路径'; }],
     [/^(\d[\d,]*) verified listings?$/, function (m) { return m[1] + ' 个已验证标的'; }],
-    [/^(\d[\d,]*) volume fields available$/, function (m) { return m[1] + ' 个成交量字段可用'; }],
+    [/^(\d[\d,]*) volume fields? available$/, function (m) { return m[1] + ' 个成交量字段可用'; }],
     [/^(\d[\d,]*) priced$/, function (m) { return m[1] + ' 个有价格'; }],
     [/^(\d[\d,]*) exchanges$/, function (m) { return m[1] + ' 个交易所'; }],
     [/^(\d[\d,]*) pairs$/, function (m) { return m[1] + ' 个交易对'; }],
@@ -660,9 +684,9 @@
     [/^(\$[^\s]+) notional$/, function (m) { return m[1] + ' 名义价值'; }],
     [/^Total: (.+)$/, function (m) { return '总计：' + m[1]; }],
     [/^Updated (.+) \((\d+)(s|m|h) ago\)$/, function (m) {
-      return '更新于 ' + m[1] + '（' + m[2] + ({s:' 秒',m:' 分钟',h:' 小时'}[m[3]] || '') + '前）';
+      return '更新于 ' + translateCore(m[1], 'zh-CN') + '（' + m[2] + ({s:' 秒',m:' 分钟',h:' 小时'}[m[3]] || '') + '前）';
     }],
-    [/^Updated (.+)$/, function (m) { return '更新于 ' + m[1]; }],
+    [/^Updated (.+)$/, function (m) { return '更新于 ' + translateCore(m[1], 'zh-CN'); }],
     [/^Combined: (.+)$/, function (m) { return '合并：' + m[1]; }],
     [/^Universe: (\d[\d,]*) U\.S\.-listed securities in Nasdaq Trader directory$/, function (m) { return '资产范围：Nasdaq Trader 目录中的 ' + m[1] + ' 个美国上市证券'; }],
     [/^(\d[\d,]*) official activity candidates → (\d[\d,]*) ranked$/, function (m) { return m[1] + ' 个官方活跃候选 → ' + m[2] + ' 个已排名'; }],
@@ -675,7 +699,7 @@
     [/^· completed-session shares \+ close$/, function () { return '· 已完成交易时段的成交股数 + 收盘价'; }],
     [/^· T\+1 as of (.+)$/, function (m) { return '· T+1，截至 ' + m[1]; }],
     [/^· (.+)$/, function (m) { return '· ' + translateCore(m[1], 'zh-CN'); }],
-    [/^Activity (.+)$/, function (m) { return '数据活动时间 ' + m[1]; }],
+    [/^Activity (.+)$/, function (m) { return '数据活动时间 ' + translateCore(m[1], 'zh-CN'); }],
     [/^Last refresh failed: (.+)$/, function (m) { return '最近刷新失败：' + m[1]; }],
     [/^Quote refresh failed: (.+)$/, function (m) { return '报价刷新失败：' + m[1]; }],
     [/^Spot refresh error: (.+)$/, function (m) { return '现货刷新错误：' + m[1]; }],
@@ -701,7 +725,7 @@
     [/^(Market|Options) (.+)$/, function (m) { return translateCore(m[1], 'zh-CN') + ' ' + m[2]; }],
     [/^Data as of (.+)$/, function (m) { return '数据截至 ' + m[1]; }],
     [/^Ranking (.+)$/, function (m) { return '排名交易日 ' + m[1]; }],
-    [/^fetched (.+)$/, function (m) { return '获取于 ' + m[1]; }],
+    [/^fetched (.+)$/, function (m) { return '获取于 ' + translateCore(m[1], 'zh-CN'); }],
     [/^(\d[\d,]*) Perp \+ (\d[\d,]*) Spot listings$/, function (m) { return m[1] + ' 个永续 + ' + m[2] + ' 个现货标的'; }],
     [/^(\d[\d,]*) comparable live points$/, function (m) { return m[1] + ' 个可比实时价格点'; }],
     [/^(\$[^\s]+) absolute gap$/, function (m) { return m[1] + ' 绝对价差'; }],
@@ -740,7 +764,7 @@
     [/^(.+) → (trade\.xyz|Bitget|Gate\.io|Binance|Kraken) (Perp|Spot)$/, function (m) {
       return translateCore(m[1], 'zh-CN') + ' → ' + m[2] + ' ' + translateCore(m[3], 'zh-CN');
     }],
-    [/^(Perp|Spot) 24h volume: (\d[\d,]*) volume fields available$/, function (m) {
+    [/^(Perp|Spot) 24h volume: (\d[\d,]*) volume fields? available$/, function (m) {
       return translateCore(m[1], 'zh-CN') + ' 24 小时成交量：' + m[2] + ' 个成交量字段可用';
     }],
     [/^Indicative estimate from live category-matched USD\/share prices(.+); excludes fees, latency and points outside the 0\.5×–1\.5× comparability guard\.$/, function (m) {
@@ -758,6 +782,7 @@
   var textSources = new WeakMap();
   var attributeSources = new WeakMap();
   var observer = null;
+  var languageApplied = false;
 
   function preferredLanguage() {
     try {
@@ -899,6 +924,7 @@
   function setLanguage(nextLanguage, options) {
     var next = SUPPORTED.has(nextLanguage) ? nextLanguage : 'en';
     var config = options || {};
+    if (languageApplied && next === language) return;
     language = next;
     document.documentElement.lang = next;
     document.title = next === 'zh-CN' ? 'Avenir Group — RWA 资产分析' : 'Avenir Group — RWA Perps Analytics';
@@ -907,6 +933,7 @@
     if (config.persist !== false) {
       try { localStorage.setItem(STORAGE_KEY, next); } catch (_) {}
     }
+    languageApplied = true;
     window.dispatchEvent(new CustomEvent('rwa:languagechange', { detail:{ language:next } }));
   }
 

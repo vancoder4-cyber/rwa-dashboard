@@ -6943,7 +6943,6 @@ function renderHeatmap() {
   const resultCount = document.getElementById('heatmapResultCount');
   const loadMore = document.getElementById('heatmapLoadMore');
   if (!grid) return;
-  grid.innerHTML = '';
   const fData = getFilteredData();
   const venueKeys = Object.keys(VENUES).filter(v => fData.some(d => d.venue === v));
 
@@ -7012,32 +7011,32 @@ function renderHeatmap() {
   const visibleAssets = assetList.slice(0, heatmapLimit);
 
   grid.style.gridTemplateColumns = `240px repeat(${venueKeys.length}, minmax(150px, 1fr)) 120px`;
-  grid.innerHTML += `<div class="hm-header">Asset <span class="hm-header-hint">ticker · coverage</span></div>`;
+  const heatmapHtml = [`<div class="hm-header">Asset <span class="hm-header-hint">ticker · coverage</span></div>`];
   venueKeys.forEach(v => {
     const sortKey = `venue:${v}`;
-    grid.innerHTML += `<div class="hm-header sortable ${heatmapSort===sortKey?'sort-active':''}" onclick="setHeatmapSort('${sortKey}')"><span class="venue-dot ${v}"></span> ${VENUES[v].name}<span class="hm-header-hint">APR · click to sort</span></div>`;
+    heatmapHtml.push(`<div class="hm-header sortable ${heatmapSort===sortKey?'sort-active':''}" onclick="setHeatmapSort('${sortKey}')"><span class="venue-dot ${v}"></span> ${VENUES[v].name}<span class="hm-header-hint">APR · click to sort</span></div>`);
   });
-  grid.innerHTML += `<div class="hm-header sortable ${heatmapSort==='spread'?'sort-active':''}" onclick="setHeatmapSort('spread')">Venue spread<span class="hm-header-hint">max − min APR</span></div>`;
+  heatmapHtml.push(`<div class="hm-header sortable ${heatmapSort==='spread'?'sort-active':''}" onclick="setHeatmapSort('spread')">Venue spread<span class="hm-header-hint">max − min APR</span></div>`);
 
   if (!visibleAssets.length) {
-    grid.innerHTML += `<div class="hm-empty">No matching funding opportunities. Try All assets or a different search.</div>`;
+    heatmapHtml.push(`<div class="hm-empty">No matching funding opportunities. Try All assets or a different search.</div>`);
   }
 
   visibleAssets.forEach((a, index) => {
     const cc = CAT_COLORS[a.category];
-    grid.innerHTML += `<div class="hm-asset-label"><span class="hm-row-index">${index+1}</span><div class="hm-asset-copy"><div class="hm-asset-top"><span style="color:${cc};font-weight:750">${a.coin}</span><span class="asset-tag tag-${a.category}">${String(a.category || '').toUpperCase()}</span></div><div class="hm-asset-name" title="${escapeHtml(a.fullName)}">${a.fullName}</div></div><span class="hm-coverage">${a.coverage}/${venueKeys.length}</span></div>`;
+    heatmapHtml.push(`<div class="hm-asset-label"><span class="hm-row-index">${index+1}</span><div class="hm-asset-copy"><div class="hm-asset-top"><span style="color:${cc};font-weight:750">${a.coin}</span><span class="asset-tag tag-${a.category}">${String(a.category || '').toUpperCase()}</span></div><div class="hm-asset-name" title="${escapeHtml(a.fullName)}">${a.fullName}</div></div><span class="hm-coverage">${a.coverage}/${venueKeys.length}</span></div>`);
 
     venueKeys.forEach(v => {
       const d = a.venues[v];
-      if (!d) { grid.innerHTML += `<div class="hm-cell na"><div class="hm-val">—</div><div class="hm-ann">Not listed</div></div>`; return; }
+      if (!d) { heatmapHtml.push(`<div class="hm-cell na"><div class="hm-val">—</div><div class="hm-ann">Not listed</div></div>`); return; }
       const r = d.funding;
       if (r === null) {
-        grid.innerHTML += `<div class="hm-cell na"><div class="hm-val">—</div><div class="hm-ann">Unavailable</div></div>`;
+        heatmapHtml.push(`<div class="hm-cell na"><div class="hm-val">—</div><div class="hm-ann">Unavailable</div></div>`);
         return;
       }
       const annVal = annualize(r, v, d);
       if (!Number.isFinite(annVal)) {
-        grid.innerHTML += `<div class="hm-cell na"><div class="hm-val">—</div><div class="hm-ann">Unavailable</div></div>`;
+        heatmapHtml.push(`<div class="hm-cell na"><div class="hm-val">—</div><div class="hm-ann">Unavailable</div></div>`);
         return;
       }
       const intensity = Math.sqrt(Math.min(Math.abs(annVal) / colorCap, 1));
@@ -7057,15 +7056,16 @@ function renderHeatmap() {
       const direction = isNearZero ? 'Near zero' : annVal > 0 ? 'Short receives' : 'Long receives';
       const interval = fundingIntervalHours(v, d);
       const title = `${VENUES[v].name}: ${fmtFunding(r)} per ${interval}h · ${fmtHeatmapApr(annVal)} APR`;
-      grid.innerHTML += `<div class="hm-cell" title="${escapeHtml(title)}" style="background:${bg};color:${col}" onclick="openHeatmapModal('${a.coin}','${v}')"><div class="hm-val">${fmtHeatmapApr(annVal)}</div><div class="hm-ann">${direction}</div></div>`;
+      heatmapHtml.push(`<div class="hm-cell" title="${escapeHtml(title)}" style="background:${bg};color:${col}" onclick="openHeatmapModal('${a.coin}','${v}')"><div class="hm-val">${fmtHeatmapApr(annVal)}</div><div class="hm-ann">${direction}</div></div>`);
     });
 
     if (a.spreadApr === null) {
-      grid.innerHTML += `<div class="hm-spread-cell"><div class="hm-spread-value">—</div><div class="hm-spread-label">Need 2 venues</div></div>`;
+      heatmapHtml.push(`<div class="hm-spread-cell"><div class="hm-spread-value">—</div><div class="hm-spread-label">Need 2 venues</div></div>`);
     } else {
-      grid.innerHTML += `<div class="hm-spread-cell"><div class="hm-spread-value">${(a.spreadApr*100).toFixed(a.spreadApr>=1?0:1)} pp</div><div class="hm-spread-label">${a.coverage} venues priced</div></div>`;
+      heatmapHtml.push(`<div class="hm-spread-cell"><div class="hm-spread-value">${(a.spreadApr*100).toFixed(a.spreadApr>=1?0:1)} pp</div><div class="hm-spread-label">${a.coverage} venues priced</div></div>`);
     }
   });
+  grid.innerHTML = heatmapHtml.join('');
 
   if (resultCount) resultCount.textContent = `Showing ${visibleAssets.length} of ${assetList.length}${assetList.length !== allAssets.length ? ` · ${allAssets.length} total` : ''}`;
   if (loadMore) {

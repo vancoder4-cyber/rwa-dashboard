@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { runInNewContext } from 'node:vm';
 
 import { historyCoverage, normalizeHistoryRows } from '../api/funding-history.js';
 import { assessChecks } from '../api/_lib/health.js';
@@ -414,6 +415,7 @@ test('bilingual UI is accessible, persisted under one preference key, and switch
   assert.match(i18n, /window\.setUiLanguage = setLanguage;/);
   const languageSetter = sourceBetween(i18n, 'function setLanguage(nextLanguage, options)', 'function initialize()');
   assert.match(languageSetter, /document\.documentElement\.lang = next/);
+  assert.match(languageSetter, /if \(languageApplied && next === language\) return;/);
   assert.doesNotMatch(languageSetter, /\bfetch\s*\(/);
   assert.doesNotMatch(languageSetter, /\b(?:XMLHttpRequest|WebSocket|EventSource)\b|sendBeacon\s*\(/);
   assert.doesNotMatch(languageSetter, /\bswitchTopPage\s*\(/);
@@ -440,6 +442,62 @@ test('bilingual UI is accessible, persisted under one preference key, and switch
     assert.ok(html.includes(english), `missing rendered English sentinel: ${english}`);
     assert.ok(i18n.includes(`'${english}':'${chinese}'`), `missing Chinese translation sentinel: ${english}`);
   });
+});
+
+test('bilingual runtime translates singular coverage and locale fragments without repeating same-language work', async () => {
+  const i18n = await readFile(new URL('../i18n.js', import.meta.url), 'utf8');
+  let treeWalks = 0;
+  let dispatched = 0;
+  const stored = [];
+  class MockElement {}
+  const body = {};
+  const document = {
+    readyState:'loading',
+    body,
+    documentElement:{ lang:'en' },
+    title:'',
+    addEventListener() {},
+    getElementById() { return null; },
+    createTreeWalker() {
+      treeWalks += 1;
+      return { nextNode() { return null; } };
+    },
+  };
+  const window = {
+    dispatchEvent() { dispatched += 1; },
+  };
+  runInNewContext(i18n, {
+    window,
+    document,
+    navigator:{ language:'en-US' },
+    localStorage:{
+      getItem() { return null; },
+      setItem(key, value) { stored.push([key, value]); },
+    },
+    Element:MockElement,
+    Node:{ TEXT_NODE:3 },
+    NodeFilter:{ SHOW_ELEMENT:1, SHOW_TEXT:4 },
+    MutationObserver:class {},
+    CustomEvent:class {},
+    Set,
+    WeakMap,
+  });
+
+  assert.equal(window.translateUi('Perp 24h volume: 1 volume field available', 'zh-CN'), '永续 24 小时成交量：1 个成交量字段可用');
+  assert.equal(window.translateUi('Spot 24h volume: 1 volume field available', 'zh-CN'), '现货 24 小时成交量：1 个成交量字段可用');
+  assert.equal(window.translateUi('2:15 PM', 'zh-CN'), '14:15');
+  assert.equal(window.translateUi('Aug 6, 2026', 'zh-CN'), '2026年8月6日');
+  assert.equal(window.translateUi('Activity 2:15:09 PM', 'zh-CN'), '数据活动时间 14:15:09');
+  assert.equal(window.translateUi('candidate list Aug 6, 2026', 'zh-CN'), '候选列表：2026年8月6日');
+
+  window.setUiLanguage('zh-CN');
+  assert.equal(treeWalks, 1);
+  assert.equal(dispatched, 1);
+  assert.deepEqual(stored, [['rwa_dashboard_locale_v1', 'zh-CN']]);
+  window.setUiLanguage('zh-CN');
+  assert.equal(treeWalks, 1, 'same-language selection must not traverse the document again');
+  assert.equal(dispatched, 1, 'same-language selection must not emit another language-change event');
+  assert.deepEqual(stored, [['rwa_dashboard_locale_v1', 'zh-CN']], 'same-language selection must not rewrite preference state');
 });
 
 test('English Spot source stays canonical while dynamic Traditional, Spot, and Heatmap copy has Chinese coverage', async () => {
@@ -504,6 +562,29 @@ test('English Spot source stays canonical while dynamic Traditional, Spot, and H
   assert.match(i18n, /\^\(\\d\[\\d,\]\*\) High\$/);
   assert.match(i18n, /\^Spot refresh error:/);
   assert.match(i18n, /expected observations in/);
+});
+
+test('heatmap batches rows into one DOM commit for the global i18n observer', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const renderer = sourceBetween(
+    html,
+    'function renderHeatmap()',
+    '// ═══════════════════════════════════════════════\n// RWA SIGNAL RADAR',
+  );
+
+  assert.match(renderer, /const heatmapHtml = \[/);
+  assert.match(renderer, /heatmapHtml\.push\(/);
+  assert.doesNotMatch(
+    renderer,
+    /grid\.innerHTML\s*\+=/,
+    'looped innerHTML replacement makes MutationObserver traverse detached intermediate trees',
+  );
+  assert.equal(
+    [...renderer.matchAll(/grid\.innerHTML\s*=/g)].length,
+    1,
+    'heatmap rows should reach the observed DOM in one atomic commit',
+  );
+  assert.match(renderer, /grid\.innerHTML = heatmapHtml\.join\(''\);/);
 });
 
 test('320px layout keeps navigation scrollable and alert/language controls usable', async () => {
