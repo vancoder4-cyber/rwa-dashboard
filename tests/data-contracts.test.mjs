@@ -487,6 +487,8 @@ test('bilingual runtime translates singular coverage and locale fragments withou
   assert.equal(window.translateUi('Spot 24h volume: 1 volume field available', 'zh-CN'), '现货 24 小时成交量：1 个成交量字段可用');
   assert.equal(window.translateUi('2:15 PM', 'zh-CN'), '14:15');
   assert.equal(window.translateUi('Aug 6, 2026', 'zh-CN'), '2026年8月6日');
+  assert.equal(window.translateUi('Data as of Aug 8, 2026 2:22 AM ET', 'zh-CN'), '数据截至 2026年8月8日 02:22 ET');
+  assert.equal(window.translateUi('Aug 6, 2026; excludes fees, latency and points outside the 0.5×–1.5× comparability guard.', 'zh-CN'), '2026年8月6日；未计入费用、延迟及超出 0.5×–1.5× 可比区间的价格点。');
   assert.equal(window.translateUi('Activity 2:15:09 PM', 'zh-CN'), '数据活动时间 14:15:09');
   assert.equal(window.translateUi('candidate list Aug 6, 2026', 'zh-CN'), '候选列表：2026年8月6日');
 

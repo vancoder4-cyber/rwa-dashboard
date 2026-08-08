@@ -676,7 +676,7 @@
     [/^(\d+(?:\.\d+)?[KMB]?) shares$/, function (m) { return m[1] + ' 股'; }],
     [/^(\d+(?:\.\d+)?[KMB]?) contracts$/, function (m) { return m[1] + ' 张合约'; }],
     [/^(.+) est\.$/, function (m) { return m[1] + ' 估算'; }],
-    [/^as of (.+)$/, function (m) { return '截至 ' + m[1]; }],
+    [/^as of (.+)$/, function (m) { return '截至 ' + translateCore(m[1], 'zh-CN'); }],
     [/^Last success (.+)$/, function (m) { return '最近成功：' + m[1]; }],
     [/^Error: (.+)$/, function (m) { return '错误：' + m[1]; }],
     [/^Open (.+) asset intelligence$/, function (m) { return '打开 ' + m[1] + ' 资产情报'; }],
@@ -697,7 +697,7 @@
     [/^(\d[\d,]*)\/(\d[\d,]*) eligible aligned$/, function (m) { return '符合条件并对齐 ' + m[1] + '/' + m[2]; }],
     [/^(\d[\d,]*) session-ineligible excluded$/, function (m) { return '已排除 ' + m[1] + ' 个不符合该交易日条件的标的'; }],
     [/^· completed-session shares \+ close$/, function () { return '· 已完成交易时段的成交股数 + 收盘价'; }],
-    [/^· T\+1 as of (.+)$/, function (m) { return '· T+1，截至 ' + m[1]; }],
+    [/^· T\+1 as of (.+)$/, function (m) { return '· T+1，截至 ' + translateCore(m[1], 'zh-CN'); }],
     [/^· (.+)$/, function (m) { return '· ' + translateCore(m[1], 'zh-CN'); }],
     [/^Activity (.+)$/, function (m) { return '数据活动时间 ' + translateCore(m[1], 'zh-CN'); }],
     [/^Last refresh failed: (.+)$/, function (m) { return '最近刷新失败：' + m[1]; }],
@@ -723,7 +723,7 @@
     [/^(\d+)-week same day$/, function (m) { return '此前 ' + m[1] + ' 周同一交易日'; }],
     [/^(.+) adjusted excluded$/, function (m) { return '已排除 ' + m[1] + ' 张调整类期权'; }],
     [/^(Market|Options) (.+)$/, function (m) { return translateCore(m[1], 'zh-CN') + ' ' + m[2]; }],
-    [/^Data as of (.+)$/, function (m) { return '数据截至 ' + m[1]; }],
+    [/^Data as of (.+)$/, function (m) { return '数据截至 ' + translateCore(m[1], 'zh-CN'); }],
     [/^Ranking (.+)$/, function (m) { return '排名交易日 ' + m[1]; }],
     [/^fetched (.+)$/, function (m) { return '获取于 ' + translateCore(m[1], 'zh-CN'); }],
     [/^(\d[\d,]*) Perp \+ (\d[\d,]*) Spot listings$/, function (m) { return m[1] + ' 个永续 + ' + m[2] + ' 个现货标的'; }],
@@ -768,10 +768,10 @@
       return translateCore(m[1], 'zh-CN') + ' 24 小时成交量：' + m[2] + ' 个成交量字段可用';
     }],
     [/^Indicative estimate from live category-matched USD\/share prices(.+); excludes fees, latency and points outside the 0\.5×–1\.5× comparability guard\.$/, function (m) {
-      return '基于类别匹配的实时美元/股价格进行指示性估算' + m[1] + '；未计入费用、延迟及超出 0.5×–1.5× 可比区间的价格点。';
+      return '基于类别匹配的实时美元/股价格进行指示性估算' + translateCore(m[1], 'zh-CN') + '；未计入费用、延迟及超出 0.5×–1.5× 可比区间的价格点。';
     }],
     [/^(.+); excludes fees, latency and points outside the 0\.5×–1\.5× comparability guard\.$/, function (m) {
-      return m[1] + '；未计入费用、延迟及超出 0.5×–1.5× 可比区间的价格点。';
+      return translateCore(m[1], 'zh-CN') + '；未计入费用、延迟及超出 0.5×–1.5× 可比区间的价格点。';
     }],
     [/^(.+) APR spread$/, function (m) { return m[1] + ' APR 差'; }],
     [/^(.+) mark-index gap$/, function (m) { return m[1] + ' 标记价-指数价偏差'; }],
