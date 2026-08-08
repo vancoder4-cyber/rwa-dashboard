@@ -121,9 +121,18 @@ export function selectBinanceSpotRwaCatalog(spotExchangeInfo, futuresExchangeInf
 
   for (const row of spotRows) {
     if (row?.status !== 'TRADING' || row?.isSpotTradingAllowed === false) continue;
-    const identity = catalogIdentity(row, 'spot');
+    // Binance's complete Spot catalog can contain non-Latin Crypto symbols.
+    // Reject them before strict RWA identity parsing unless the raw base is an
+    // exact metal exception or a trailing-B wrapper candidate. A malformed
+    // candidate still reaches catalogIdentity() and fails closed.
+    const rawBaseAsset = String(row?.baseAsset || '').trim().toUpperCase();
     const quoteAsset = String(row?.quoteAsset || '').trim().toUpperCase();
     if (!SPOT_QUOTES.has(quoteAsset)) continue;
+    const isMetalCandidate = Object.hasOwn(BINANCE_SPOT_METAL_EXCEPTIONS, rawBaseAsset);
+    const isBstockCandidate = rawBaseAsset.length >= 3 && rawBaseAsset.endsWith('B');
+    if (!isMetalCandidate && !isBstockCandidate) continue;
+
+    const identity = catalogIdentity(row, 'spot');
 
     const metal = BINANCE_SPOT_METAL_EXCEPTIONS[identity.baseAsset];
     const bstock = metal ? null : bstockEvidence(identity.baseAsset, tradfi);

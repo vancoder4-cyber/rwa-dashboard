@@ -156,6 +156,7 @@ test('Binance fixed spot catalog cross-checks B candidates against active TradFi
     binanceSpotInstrument('QNTUSDT', 'QNT'),
     binanceSpotInstrument('PAXGUSDT', 'PAXG'),
     binanceSpotInstrument('XAUTUSDT', 'XAUT'),
+    binanceSpotInstrument('币安人生USDT', '币安人生'),
     binanceSpotInstrument('PAXGBTC', 'PAXG', 'BTC'),
     binanceSpotInstrument('OLDPAXGUSDT', 'PAXG', 'USDT', { status:'BREAK' }),
   ] };
