@@ -88,6 +88,7 @@
 | Gate.io    | `#638EFF` | `rgba(99,142,255,0.12)`       |
 | Binance    | `#F0B90B` | `rgba(240,185,11,0.12)`       |
 | Kraken     | `#A78BFA` | `rgba(167,139,250,0.12)`      |
+| OKX        | `#111827` | `rgba(17,24,39,0.12)`         |
 | Bybit      | `#FB923C` | `rgba(251,147,60,0.12)`       |
 | Lighter    | `#34D399` | `rgba(52,211,153,0.12)`       |
 | Vest       | `#F472B6` | `rgba(244,114,182,0.12)`      |
@@ -183,6 +184,13 @@ Base unit: 4px
 - Change: Green/Red muted bg + matching text
 - Venue: Venue brand color at 12% bg + full color text
 - Size: 10px font, 2px 8px padding, `--r-sm` radius
+
+### Listing identity & provenance
+- The primary row identity is the canonical underlying, while venue symbol and product type remain visible as listing metadata.
+- One venue dot represents one venue, not one contract. If OKX supplies both SWAP and X-Perp for the same underlying, the aggregate row counts OKX once but the expanded row and Asset Intelligence Drawer show both independent listings with `SWAP` / `X-PERP` labels.
+- Coverage and numeric fields use only the canonical `Full / Partial / Estimated / Unavailable` states. Missing values render as an em dash plus status, never numeric zero.
+- OKX derivative USD volume derived from base quantity × price and generic account-tier fee defaults carry an `Estimated` badge. Unsupported fees are `Unavailable`; neither may visually resemble an official Full value.
+- The Top 30 loading/provenance line names every participating venue. A 30-day value is Full only with 30 confirmed daily bars; partial history or `24h×30` fallback must remain visually distinguishable.
 
 ### Modal
 - Overlay: `rgba(0,0,0,0.7)` + `backdrop-filter: blur(8px)`

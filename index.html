@@ -63,6 +63,8 @@
   --gate-dim:     rgba(43,95,224,0.10);
   --binance:      #C99400;
   --binance-dim:  rgba(201,148,0,0.10);
+  --okx:          #111827;
+  --okx-dim:      rgba(17,24,39,0.10);
   --kraken:       #7B42C6;
   --kraken-dim:   rgba(123,66,198,0.10);
   --bybit:        #E07800;
@@ -321,6 +323,7 @@ body {
 .venue-dot.bitget { background: var(--bitget); }
 .venue-dot.gate { background: var(--gate); }
 .venue-dot.binance { background: var(--binance); }
+.venue-dot.okx { background: var(--okx); box-shadow: 0 0 0 1px rgba(255,255,255,.45) inset; }
 .venue-dot.kraken { background: var(--kraken); }
 .venue-dot.bybit { background: var(--bybit); }
 .venue-dot.lighter { background: var(--lighter); }
@@ -936,6 +939,7 @@ td:first-child { text-align: left; }
 .tag-fx       { background: var(--pink-dim); color: var(--pink); }
 .tag-etf      { background: var(--cyan-dim); color: var(--cyan); }
 .tag-pre-ipo  { background: var(--orange-dim); color: var(--orange); }
+.tag-bond     { background: rgba(142,142,147,.12); color: #636366; }
 .market-origin-tag {
   display:inline-flex; align-items:center; margin-left:3px; padding:1px 5px; border-radius:4px;
   font:700 9px/1.35 Inter,sans-serif; letter-spacing:.25px; white-space:nowrap;
@@ -977,6 +981,7 @@ td:first-child { text-align: left; }
 .venue-badge-sm.bitget { background: var(--bitget-dim); color: var(--bitget); border: 1px solid rgba(0,183,79,0.15); }
 .venue-badge-sm.gate { background: var(--gate-dim); color: var(--gate); border: 1px solid rgba(43,95,224,0.15); }
 .venue-badge-sm.binance { background: var(--binance-dim); color: var(--binance); border: 1px solid rgba(201,148,0,0.15); }
+.venue-badge-sm.okx { background: var(--okx-dim); color: var(--okx); border: 1px solid rgba(17,24,39,0.15); }
 .venue-badge-sm.kraken { background: var(--kraken-dim); color: var(--kraken); border: 1px solid rgba(123,66,198,0.15); }
 
 .venue-subrow { background: rgba(120,120,128,0.03); cursor: pointer; }
@@ -1426,6 +1431,7 @@ input[type="checkbox"] {
     <div class="sub-tab" onclick="switchSubTab('bitget', this)"><span class="venue-dot bitget"></span>Bitget</div>
     <div class="sub-tab" onclick="switchSubTab('gate', this)"><span class="venue-dot gate"></span>Gate.io</div>
     <div class="sub-tab" onclick="switchSubTab('binance', this)"><span class="venue-dot binance"></span>Binance</div>
+    <div class="sub-tab" onclick="switchSubTab('okx', this)"><span class="venue-dot okx"></span>OKX</div>
   </div>
 
   <!-- Aggregator -->
@@ -1574,6 +1580,41 @@ input[type="checkbox"] {
     </div>
   </div>
 
+  <!-- OKX table -->
+  <div class="sub-view" id="sub-okx">
+    <div class="filter-bar">
+      <div class="chip active" onclick="setVenueFilter('okx','all',this)">All RWA <span class="count" id="okxCountAll"></span></div>
+      <div class="chip" onclick="setVenueFilter('okx','equity',this)">Equities <span class="count" id="okxCountEquity"></span></div>
+      <div class="chip" onclick="setVenueFilter('okx','commodity',this)">Commodities <span class="count" id="okxCountCommodity"></span></div>
+      <div class="chip" onclick="setVenueFilter('okx','index',this)">Indices <span class="count" id="okxCountIndex"></span></div>
+      <div class="chip" onclick="setVenueFilter('okx','etf',this)">ETFs <span class="count" id="okxCountEtf"></span></div>
+      <div class="chip" onclick="setVenueFilter('okx','pre-ipo',this)">Pre-IPO <span class="count" id="okxCountPreIpo"></span></div>
+      <div class="chip" onclick="setVenueFilter('okx','fx',this)">FX <span class="count" id="okxCountFx"></span></div>
+      <div class="chip" onclick="setVenueFilter('okx','bond',this)">Bonds <span class="count" id="okxCountBond"></span></div>
+      <label style="display:flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;color:var(--foreground-sec);cursor:pointer;user-select:none">
+        <input type="checkbox" id="okxHideInactive" checked onchange="renderVenueTable('okx')"> Active only
+      </label>
+      <input class="search-box" placeholder="Search asset..." oninput="venueTableSearch.okx=this.value.toLowerCase();renderVenueTable('okx')">
+    </div>
+    <div class="info-bar"><span>OKX RWA SWAP + official X-Perp · Funding interval is contract-specific · Default fee values are indicative and account-tier dependent</span><span>Official instCategory gate · Auto-refresh: 60s</span></div>
+    <div class="table-wrap">
+      <table><thead><tr>
+        <th style="text-align:left" data-sort="name" onclick="setVenueSort('okx','name')">Asset <span class="arrow"></span></th>
+        <th data-sort="markPx" onclick="setVenueSort('okx','markPx')">Mark Price <span class="arrow"></span></th>
+        <th data-sort="indexPx" onclick="setVenueSort('okx','indexPx')">Index Price <span class="arrow"></span></th>
+        <th data-sort="change" onclick="setVenueSort('okx','change')">24h Change <span class="arrow"></span></th>
+        <th data-sort="volume" onclick="setVenueSort('okx','volume')">24h Volume <span class="arrow">▼</span></th>
+        <th data-sort="oi" onclick="setVenueSort('okx','oi')">Open Interest <span class="arrow"></span></th>
+        <th data-sort="depth" onclick="setVenueSort('okx','depth')">±2% Depth <span class="arrow"></span></th>
+        <th data-sort="funding" onclick="setVenueSort('okx','funding')">Funding Rate <span class="arrow"></span></th>
+        <th data-sort="posRate" onclick="setVenueSort('okx','posRate')"><span class="th-info">% 有效费率 <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip">排除年化 &lt; 1.5% 的无效周期，取正/负费率中占比更大的方向。比例越高，费率方向越稳定。</span></span></th>
+        <th style="cursor:default"><div style="display:flex;align-items:center;gap:6px;justify-content:flex-end"><span>Funding</span>
+          <div class="spark-range-btns"><button class="sr-btn active" onclick="setSparkRange('okx',24,this)">24h</button><button class="sr-btn" onclick="setSparkRange('okx',72,this)">3d</button><button class="sr-btn" onclick="setSparkRange('okx',168,this)">7d</button></div>
+        </div></th>
+      </tr></thead><tbody id="okxTableBody"></tbody></table>
+    </div>
+  </div>
+
   <!-- Lighter table -->
   <div class="sub-view" id="sub-lighter">
     <div class="filter-bar">
@@ -1687,6 +1728,7 @@ input[type="checkbox"] {
     <div class="chip" onclick="setAssetCat('etf',this)">ETFs <span class="count" id="aCountEtf"></span></div>
     <div class="chip" onclick="setAssetCat('pre-ipo',this)">Pre-IPO <span class="count" id="aCountPreIpo"></span></div>
     <div class="chip" onclick="setAssetCat('fx',this)">FX <span class="count" id="aCountFx"></span></div>
+    <div class="chip" onclick="setAssetCat('bond',this)">Bonds <span class="count" id="aCountBond"></span></div>
     <label style="display:flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;color:var(--foreground-sec);cursor:pointer;user-select:none">
       <input type="checkbox" id="assetHideInactive" onchange="renderAssetView()"> Active only
     </label>
@@ -1738,6 +1780,7 @@ input[type="checkbox"] {
         <option value="venue:bitget">Sort: Bitget |APR|</option>
         <option value="venue:gate">Sort: Gate.io |APR|</option>
         <option value="venue:binance">Sort: Binance |APR|</option>
+        <option value="venue:okx">Sort: OKX |APR|</option>
       </select>
       <span class="hm-result-count" id="heatmapResultCount"></span>
     </div>
@@ -1776,6 +1819,7 @@ input[type="checkbox"] {
     <div class="spot-sub-tab" onclick="switchSpotSub('binance',this)"><span class="venue-dot binance"></span> Binance <span class="spot-cnt">2</span></div>
     <div class="spot-sub-tab" onclick="switchSpotSub('bitget',this)"><span class="venue-dot bitget"></span> Bitget <span class="spot-cnt">5</span></div>
     <div class="spot-sub-tab" onclick="switchSpotSub('kraken',this)"><span class="venue-dot kraken"></span> Kraken <span class="spot-cnt">5</span></div>
+    <div class="spot-sub-tab" onclick="switchSpotSub('okx',this)"><span class="venue-dot okx"></span> OKX <span class="spot-cnt">0</span></div>
   </div>
 
   <!-- SPOT OVERVIEW -->
@@ -1901,6 +1945,7 @@ input[type="checkbox"] {
               <option value="binance">Binance Perp</option>
               <option value="bitget">Bitget Perp</option>
               <option value="tradexyz">trade.xyz Perp</option>
+              <option value="okx">OKX Perp</option>
             </select>
           </div>
           <div class="spot-perp-sel">
@@ -2008,6 +2053,7 @@ input[type="checkbox"] {
   <div class="footer-venues">
     <div class="footer-venue"><span class="venue-dot tradexyz"></span> trade.xyz</div>
     <div class="footer-venue"><span class="venue-dot bitget"></span> Bitget</div>
+    <div class="footer-venue"><span class="venue-dot okx"></span> OKX</div>
     <div style="margin-left:8px" id="footerTime">—</div>
   </div>
 </div>
@@ -2055,12 +2101,13 @@ const VENUES = {
   bitget:   { name: 'Bitget',    color: '#00B74F', fundingInterval: 8, makerFee: 0.0002, takerFee: 0.0006 },
   gate:     { name: 'Gate.io',   color: '#2B5FE0', fundingInterval: 8, makerFee: 0.00015, takerFee: 0.0005 },
   binance:  { name: 'Binance',   color: '#C99400', fundingInterval: 8, makerFee: 0.0002, takerFee: 0.0005 },
+  okx:      { name: 'OKX',       color: '#111827', fundingInterval: 8, makerFee: 0.0002, takerFee: 0.0005 },
 };
 const ENABLED_PERP_VENUES = Object.freeze(Object.keys(VENUES));
-const ENABLED_SPOT_VENUES = Object.freeze(['gate', 'kraken', 'bitget', 'binance']);
+const ENABLED_SPOT_VENUES = Object.freeze(['gate', 'kraken', 'bitget', 'binance', 'okx']);
 
-const CAT_COLORS = { index:'#007AFF', equity:'#AF52DE', commodity:'#C7942A', etf:'#32ADE6', 'pre-ipo':'#FF9500', fx:'#FF2D55', other:'#98989D' };
-const CAT_LABELS = { index:'Index', equity:'Equity', commodity:'Commodity', etf:'ETF', 'pre-ipo':'Pre-IPO', fx:'FX', other:'Other' };
+const CAT_COLORS = { index:'#007AFF', equity:'#AF52DE', commodity:'#C7942A', etf:'#32ADE6', 'pre-ipo':'#FF9500', fx:'#FF2D55', bond:'#8E8E93', other:'#98989D' };
+const CAT_LABELS = { index:'Index', equity:'Equity', commodity:'Commodity', etf:'ETF', 'pre-ipo':'Pre-IPO', fx:'FX', bond:'Bond', other:'Other' };
 
 // ═══════════════════════════════════════════════════
 // UNIFIED RWA ASSET SYSTEM (ported from rwa-cli)
@@ -2174,6 +2221,9 @@ const INDEX_SYMBOL_ALIASES = {
   NDX100:'NDX', US100:'NDX', JPN225:'JP225', US2000:'RTY', US30:'DJI',
   GER40:'DAX', UK100:'FTSE'
 };
+// Bitget and OKX currently place these exact RWA indices in a broad stock
+// product class. Refine them only after the venue's official RWA gate.
+const BROAD_STOCK_INDEX_SYMBOLS = new Set(['SP500','NDX100','KR200']);
 const EQUITY_SYMBOL_ALIASES = {
   SAMSUNGUSD:'SAMSUNG', SKHYNIXUSD:'SKHYNIX', HYUNDAIUSD:'HYUNDAI',
   BBX:'BB', BRKB:'BRK-B', HK0700:'TENCENT', HK1810:'XIAOMI',
@@ -2204,6 +2254,7 @@ const ETF_SYMBOLS = new Set([
   'XLE','XLU','XLV','YANG','YINN'
 ]);
 ['EWT','DRAM','KORU','KSTR','LYTE','NCLD','EWH','DFEN'].forEach(symbol => ETF_SYMBOLS.add(symbol));
+['SHLD','TMF','XBI'].forEach(symbol => ETF_SYMBOLS.add(symbol));
 // Nasdaq official identity check: MUU is Direxion Daily MU Bull 2X ETF, not
 // Micron common equity. Keep the wrapper category aligned across all venues.
 ETF_SYMBOLS.add('MUU');
@@ -2310,7 +2361,7 @@ const OFFICIAL_TYPE_CATEGORIES = Object.freeze({
   PREIPO:'pre-ipo', PREMARKET:'pre-ipo',
   ETF:'etf', EQUITYETF:'etf', STOCKETF:'etf',
   COMMODITY:'commodity', COMMODITIES:'commodity', COMMOD:'commodity', METAL:'commodity', METALS:'commodity',
-  INDEX:'index', INDICES:'index', FOREX:'fx', FX:'fx',
+  INDEX:'index', INDICES:'index', FOREX:'fx', FX:'fx', BOND:'bond', BONDS:'bond',
   STOCK:'equity', STOCKS:'equity', EQUITY:'equity', EQUITIES:'equity', SHARE:'equity', SHARES:'equity',
   PREFERREDSTOCK:'equity'
 });
@@ -2328,6 +2379,7 @@ function categoryForOfficialType(type) {
   if (tokens.some(token => ['COMMODITY','COMMODITIES','COMMOD','METAL','METALS'].includes(token))) return 'commodity';
   if (tokens.some(token => ['INDEX','INDICES'].includes(token))) return 'index';
   if (tokens.some(token => ['FOREX','FX'].includes(token))) return 'fx';
+  if (tokens.some(token => ['BOND','BONDS'].includes(token))) return 'bond';
   if (tokens.some(token => ['STOCK','STOCKS','EQUITY','EQUITIES','SHARE','SHARES'].includes(token))) return 'equity';
   return '';
 }
@@ -2389,6 +2441,7 @@ function categoryFromOfficial(type, symbol, name = '') {
   // A lifecycle match never overrules an explicit crypto identity. In normal
   // fetchers this is a second line of defence after the venue admission gate.
   if (officialCategory === 'other') return 'other';
+  if (['equity','etf','pre-ipo'].includes(officialCategory) && BROAD_STOCK_INDEX_SYMBOLS.has(raw)) return 'index';
   if (TOKENIZED_ETF_WRAPPERS[raw]) return 'etf';
   const listing = securityListingForSymbol(raw);
   // Public-vs-pre-IPO only refines a security type; it never overrides an
@@ -2766,16 +2819,16 @@ let tradfiPriceRetryAt = 0;
 let tradfiPriceRefreshTimer = null;
 
 // Per-venue table state
-let venueTableCatFilter = { tradexyz: 'all', bitget: 'all', gate: 'all', binance: 'all' };
-let venueTableSearch = { tradexyz: '', bitget: '', gate: '', binance: '' };
-let venueTableSort = { tradexyz: { key: 'volume', dir: -1 }, bitget: { key: 'volume', dir: -1 }, gate: { key: 'volume', dir: -1 }, binance: { key: 'volume', dir: -1 } };
+let venueTableCatFilter = { tradexyz: 'all', bitget: 'all', gate: 'all', binance: 'all', okx: 'all' };
+let venueTableSearch = { tradexyz: '', bitget: '', gate: '', binance: '', okx: '' };
+let venueTableSort = { tradexyz: { key: 'volume', dir: -1 }, bitget: { key: 'volume', dir: -1 }, gate: { key: 'volume', dir: -1 }, binance: { key: 'volume', dir: -1 }, okx: { key: 'volume', dir: -1 } };
 let assetSort = { key: 'volume', dir: -1 };
 
 // Sparkline state
-let sparkHours = { tradexyz: 24, bitget: 24, gate: 24, binance: 24 };
+let sparkHours = { tradexyz: 24, bitget: 24, gate: 24, binance: 24, okx: 24 };
 let divHoldDays = 0; // 0 = no fee deduction
 let fundingCache = {}; // key: "venue:coin" → { hours, data }
-let sparkLoadGeneration = { tradexyz:0, bitget:0, gate:0, binance:0 };
+let sparkLoadGeneration = { tradexyz:0, bitget:0, gate:0, binance:0, okx:0 };
 
 // ═══════════════════════════════════════════════
 // HELPERS
@@ -2875,6 +2928,31 @@ function annualize(r, venue, assetOrHours) {
   if (r === null) return null;
   const interval = fundingIntervalHours(venue, assetOrHours);
   return r * (24 / interval) * 365;
+}
+function representativeFundingRatesByVenue(listings) {
+  const representatives = new Map();
+  (listings || []).forEach(asset => {
+    if (asset?.funding === null || !asset?.venue) return;
+    const annualized = annualize(asset.funding, asset.venue, asset);
+    if (!Number.isFinite(annualized)) return;
+    const candidate = {
+      venue:asset.venue,
+      annualized,
+      asset,
+      liquidity:Number(asset.volume) || 0,
+      contract:String(asset.symbol || asset.venueSymbol || asset.coin || ''),
+    };
+    const current = representatives.get(asset.venue);
+    if (!current || candidate.liquidity > current.liquidity ||
+        (candidate.liquidity === current.liquidity && candidate.contract.localeCompare(current.contract) < 0)) {
+      representatives.set(asset.venue, candidate);
+    }
+  });
+  return [...representatives.values()];
+}
+function distinctVenueFundingSpread(listings) {
+  const rates = representativeFundingRatesByVenue(listings).map(row => row.annualized);
+  return rates.length >= 2 ? Math.max(...rates) - Math.min(...rates) : null;
 }
 function fmtAnnual(r, venue, assetOrHours) {
   const ann = annualize(r, venue, assetOrHours);
@@ -3374,16 +3452,16 @@ async function fetchGate() {
 // ═══════════════════════════════════════════════
 
 const BINANCE_API_BASE = 'https://fapi.binance.com/fapi/v1';
-// Official Binance catalog snapshot captured 2026-08-07. Live exchangeInfo is
+// Official Binance catalog snapshot captured 2026-08-08. Live exchangeInfo is
 // always preferred; this prevents a temporary Binance block from deleting the
 // venue. Group labels reproduce the venue snapshot only: every row still passes
 // through SECURITY_LISTING_REGISTRY, so a stale PRE-IPO group cannot override a
 // verified public listing. Duplicate canonical names preserve separate contracts.
 const BINANCE_TRADIFI_SNAPSHOT_GROUPS = {
-  EQUITY: ['AAOI','AAPL','ADBE','ALAB','AMAT','AMD','AMZN','APP','ARM','ASML','ASTS','AVGO','AXTI','BABA','BB','BE','BMNR','BNC','BOT','BRK-B','BSP','BX','CAT','CBRS','CIEN','COHR','COIN','COST','CRCL','CRDO','CRM','CRWD','CRWV','CSCO','DELL','DIS','DKNG','EBAY','FLEX','FLNC','FWDI','GEV','GIGADEV','GLW','GME','GOOGL','GS','HD','HIMS','HOOD','HPE','HYUNDAI','IBM','INTC','INTW','IREN','JPM','KLAC','KO','LITE','LLY','LRCX','META','MINIMAX','MRVL','MSFT','MSTR','MU','MUU','MVLL','NBIS','NFLX','NOK','NOW','NVDA','NVO','ONDS','ORCL','PANW','PAYP','PENG','PLTR','POPMART','PYPL','QCOM','QNTX','RDDT','RIVN','RKLB','SAMSUNG','SHAZ','SKHY','SKHYNIX','SMCI','SNDK','SNOW','SOFI','SONY','SPCX','SPCX','STRC','STXX','TBT','TENCENT','TENCENT','TER','TMF','TSLA','TSM','TTWO','TXN','UBER','USAR','V','VRT','WDC','WEN','WMT','XBI','XIAOMI','ZHIPU','ZM'],
+  EQUITY: ['AAOI','AAPL','ADBE','ALAB','AMAT','AMD','AMZN','APP','ARM','ASML','ASTS','AVGO','AXTI','BABA','BBX','BE','BMNR','BNC','BOT','BRK-B','BSP','BX','CAT','CBRS','CIEN','COHR','COIN','COST','CRCL','CRDO','CRM','CRWD','CRWV','CSCO','DELL','DIS','DKNG','EBAY','FLEX','FLNC','FWDI','GEV','GIGADEV','GLW','GME','GOOGL','GS','HD','HIMS','HOOD','HPE','HYUNDAI','IBM','INTC','INTW','IREN','JPM','KLAC','KO','LITE','LLY','LRCX','META','MINIMAX','MRVL','MSFT','MSTR','MU','MUU','MVLL','NBIS','NFLX','NOK','NOW','NVDA','NVO','ONDS','ORCL','PANW','PAYP','PENG','PLTR','POPMART','PYPL','QCOM','QNTX','RDDT','RIVN','RKLB','SAMSUNG','SHAZ','SKHY','SKHYNIX','SMCI','SNDK','SNOW','SOFI','SONY','SPCX','SPCX','STRC','STXX','TBT','TENCENT','HK0700','TER','TMF','TSLA','TSM','TTWO','TXN','UBER','USAR','V','VRT','WDC','WEN','WMT','XBI','HK1810','ZHIPU','ZM'],
   'PRE-IPO': ['ANTHROPIC','OPENAI'],
   ETF: ['BITO','DRAM','EWJ','EWT','EWY','EWZ','IWM','KORU','KSTR','QQQ','SMH','SNXX','SOXL','SOXS','SPY','SQQQ','TQQQ','TZA','URNM','UVXY','XLE'],
-  COMMODITY: ['BRENTOIL','NATGAS','PAXG','WTI','XAG','XAU','XAUT','XCU','XPD','XPT']
+  COMMODITY: ['BZ','NATGAS','PAXG','CL','XAG','XAU','XAUT','COPPER','XPD','XPT']
 };
 const BINANCE_TRADIFI_SNAPSHOT = (() => {
   const seen = {};
@@ -3391,8 +3469,7 @@ const BINANCE_TRADIFI_SNAPSHOT = (() => {
     const ordinal = (seen[baseAsset] || 0) + 1;
     seen[baseAsset] = ordinal;
     let symbol = `${baseAsset.replace(/-/g, '')}USDT`;
-    if (baseAsset === 'SPCX' && ordinal === 2) symbol = 'SPACEXUSDT';
-    if (baseAsset === 'TENCENT' && ordinal === 2) symbol = '0700USDT';
+    if (baseAsset === 'SPCX' && ordinal === 2) symbol = 'SPCXUSD1';
     return { symbol, baseAsset, contractType: 'TRADIFI_PERPETUAL', underlyingType: type, status: 'TRADING', snapshot: true };
   }));
 })();
@@ -3581,6 +3658,93 @@ async function fetchBinance() {
   runEnhancementTasks(depthTasksBinance, 5, 'Binance depth');
 
   logLoad(`Binance: ${assets.length} RWA assets processed`);
+  return assets;
+}
+
+// ═══════════════════════════════════════════════
+// API: OKX (official RWA SWAP + X-Perp catalog)
+// ═══════════════════════════════════════════════
+
+function okxOfficialType(instCategory) {
+  return ({ '3':'STOCKS', '4':'COMMODITIES', '5':'FOREX', '6':'BONDS' })[String(instCategory || '')] || '';
+}
+
+function okxSnapshotRows(payload, key) {
+  const rows = payload?.[key];
+  if (Array.isArray(rows)) return rows;
+  if (rows && typeof rows === 'object') return Object.values(rows);
+  return [];
+}
+
+async function fetchOkx() {
+  logLoad('Fetching OKX official RWA contract snapshot...');
+  const response = await fetch('/api/okx-market?type=perp-snapshot', { cache:'no-store', signal:AbortSignal.timeout(55000) });
+  if (!response.ok) throw new Error(`OKX snapshot HTTP ${response.status}`);
+  const snapshot = await response.json();
+  const instruments = okxSnapshotRows(snapshot, 'instruments');
+  if (!instruments.length) throw new Error('OKX official RWA catalog is empty');
+  const tickerMap = new Map(okxSnapshotRows(snapshot, 'tickers').map(row => [row.instId, row]));
+  const markMap = new Map(okxSnapshotRows(snapshot, 'marks').map(row => [row.instId, row]));
+  const oiMap = new Map(okxSnapshotRows(snapshot, 'openInterest').map(row => [row.instId, row]));
+  const fundingMap = new Map(okxSnapshotRows(snapshot, 'funding').map(row => [row.instId, row]));
+  const assets = [];
+
+  for (const meta of instruments) {
+    const venueSymbol = String(meta.instId || '').toUpperCase();
+    const officialType = okxOfficialType(meta.instCategory);
+    const isSwap = meta.instType === 'SWAP' && meta.ruleType !== 'xperp';
+    const isXPerp = meta.instType === 'FUTURES' && meta.ruleType === 'xperp';
+    if (meta.state !== 'live' || !officialType || (!isSwap && !isXPerp)) continue;
+    const venueBase = String(meta.ctValCcy || meta.uly || venueSymbol.split('-')[0]).split('-')[0].toUpperCase();
+    let normalized = normalizeOfficialRwaSymbol(venueBase, officialType);
+    // OKX's broad Stocks bucket contains this explicitly named equity index.
+    // This is a venue-scoped refinement after the official non-crypto gate.
+    if (venueBase === 'KR200') normalized = { symbol:'KR200', category:'index' };
+    const base = normalized.symbol;
+    if (!base || normalized.category === 'other' || EXCLUDED_SYMBOLS.has(base)) continue;
+
+    const ticker = tickerMap.get(venueSymbol) || {};
+    const markRow = markMap.get(venueSymbol) || {};
+    const oiRow = oiMap.get(venueSymbol) || {};
+    const fundingRow = fundingMap.get(venueSymbol) || {};
+    const mark = firstNumber(markRow.markPx, ticker.last);
+    const last = numberOrNull(ticker.last);
+    const open24h = numberOrNull(ticker.open24h);
+    const volumeUnderlying = numberOrNull(ticker.volCcy24h);
+    const volume = volumeUnderlying !== null && (last ?? mark) > 0 ? volumeUnderlying * (last ?? mark) : null;
+    const oi = numberOrNull(oiRow.oiUsd);
+    const funding = numberOrNull(fundingRow.fundingRate);
+    const prevFundingTime = numberOrNull(fundingRow.prevFundingTime);
+    const fundingTime = numberOrNull(fundingRow.fundingTime);
+    const nextFundingTime = numberOrNull(fundingRow.nextFundingTime);
+    const intervalMs = nextFundingTime !== null && fundingTime !== null
+      ? nextFundingTime - fundingTime
+      : fundingTime !== null && prevFundingTime !== null ? fundingTime - prevFundingTime : null;
+    const fundingInterval = intervalMs > 0 ? intervalMs / 3600000 : VENUES.okx.fundingInterval;
+    const change = last !== null && open24h > 0 ? ((last - open24h) / open24h) * 100 : null;
+    registerRwaAsset(base, '', normalized.category);
+
+    assets.push({
+      coin:base, symbol:venueSymbol, venueSymbol, fullName:KNOWN_NAMES[base] || base,
+      category:normalized.category, venue:'okx', marketType:isXPerp ? 'X-PERP' : 'SWAP',
+      markPx:mark, indexPx:null, change, volume, oi, funding, predictedFunding:null,
+      depth2:null, isListed:true, isActive:true, isPriced:mark > 0,
+      fundingIntervalHours:fundingInterval,
+      makerFee:VENUES.okx.makerFee, takerFee:VENUES.okx.takerFee,
+      sourceAt:Number(ticker.ts || markRow.ts) || Date.parse(snapshot.generatedAt) || Date.now(),
+      fieldStatus:{
+        markPx:numberOrNull(markRow.markPx) !== null ? 'full' : last !== null ? 'estimated' : 'unavailable',
+        indexPx:'unavailable',
+        change:change !== null ? 'full' : 'unavailable',
+        volume:volume !== null ? 'estimated' : 'unavailable',
+        oi:oi !== null ? 'full' : 'unavailable',
+        funding:funding !== null ? 'full' : 'unavailable',
+        predictedFunding:'unavailable', depth2:'unavailable', fees:'estimated'
+      }
+    });
+  }
+  if (!assets.length) throw new Error('OKX official catalog produced no identity-verified RWA contracts');
+  logLoad(`OKX: ${assets.length} official RWA contracts processed`);
   return assets;
 }
 
@@ -3956,6 +4120,14 @@ async function fetchFundingHistoryGate(contract, hours, intervalHours = 8) {
   } catch (e) { return []; }
 }
 
+function fundingAssetKey(venue, asset) {
+  return `${venue}:${asset?.symbol || asset?.venueSymbol || asset?.coin || ''}`;
+}
+
+function fundingDomSuffix(venue, asset) {
+  return fundingAssetKey(venue, asset).replace(/[^A-Za-z0-9_-]/g, '_');
+}
+
 function setSparkRange(venue, hours, btnEl) {
   sparkHours[venue] = hours;
   // Update buttons within the same table
@@ -4039,7 +4211,7 @@ async function loadFundingHistoryBulk(venue, assets, generation) {
         hours,
         fundingIntervalHours(venue, asset),
       );
-      fundingCache[`${venue}:${asset.coin}`] = {
+      fundingCache[fundingAssetKey(venue, asset)] = {
         hours,
         data: normalized.rows,
         coverage: { ...normalized.coverage, reason: payload?.results?.[symbol]?.error || payload?.results?.[symbol]?.reason || null },
@@ -4055,7 +4227,7 @@ async function loadFundingHistoryBulk(venue, assets, generation) {
   // Retry only the missing subset under a distinct cache key; never refetch
   // the full table or overwrite already valid rows.
   const missing = assets.filter(asset => {
-    const cached = fundingCache[`${venue}:${asset.coin}`];
+    const cached = fundingCache[fundingAssetKey(venue, asset)];
     return !cached || !Array.isArray(cached.data) || cached.data.length < 2;
   });
   for (let i = 0; i < missing.length; i += 20) {
@@ -4069,7 +4241,7 @@ async function loadFundingHistoryBulk(venue, assets, generation) {
       for (const asset of chunk) {
         const symbol = asset.symbol || asset.coin;
         const normalized = normalizeFundingHistoryWindow(payload?.results?.[symbol]?.rows || [], hours, fundingIntervalHours(venue, asset));
-        fundingCache[`${venue}:${asset.coin}`] = {
+        fundingCache[fundingAssetKey(venue, asset)] = {
           hours,
           data: normalized.rows,
           coverage: { ...normalized.coverage, reason: payload?.results?.[symbol]?.error || payload?.results?.[symbol]?.reason || null },
@@ -4084,12 +4256,12 @@ async function loadFundingHistoryBulk(venue, assets, generation) {
 }
 
 async function loadSparkline(venue, asset) {
-  const cellId = `spark_${venue}_${asset.coin}`;
+  const cellId = `spark_${fundingDomSuffix(venue, asset)}`;
   const cell = document.getElementById(cellId);
   if (!cell) return;
 
   const hours = sparkHours[venue];
-  const cacheKey = `${venue}:${asset.coin}`;
+  const cacheKey = fundingAssetKey(venue, asset);
   let data = fundingCache[cacheKey];
 
   const shouldRetryEmpty = data && (!Array.isArray(data.data) || data.data.length < 2) && Date.now() - (data.fetchedAt || 0) > 15000;
@@ -4097,7 +4269,7 @@ async function loadSparkline(venue, asset) {
     cell.innerHTML = '<span style="color:var(--text-muted);font-size:11px">loading...</span>';
     try {
       let raw;
-      if (!_isDev && ['tradexyz','gate','binance','bitget'].includes(venue)) {
+      if (!_isDev && ['tradexyz','gate','binance','bitget','okx'].includes(venue)) {
         const historySymbol = asset.symbol || (venue === 'gate' ? `${asset.coin}_USDT` : venue === 'tradexyz' ? asset.coin : `${asset.coin}USDT`);
         const response = await fetch(`/api/funding-history?venue=${venue}&hours=${hours}&symbols=${encodeURIComponent(historySymbol)}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -4142,7 +4314,7 @@ async function loadSparkline(venue, asset) {
   cell.innerHTML = `<span class="history-value">${renderSparkSVG(rates, asset.predictedFunding)}${dataStatusBadge(coverage.status, coverageTitle)}</span>`;
 
   // Update % 有效费率 cell
-  const posCell = document.getElementById(`pos_${venue}_${asset.coin}`);
+  const posCell = document.getElementById(`pos_${fundingDomSuffix(venue, asset)}`);
   if (posCell && rates.length > 0) {
     const interval = fundingIntervalHours(venue, asset);
     const annFactor = 8760 / interval;
@@ -4400,7 +4572,7 @@ let modalVenue = null;
 let modalAssetData = null;
 let modalIdentityRequest = null;
 let modalReturnFocus = null;
-const ASSET_INTELLIGENCE_CATEGORIES = new Set(['equity','etf','commodity','index','fx','pre-ipo']);
+const ASSET_INTELLIGENCE_CATEGORIES = new Set(['equity','etf','commodity','index','fx','bond','pre-ipo']);
 
 function assetIntelligenceKey(canonical, category) {
   const symbol = String(canonical || '').trim().toUpperCase();
@@ -4864,7 +5036,7 @@ async function loadModalChart() {
 
   let raw;
   try {
-    if (!_isDev && ['tradexyz','gate','binance','bitget'].includes(v)) {
+    if (!_isDev && ['tradexyz','gate','binance','bitget','okx'].includes(v)) {
       const response = await fetch(`/api/funding-history?venue=${v}&hours=${hours}&symbols=${encodeURIComponent(historySymbol)}`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const payload = await response.json();
@@ -5018,7 +5190,7 @@ async function refresh(isFirst, force = false) {
   if (refreshInFlight) return refreshInFlight;
   const task = (async () => {
    try {
-    const perpFetchers = { tradexyz:fetchTradeXyz, bitget:fetchBitget, gate:fetchGate, binance:fetchBinance };
+    const perpFetchers = { tradexyz:fetchTradeXyz, bitget:fetchBitget, gate:fetchGate, binance:fetchBinance, okx:fetchOkx };
     const venueDatasets = await Promise.all(
       ENABLED_PERP_VENUES.map(venue => fetchVenueWithFallback(venue, perpFetchers[venue]))
     );
@@ -5163,10 +5335,10 @@ function computeAlerts() {
     if (d.funding !== null) grouped[d.coin].push(d);
   });
   Object.entries(grouped).forEach(([coin, venues]) => {
-    if (venues.length < 2) return;
-    const annRates = venues.map(d => ({
-      venue: d.venue, ann: annualize(d.funding, d.venue, d)
+    const annRates = representativeFundingRatesByVenue(venues).map(row => ({
+      venue:row.venue, ann:row.annualized, asset:row.asset,
     }));
+    if (annRates.length < 2) return;
     const maxR = annRates.reduce((a, b) => a.ann > b.ann ? a : b);
     const minR = annRates.reduce((a, b) => a.ann < b.ann ? a : b);
     const spread = maxR.ann - minR.ann;
@@ -5261,6 +5433,7 @@ function renderCurrentView() {
     else if (currentSubTab === 'bitget') renderVenueTable('bitget');
     else if (currentSubTab === 'gate') renderVenueTable('gate');
     else if (currentSubTab === 'binance') renderVenueTable('binance');
+    else if (currentSubTab === 'okx') renderVenueTable('okx');
   }
   else if (currentView === 'asset') renderAssetView();
   else if (currentView === 'heatmap') renderHeatmap();
@@ -5544,7 +5717,7 @@ function renderDivergence() {
     const ann = annualize(d.funding, d.venue, d);
     if (ann === null) return;
     if (!grouped[d.coin]) grouped[d.coin] = { coin: d.coin, fullName: d.fullName, category: d.category, venues: [] };
-    grouped[d.coin].venues.push({ venue: d.venue, ann, raw: d.funding });
+    grouped[d.coin].venues.push({ venue: d.venue, ann, raw: d.funding, symbol:d.symbol || d.venueSymbol || d.coin, marketType:d.marketType || '' });
   });
 
   // Build two lists: positive (longs pay shorts) and negative (shorts pay longs)
@@ -5578,7 +5751,8 @@ function renderDivergence() {
       const chips = a.venues.map(v => {
         const vn = VENUES[v.venue]?.name || v.venue;
         const rate = (v.ann * 100).toFixed(2);
-        return `<span class="fr-venue-chip"><span class="venue-dot ${v.venue}"></span>${vn} <span class="fr-chip-rate" style="color:${isPositive ? 'var(--negative)' : 'var(--positive)'}">${isPositive ? '+' : ''}${rate}%</span></span>`;
+        const contract = v.marketType || v.symbol ? ` title="${escapeHtml(`${vn} ${v.marketType || ''} ${v.symbol || ''}`.trim())}"` : '';
+        return `<span class="fr-venue-chip"${contract}><span class="venue-dot ${v.venue}"></span>${vn}${v.marketType ? ` ${escapeHtml(v.marketType)}` : ''} <span class="fr-chip-rate" style="color:${isPositive ? 'var(--negative)' : 'var(--positive)'}">${isPositive ? '+' : ''}${rate}%</span></span>`;
       }).join('');
       const hidden = idx >= DIV_INITIAL_SHOW ? ' style="display:none"' : '';
       return `<div class="fr-row" data-panel="${panelId}"${hidden}><div class="fr-coin" style="color:${cc}">${a.coin}<span data-i18n-skip>${a.fullName}</span></div><div class="fr-apr" style="color:${aprColor}">${isPositive ? '+' : '-'}${aprPct}%</div><div class="fr-venues">${chips}</div></div>`;
@@ -5679,21 +5853,25 @@ async function _fetchReal30DayVolumeImpl() {
   // result: { COIN: { venues: { venueName: { vol30d, method } }, totalVol30d, components: Set } }
   const merged = {};
 
-  function addVol(coin, venue, vol, method = 'real', category = '') {
+  function addVol(coin, venue, vol, method = 'real', category = '', contributionId = '') {
     const key = canonicalSymbolForCategory(coin, category);
     if (!key || EXCLUDED_SYMBOLS.has(key)) return;
     const mergeKey = VOLUME_MERGE_GROUPS[key] || key;
     if (!merged[mergeKey]) merged[mergeKey] = { venues: {}, totalVol30d: 0, components: new Set() };
     merged[mergeKey].components.add(key);
+    const contributionKey = String(contributionId || `${venue}:${key}`).toUpperCase();
     // Always key by venue name — aggregate merged symbols (XAUT, PAXG → XAU) into one venue entry
     const vKey = venue;
     if (!merged[mergeKey].venues[vKey]) {
-      merged[mergeKey].venues[vKey] = { vol30d: 0, method, origVenue: venue, origSymbol: key, symbols: new Set() };
+      merged[mergeKey].venues[vKey] = { vol30d: 0, method, origVenue: venue, origSymbol: key, symbols: new Set(), contributions: new Set() };
+    } else if (merged[mergeKey].venues[vKey].method !== method) {
+      // A venue contribution can combine multiple contracts/components. Mixed
+      // real, partial-history and estimated inputs are Partial, never Full.
+      merged[mergeKey].venues[vKey].method = 'partial';
     }
     merged[mergeKey].venues[vKey].vol30d += vol;
     merged[mergeKey].venues[vKey].symbols.add(key);
-    // Prefer 'real' method over 'est'
-    if (method === 'real') merged[mergeKey].venues[vKey].method = 'real';
+    merged[mergeKey].venues[vKey].contributions.add(contributionKey);
   }
 
   // ── Binance: server-side Singapore bulk proxy avoids client-region blocks ──
@@ -5709,7 +5887,7 @@ async function _fetchReal30DayVolumeImpl() {
         binanceAssets.forEach(asset => {
           const symbol = asset.symbol || (asset.coin + 'USDT');
           const volume30d = Number(totals[symbol]?.volume30d) || 0;
-          if (volume30d > 0) addVol(asset.coin, 'binance', volume30d, 'real', asset.category);
+          if (volume30d > 0) addVol(asset.coin, 'binance', volume30d, 'real', asset.category, symbol);
         });
         return;
       } catch { return; }
@@ -5721,7 +5899,7 @@ async function _fetchReal30DayVolumeImpl() {
         if (!res.ok) continue;
         const rows = await res.json();
         const volume30d = Array.isArray(rows) ? rows.reduce((sum, row) => sum + (Number(row?.[7]) || 0), 0) : 0;
-        if (volume30d > 0) addVol(asset.coin, 'binance', volume30d, 'real', asset.category);
+        if (volume30d > 0) addVol(asset.coin, 'binance', volume30d, 'real', asset.category, symbol);
       } catch {}
     }
   }];
@@ -5740,7 +5918,7 @@ async function _fetchReal30DayVolumeImpl() {
         const volQuote = parseFloat(c[6] || c[5] || 0);
         totalVol += volQuote;
       });
-      if (totalVol > 0) addVol(asset.coin, 'bitget', totalVol, 'real', asset.category);
+      if (totalVol > 0) addVol(asset.coin, 'bitget', totalVol, 'real', asset.category, sym);
     } catch {}
   });
 
@@ -5763,7 +5941,7 @@ async function _fetchReal30DayVolumeImpl() {
           if (!Array.isArray(candles)) return;
           let totalVol = 0;
           candles.forEach(c => { totalVol += parseFloat(c.sum || 0); });
-          if (totalVol > 0) addVol(a.coin, 'gate', totalVol, 'real', a.category);
+          if (totalVol > 0) addVol(a.coin, 'gate', totalVol, 'real', a.category, contract);
         });
       } catch {}
     } else {
@@ -5777,7 +5955,7 @@ async function _fetchReal30DayVolumeImpl() {
           if (!Array.isArray(candles)) continue;
           let totalVol = 0;
           candles.forEach(c => { totalVol += parseFloat(c.sum || 0); });
-          if (totalVol > 0) addVol(asset.coin, 'gate', totalVol, 'real', asset.category);
+          if (totalVol > 0) addVol(asset.coin, 'gate', totalVol, 'real', asset.category, contract);
         } catch {}
       }
     }
@@ -5797,7 +5975,7 @@ async function _fetchReal30DayVolumeImpl() {
         xyzAssets.forEach(asset => {
           const symbol = asset.symbol || `xyz:${asset.coin}`;
           const volume30d = Number(totals[symbol]?.volume30d) || 0;
-          if (volume30d > 0) addVol(asset.coin, 'tradexyz', volume30d, 'real', asset.category);
+          if (volume30d > 0) addVol(asset.coin, 'tradexyz', volume30d, 'real', asset.category, symbol);
         });
         return;
       } catch { return; }
@@ -5811,9 +5989,33 @@ async function _fetchReal30DayVolumeImpl() {
         if (!res.ok) continue;
         const rows = await res.json();
         const volume30d = Array.isArray(rows) ? rows.reduce((sum, row) => sum + (Number(row?.v) || 0) * (Number(row?.c) || asset.markPx || 0), 0) : 0;
-        if (volume30d > 0) addVol(asset.coin, 'tradexyz', volume30d, 'real', asset.category);
+        if (volume30d > 0) addVol(asset.coin, 'tradexyz', volume30d, 'real', asset.category, asset.symbol || `xyz:${asset.coin}`);
       } catch {}
     }
+  }];
+
+  // ── OKX: official SWAP + X-Perp daily quote-volume totals ──
+  const okxAssets = allData.filter(d => d.venue === 'okx').sort((a,b)=>b.volume-a.volume).slice(0,80);
+  const okxKlineTasks = [async () => {
+    if (!okxAssets.length) return;
+    try {
+      const symbols = okxAssets.map(asset => asset.symbol).filter(Boolean).sort();
+      const response = await fetch(`/api/okx-market?type=volume30d&symbols=${encodeURIComponent(symbols.join(','))}`);
+      if (!response.ok) return;
+      const payload = await response.json();
+      const totals = payload?.results || payload;
+      okxAssets.forEach(asset => {
+        const row = totals?.[asset.symbol] || {};
+        const volume30d = Number(row.volume30d) || 0;
+        const method = row.status === 'full' ? 'real' : row.status === 'partial' ? 'partial' : 'est';
+        // A canonical asset may have both SWAP and X-Perp listings. Record the
+        // contract even when its confirmed volume is zero so a second listing
+        // cannot be silently replaced by a 24h×30 fallback or hidden by a Set.
+        if (['full','partial','estimated'].includes(row.status) && Number.isFinite(volume30d)) {
+          addVol(asset.coin, 'okx', volume30d, method, asset.category, asset.symbol);
+        }
+      });
+    } catch {}
   }];
 
   // ── Run all kline fetches in parallel batches ──
@@ -5822,6 +6024,7 @@ async function _fetchReal30DayVolumeImpl() {
     batchFetch(bgKlineTasks, 5),
     batchFetch(gateKlineTasks, 5),
     batchFetch(xyzKlineTasks, 5),
+    batchFetch(okxKlineTasks, 5),
   ]);
 
   // ── Also add estimate fallback for any venue where kline fetch failed ──
@@ -5830,8 +6033,9 @@ async function _fetchReal30DayVolumeImpl() {
     if (!key || EXCLUDED_SYMBOLS.has(key)) return;
     const mergeKey = VOLUME_MERGE_GROUPS[key] || key;
     const existing = merged[mergeKey]?.venues[d.venue];
-    if (existing?.symbols?.has(key)) return; // this exact component already has real data
-    if (d.volume > 0) addVol(d.coin, d.venue, d.volume * 30, 'est', d.category);
+    const contributionKey = String(d.symbol || d.venueSymbol || `${d.venue}:${key}`).toUpperCase();
+    if (existing?.contributions?.has(contributionKey)) return; // this exact listing already has history data
+    if (d.volume > 0) addVol(d.coin, d.venue, d.volume * 30, 'est', d.category, contributionKey);
   });
 
   // ── Compute totals ──
@@ -5870,7 +6074,7 @@ function renderTop30Volume() {
       <div class="section-subtitle">Building a rolling 30-day view from exchange klines; any missing venue history is explicitly labeled Estimated.</div>
       <div style="text-align:center;padding:40px;color:var(--foreground-dim)">
         <div class="spin" style="display:inline-block;width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite"></div>
-        <div style="margin-top:12px;font-size:12px">Loading 30-day kline data from Binance, Bitget, Gate.io, and trade.xyz…</div>
+        <div style="margin-top:12px;font-size:12px">Loading 30-day kline data from Binance, Bitget, Gate.io, trade.xyz, and OKX…</div>
       </div>`;
     // Kick off the fetch, then re-render
     fetchReal30DayVolume().then(() => renderTop30Volume()).catch(e => {
@@ -5927,9 +6131,10 @@ function renderTop30Volume() {
   function volumeDataStatus(row) {
     const entries = Object.values(row.venues).filter(venue => venue.vol30d > 0);
     const real = entries.filter(venue => venue.method === 'real').length;
+    const partial = entries.filter(venue => venue.method === 'partial').length;
     if (!entries.length) return { status:'unavailable', title:'No 30-day volume source available', real:0, total:0 };
     if (real === entries.length) return { status:'full', title:`All ${entries.length} venue contribution(s) use exchange klines`, real, total:entries.length };
-    if (real > 0) return { status:'partial', title:`${real}/${entries.length} venue contribution(s) use exchange klines; the rest use 24h×30`, real, total:entries.length };
+    if (real > 0 || partial > 0) return { status:'partial', title:`${real} Full + ${partial} Partial of ${entries.length} venue contribution(s); remaining inputs use 24h×30`, real, total:entries.length };
     return { status:'estimated', title:'All venue contributions use 24h×30 estimates', real:0, total:entries.length };
   }
 
@@ -6613,7 +6818,8 @@ function renderVenueTable(venue) {
     tradexyz: { tbodyId: 'xyzTableBody', prefix: 'xyz', hideId: 'xyzHideInactive' },
     bitget:   { tbodyId: 'bgTableBody',  prefix: 'bg',  hideId: 'bgHideInactive' },
     gate:     { tbodyId: 'gateTableBody', prefix: 'gate', hideId: 'gateHideInactive' },
-    binance:  { tbodyId: 'bnTableBody',  prefix: 'bn',  hideId: 'bnHideInactive' }
+    binance:  { tbodyId: 'bnTableBody',  prefix: 'bn',  hideId: 'bnHideInactive' },
+    okx:      { tbodyId: 'okxTableBody', prefix: 'okx', hideId: 'okxHideInactive' }
   };
   const vm = venueMap[venue] || venueMap.bitget;
   const tbodyId = vm.tbodyId;
@@ -6661,7 +6867,7 @@ function renderVenueTable(venue) {
     const age = health.lastSuccessAt ? `${Math.max(0, Math.round((Date.now() - health.lastSuccessAt) / 1000))}s since last success` : 'No successful refresh';
     freshness.innerHTML = `<span class="data-freshness ${health.status}" title="${escapeHtml(health.error || age)}">${health.status === 'live' ? 'Live' : health.status === 'stale' ? 'Stale cache' : 'Unavailable'}</span>`;
   }
-  const catCounts = { all: allVenueData.length, equity: 0, commodity: 0, index: 0, etf: 0, 'pre-ipo': 0, fx: 0 };
+  const catCounts = { all: allVenueData.length, equity: 0, commodity: 0, index: 0, etf: 0, 'pre-ipo': 0, fx: 0, bond: 0 };
   allVenueData.forEach(d => { if (catCounts[d.category] !== undefined) catCounts[d.category]++; });
   Object.entries(catCounts).forEach(([cat, count]) => {
     const capCat = cat === 'pre-ipo' ? 'PreIpo' : cat.charAt(0).toUpperCase() + cat.slice(1);
@@ -6689,8 +6895,8 @@ function renderVenueTable(venue) {
       case 'depth':   va = a.depth2||0; vb = b.depth2||0; break;
       case 'funding': va = a.funding===null?-1:Math.abs(a.funding); vb = b.funding===null?-1:Math.abs(b.funding); break;
       case 'posRate': {
-        const ca = fundingCache[`${venue}:${a.coin}`];
-        const cb = fundingCache[`${venue}:${b.coin}`];
+        const ca = fundingCache[fundingAssetKey(venue, a)];
+        const cb = fundingCache[fundingAssetKey(venue, b)];
         const calcDom = (c, asset) => {
           if (!c || !c.data) return -1;
           const intv = fundingIntervalHours(venue, asset);
@@ -6725,7 +6931,8 @@ function renderVenueTable(venue) {
     const catColor = CAT_COLORS[d.category] || '#63656e';
     const annRate = annualize(d.funding, venue, d);
     const annPct = annRate !== null ? (annRate * 100).toFixed(2) : 'N/A';
-    const sparkId = `spark_${venue}_${d.coin}`;
+    const sparkSuffix = fundingDomSuffix(venue, d);
+    const sparkId = `spark_${sparkSuffix}`;
     const changeHTML = hasChange
       ? `<span class="change-badge ${isUp?'up':'down'}">${isUp?'+':''}${d.change.toFixed(2)}%</span>`
       : `<span style="color:var(--foreground-dim)">—</span>`;
@@ -6747,7 +6954,7 @@ function renderVenueTable(venue) {
       }
     };
     tr.innerHTML = `
-      <td><div class="asset-cell"><div class="asset-icon" style="background:${catColor}12;color:${catColor};border:1px solid ${catColor}25">${d.coin.slice(0,2)}</div><div class="asset-info"><div class="asset-name">${d.coin} <span class="asset-tag tag-${d.category}">${d.category.toUpperCase()}</span>${renderMarketTags(d)}</div><div class="asset-type">${d.fullName}</div>${marketStateHTML}</div></div></td>
+      <td><div class="asset-cell"><div class="asset-icon" style="background:${catColor}12;color:${catColor};border:1px solid ${catColor}25">${d.coin.slice(0,2)}</div><div class="asset-info"><div class="asset-name">${d.coin} <span class="asset-tag tag-${d.category}">${d.category.toUpperCase()}</span>${renderMarketTags(d)}</div><div class="asset-type">${d.fullName}${d.marketType ? ` · ${escapeHtml(d.marketType)}` : ''}${d.venue === 'okx' && d.symbol ? ` · ${escapeHtml(d.symbol)}` : ''}</div>${marketStateHTML}</div></div></td>
       <td class="mono" style="font-weight:600">${fieldValueWithStatus(markHTML, fs.markPx, 'Official mark price coverage')}</td>
       <td class="mono" style="color:var(--foreground-sec)">${fieldValueWithStatus(indexHTML, fs.indexPx, 'Official index/oracle coverage')}</td>
       <td>${fieldValueWithStatus(changeHTML, fs.change, '24h change coverage')}</td>
@@ -6755,7 +6962,7 @@ function renderVenueTable(venue) {
       <td class="mono">${fieldValueWithStatus(fmtVolume(d.oi), fs.oi, venue === 'binance' ? 'Binance OI is fetched for the top 80 contracts; other rows are unavailable' : 'Open interest coverage')}</td>
       <td class="mono ${d.depth2 > 100000 ? 'pos' : d.depth2 > 10000 ? '' : 'neg'}">${fieldValueWithStatus(d.depth2 != null ? fmtVolume(d.depth2) : '<span style="color:var(--foreground-dim)">—</span>', fs.depth2, 'Partial = top-liquidity subset and up to 50 order-book levels')}</td>
       <td>${fieldValueWithStatus(`<span class="funding-badge ${fundingClass(d.funding, venue, d)}">${fmtFunding(d.funding)}</span><span style="display:block;font-size:10px;color:var(--foreground-dim);margin-top:2px">${annPct === 'N/A' ? 'N/A' : annPct + '% APR'}</span>`, fs.funding, 'Current funding coverage')}</td>
-      <td id="pos_${venue}_${d.coin}" style="text-align:center"><span style="color:var(--foreground-dim);font-size:11px">—</span></td>
+      <td id="pos_${sparkSuffix}" style="text-align:center"><span style="color:var(--foreground-dim);font-size:11px">—</span></td>
       <td id="${sparkId}"><span style="color:var(--foreground-dim);font-size:11px">—</span></td>
     `;
     tbody.appendChild(tr);
@@ -6785,12 +6992,16 @@ function renderAssetView() {
   tbody.innerHTML = '';
   const grouped = {};
   getFilteredData().forEach(d => {
-    if (!grouped[d.coin]) grouped[d.coin] = {coin:d.coin, fullName:d.fullName, category:d.category, venues:{}};
-    grouped[d.coin].venues[d.venue] = d;
+    if (!grouped[d.coin]) grouped[d.coin] = {coin:d.coin, fullName:d.fullName, category:d.category, venues:{}, listings:[]};
+    const group = grouped[d.coin];
+    group.listings.push(d);
+    // Keep one representative per venue for venue-count/dot rendering, while
+    // preserving every contract in listings (notably OKX SWAP + X-Perp).
+    if (!group.venues[d.venue] || d.volume > group.venues[d.venue].volume) group.venues[d.venue] = d;
   });
   let allAssets = Object.values(grouped);
 
-  const catCounts = { all: allAssets.length, equity: 0, commodity: 0, index: 0, etf: 0, 'pre-ipo': 0, fx: 0 };
+  const catCounts = { all: allAssets.length, equity: 0, commodity: 0, index: 0, etf: 0, 'pre-ipo': 0, fx: 0, bond: 0 };
   allAssets.forEach(a => { if (catCounts[a.category] !== undefined) catCounts[a.category]++; });
   Object.entries(catCounts).forEach(([cat, count]) => {
     const capCat = cat === 'pre-ipo' ? 'PreIpo' : cat.charAt(0).toUpperCase() + cat.slice(1);
@@ -6802,13 +7013,13 @@ function renderAssetView() {
   let assets = allAssets.filter(a => {
     if (assetCatFilter !== 'all' && a.category !== assetCatFilter) return false;
     if (assetSearch && !a.coin.toLowerCase().includes(assetSearch) && !a.fullName.toLowerCase().includes(assetSearch)) return false;
-    if (hideInactive) { if (!Object.values(a.venues).some(v => v.isActive)) return false; }
+    if (hideInactive) { if (!a.listings.some(v => v.isActive)) return false; }
     return true;
   });
 
   const { key: sk, dir: sd } = assetSort;
   assets.sort((a, b) => {
-    const aVols = Object.values(a.venues), bVols = Object.values(b.venues);
+    const aVols = a.listings, bVols = b.listings;
     let va, vb;
     switch (sk) {
       case 'name':   return sd * a.coin.localeCompare(b.coin);
@@ -6818,10 +7029,8 @@ function renderAssetView() {
       case 'volume': va = aVols.reduce((s,v)=>s+v.volume,0); vb = bVols.reduce((s,v)=>s+v.volume,0); break;
       case 'oi':     va = aVols.reduce((s,v)=>s+v.oi,0); vb = bVols.reduce((s,v)=>s+v.oi,0); break;
       case 'spread':
-        const aR = aVols.filter(v=>v.funding!==null).map(v=>annualize(v.funding,v.venue,v));
-        const bR = bVols.filter(v=>v.funding!==null).map(v=>annualize(v.funding,v.venue,v));
-        va = aR.length>=2 ? Math.max(...aR)-Math.min(...aR) : 0;
-        vb = bR.length>=2 ? Math.max(...bR)-Math.min(...bR) : 0; break;
+        va = distinctVenueFundingSpread(aVols) || 0;
+        vb = distinctVenueFundingSpread(bVols) || 0; break;
       default: va = aVols.reduce((s,v)=>s+v.volume,0); vb = bVols.reduce((s,v)=>s+v.volume,0);
     }
     return sd * (va - vb);
@@ -6838,25 +7047,22 @@ function renderAssetView() {
   assets.forEach(a => {
     const vList = Object.keys(a.venues);
     const vCount = vList.length;
-    const totVol = Object.values(a.venues).reduce((s,v)=>s+v.volume,0);
-    const totOI = Object.values(a.venues).reduce((s,v)=>s+v.oi,0);
-    const bestPx = Math.max(...Object.values(a.venues).map(v=>v.markPx));
-    const venuesWithChange = Object.values(a.venues).filter(v => v.change !== null && v.change !== undefined);
+    const totVol = a.listings.reduce((s,v)=>s+v.volume,0);
+    const totOI = a.listings.reduce((s,v)=>s+v.oi,0);
+    const bestPx = Math.max(...a.listings.map(v=>v.markPx));
+    const venuesWithChange = a.listings.filter(v => v.change !== null && v.change !== undefined);
     const avgChg = venuesWithChange.length > 0 ? venuesWithChange.reduce((s,v)=>s+v.change,0)/venuesWithChange.length : null;
     const hasAvgChg = avgChg !== null;
     const isUp = hasAvgChg ? avgChg >= 0 : true;
     const catColor = CAT_COLORS[a.category];
     let fs = '—', fsc = '';
-    if (vCount >= 2) {
-      const rates = Object.values(a.venues).map(v=>v.funding).filter(f=>f!==null);
-      if (rates.length >= 2) {
-        const sp = Math.max(...rates) - Math.min(...rates);
-        fs = sp > 0 ? (sp*100).toFixed(4)+'%' : '0.0000%';
-        if (sp > 0) fsc = 'style="color:var(--accent);font-weight:600"';
-      }
+    const spreadAnnualized = distinctVenueFundingSpread(a.listings);
+    if (spreadAnnualized !== null) {
+      fs = spreadAnnualized > 0 ? (spreadAnnualized*100).toFixed(1)+'% APR' : '0.0% APR';
+      if (spreadAnnualized > 0) fsc = 'style="color:var(--accent);font-weight:600"';
     }
     const dots = vList.map(v=>`<span class="venue-dot ${v}" title="${VENUES[v].name}"></span>`).join('');
-    const anyActive = Object.values(a.venues).some(v => v.isActive);
+    const anyActive = a.listings.some(v => v.isActive);
     const inactiveTag = anyActive ? '' : ' <span class="i18n-ui-token" style="font-size:9px;padding:1px 5px;border-radius:4px;background:rgba(92,97,112,0.15);color:var(--foreground-dim);font-weight:600">INACTIVE</span>';
     const rowOp = anyActive ? '' : 'opacity:0.45;';
 
@@ -6878,15 +7084,16 @@ function renderAssetView() {
     tbody.appendChild(tr);
 
     if (expandedAsset === a.coin) {
-      vList.forEach(vk => {
-        const d = a.venues[vk];
+      a.listings.forEach(d => {
+        const vk = d.venue;
         const fAnn = fmtAnnual(d.funding, vk, d);
         const fAnnLabel = fAnn === 'N/A' ? 'N/A' : fAnn + ' APR';
         const sub = document.createElement('tr');
         sub.className = 'venue-subrow';
         const subHasChg = d.change !== null && d.change !== undefined;
         const subChgHTML = subHasChg ? `<span class="change-badge ${d.change>=0?'up':'down'}">${d.change>=0?'+':''}${d.change.toFixed(2)}%</span>` : `<span style="color:var(--foreground-dim)">—</span>`;
-        sub.innerHTML = `<td style="padding-left:56px"><span class="venue-badge-sm ${vk}">${VENUES[vk].name}</span> <span style="font-size:11px;color:var(--foreground-dim);margin-left:6px">${fundingIntervalHours(vk,d)}h funding</span> <span style="font-size:10px;color:var(--info);margin-left:8px;cursor:pointer" title="Click for detail">⊕ Detail</span></td><td></td><td class="mono" style="font-weight:600">$${fmtPrice(d.markPx)}</td><td>${subChgHTML}</td><td class="mono">${fmtVolume(d.volume)}</td><td class="mono">${fmtVolume(d.oi)}</td><td><span class="funding-badge ${fundingClass(d.funding, vk, d)}">${fmtFunding(d.funding)}</span> <span style="font-size:10px;color:var(--foreground-dim)">${fAnnLabel}</span></td>`;
+        const contractLabel = d.marketType ? `${d.marketType} · ${d.symbol || d.venueSymbol || d.coin}` : (d.symbol || d.venueSymbol || '');
+        sub.innerHTML = `<td style="padding-left:56px"><span class="venue-badge-sm ${vk}">${VENUES[vk].name}</span> <span style="font-size:11px;color:var(--foreground-dim);margin-left:6px">${escapeHtml(contractLabel)} · ${fundingIntervalHours(vk,d)}h funding</span> <span style="font-size:10px;color:var(--info);margin-left:8px;cursor:pointer" title="Click for detail">⊕ Detail</span></td><td></td><td class="mono" style="font-weight:600">$${fmtPrice(d.markPx)}</td><td>${subChgHTML}</td><td class="mono">${fmtVolume(d.volume)}</td><td class="mono">${fmtVolume(d.oi)}</td><td><span class="funding-badge ${fundingClass(d.funding, vk, d)}">${fmtFunding(d.funding)}</span> <span style="font-size:10px;color:var(--foreground-dim)">${fAnnLabel}</span></td>`;
         sub.onclick = (e) => { e.stopPropagation(); openAssetModal(vk, d); };
         tbody.appendChild(sub);
       });
@@ -6948,8 +7155,12 @@ function renderHeatmap() {
 
   const grouped = {};
   fData.forEach(d => {
-    if (!grouped[d.coin]) grouped[d.coin] = {coin:d.coin, fullName:d.fullName, category:d.category, venues:{}};
-    grouped[d.coin].venues[d.venue] = d;
+    if (!grouped[d.coin]) grouped[d.coin] = {coin:d.coin, fullName:d.fullName, category:d.category, venues:{}, listings:[]};
+    const group = grouped[d.coin];
+    group.listings.push(d);
+    // One heatmap column represents one venue. If that venue exposes variants,
+    // use its most liquid contract and keep the complete set in the Drawer.
+    if (!group.venues[d.venue] || d.volume > group.venues[d.venue].volume) group.venues[d.venue] = d;
   });
 
   const allAssets = Object.values(grouped).map(a => {
@@ -6964,7 +7175,7 @@ function renderHeatmap() {
     a.coverage = rates.length;
     a.maxAbsApr = aprs.length ? Math.max(...aprs.map(Math.abs)) : -1;
     a.spreadApr = aprs.length >= 2 ? Math.max(...aprs) - Math.min(...aprs) : null;
-    a.totalVolume = Object.values(a.venues).reduce((sum, d) => sum + (Number(d.volume) || 0), 0);
+    a.totalVolume = a.listings.reduce((sum, d) => sum + (Number(d.volume) || 0), 0);
     return a;
   });
 
@@ -8363,6 +8574,67 @@ async function fetchSpotRwaBinance() {
   return assets;
 }
 
+// ── OKX Unified Tokenized Stocks ──
+async function fetchSpotRwaOkx() {
+  const response = await fetch('/api/okx-market?type=spot-snapshot', { cache:'no-store', signal:AbortSignal.timeout(20000) });
+  if (!response.ok) throw new Error(`OKX spot snapshot HTTP ${response.status}`);
+  const snapshot = await response.json();
+  const instruments = okxSnapshotRows(snapshot, 'instruments');
+  if (!instruments.length) throw new Error('OKX Unified Tokenized Stocks catalog is empty');
+  const tickerMap = new Map(okxSnapshotRows(snapshot, 'tickers').map(row => [row.instId, row]));
+  const exactGoldPairs = Object.freeze({
+    'PAXG-USD':{ base:'PAXG', quote:'USD' },
+    'PAXG-USDT':{ base:'PAXG', quote:'USDT' },
+    'XAUT-USDT':{ base:'XAUT', quote:'USDT' },
+  });
+  const assets = [];
+  for (const instrument of instruments) {
+    const venueSymbol = String(instrument.instId || '').toUpperCase();
+    const venueBase = String(instrument.baseCcy || '').toUpperCase();
+    const quote = String(instrument.quoteCcy || '').toUpperCase();
+    const isUnifiedStock = instrument.state === 'live' && instrument.instType === 'SPOT' &&
+      String(instrument.instCategory) === '3' && quote === 'USDT' && /^X[A-Z0-9.-]{1,29}$/.test(venueBase);
+    const goldPair = exactGoldPairs[venueSymbol];
+    const isExactGold = instrument.state === 'live' && instrument.instType === 'SPOT' &&
+      String(instrument.instCategory) === '1' && goldPair?.base === venueBase && goldPair?.quote === quote;
+    // Only strip the wrapper X after the official Stock category gate. XRP,
+    // XLM and every other category-1 crypto remain excluded. PAXG/XAUT are
+    // three exact, globally audited tokenized-gold pair exceptions only.
+    if (!isUnifiedStock && !isExactGold) continue;
+    const rawUnderlying = isUnifiedStock ? venueBase.slice(1) : venueBase;
+    const category = isUnifiedStock ? securityCategoryForUnderlying(rawUnderlying, 'equity') : 'commodity';
+    const underlying = canonicalSymbolForCategory(rawUnderlying, category);
+    if (!underlying || EXCLUDED_SYMBOLS.has(underlying)) continue;
+    const ticker = tickerMap.get(venueSymbol) || {};
+    const last = numberOrNull(ticker.last);
+    const open = numberOrNull(ticker.open24h);
+    const issuer = isUnifiedStock ? 'OKX Unified Tokenized Stocks' : venueBase === 'PAXG' ? 'Paxos' : 'Tether';
+    registerSpotAssetMeta(venueBase, underlying, issuer, category, 'okx');
+    assets.push({
+      coin:venueBase, pair:venueSymbol, venueSymbol, underlyingSymbol:underlying,
+      last,
+      chg:last !== null && open > 0 ? ((last - open) / open) * 100 : null,
+      // For OKX Spot, volCcy24h is quote-currency turnover; quote is gated USDT.
+      vol:numberOrNull(ticker.volCcy24h),
+      hi:numberOrNull(ticker.high24h), lo:numberOrNull(ticker.low24h),
+      bid:numberOrNull(ticker.bidPx), ask:numberOrNull(ticker.askPx), depth2:null,
+      xstock:isUnifiedStock, issuer,
+      isListed:true, isActive:true, isPriced:last > 0,
+      sourceAt:Number(ticker.ts) || Date.parse(snapshot.generatedAt) || Date.now(),
+      fieldStatus:{
+        price:last !== null ? 'full' : 'unavailable',
+        change:last !== null && open > 0 ? 'full' : 'unavailable',
+        volume:numberOrNull(ticker.volCcy24h) !== null ? 'full' : 'unavailable',
+        bidAsk:numberOrNull(ticker.bidPx) !== null && numberOrNull(ticker.askPx) !== null ? 'full' : 'unavailable',
+        depth2:'unavailable', fees:'unavailable'
+      }
+    });
+  }
+  if (!assets.length) throw new Error('OKX catalog produced no verified tokenized stocks');
+  console.log(`[Spot] OKX Unified Tokenized Stocks: ${assets.length} listed`);
+  return assets;
+}
+
 // ── Bybit Spot Fetch ──
 const BYBIT_SPOT_BASE = 'https://api.bybit.com/v5/market';  // CORS OK — direct
 // Bit.com: serverless function handles auth server-side (keys in Vercel env vars)
@@ -8520,13 +8792,23 @@ function _buildSpotPerpFromAllData() {
       depth2: d.depth2 ?? null,
       volume: d.volume || 0,
       category: d.category || 'other',
+      venueSymbol: d.symbol || d.venueSymbol || d.coin,
+      marketType: d.marketType || '',
       fundingIntervalHours: interval,
       settlesPerDay: 24 / interval,
     };
-    result[d.venue][d.coin] = entry;
+    // A venue can list more than one contract for one underlying (OKX SWAP +
+    // X-Perp). The arb bridge needs one route, so choose the more liquid live
+    // contract deterministically instead of silently letting array order win.
+    const existing = result[d.venue][d.coin];
+    if (!existing || entry.volume > existing.volume) result[d.venue][d.coin] = entry;
+    const selected = result[d.venue][d.coin];
     // Also store under canonical symbol for robust matching (GOLD→XAU, etc.)
     const canonical = canonicalSymbolForCategory(d.coin, d.category);
-    if (canonical !== d.coin) result[d.venue][canonical] = entry;
+    if (canonical !== d.coin) {
+      const canonicalExisting = result[d.venue][canonical];
+      if (!canonicalExisting || selected.volume > canonicalExisting.volume) result[d.venue][canonical] = selected;
+    }
   }
   return result;
 }
@@ -8571,16 +8853,19 @@ async function refreshSpotArbData(force = false) {
     // underlyings used by suffix-based discovery on Gate and removes a timing
     // race where the venue could miss newly listed tokenized stocks.
     const bitgetResult = (await Promise.allSettled([fetchSpotRwaBitget()]))[0];
-    const otherResults = await Promise.allSettled([
-      fetchSpotRwaGate(),
-      fetchSpotRwaKraken(),
-      fetchSpotRwaBinance(),
-    ]);
-    const results = [otherResults[0], otherResults[1], bitgetResult, otherResults[2]];
-    const venueKeys = ENABLED_SPOT_VENUES;
+    const remainingFetchers = {
+      gate:fetchSpotRwaGate,
+      kraken:fetchSpotRwaKraken,
+      binance:fetchSpotRwaBinance,
+      okx:fetchSpotRwaOkx,
+    };
+    const remainingEntries = Object.entries(remainingFetchers);
+    const remainingResults = await Promise.allSettled(remainingEntries.map(([, fetcher]) => fetcher()));
+    const resultsByVenue = { bitget:bitgetResult };
+    remainingEntries.forEach(([venue], index) => { resultsByVenue[venue] = remainingResults[index]; });
     const nextSpotData = {};
-    results.forEach((r, i) => {
-      const venue = venueKeys[i];
+    ENABLED_SPOT_VENUES.forEach(venue => {
+      const r = resultsByVenue[venue] || { status:'rejected', reason:new Error('No configured fetcher') };
       if (r.status === 'fulfilled') {
         const normalized = Array.isArray(r.value)
           ? r.value.map(row => normalizeSpotDataState({ ...row, venue }))
@@ -8658,8 +8943,8 @@ async function refreshSpotArbData(force = false) {
   }
 }
 
-const SPOT_VENUE_NAMES = { gate:'Gate.io', binance:'Binance', bitget:'Bitget', kraken:'Kraken' };
-const SPOT_PERP_VENUES = { gate:{name:'Gate.io',settlesPerDay:3}, binance:{name:'Binance',settlesPerDay:3}, bitget:{name:'Bitget',settlesPerDay:3}, tradexyz:{name:'trade.xyz',settlesPerDay:24} };
+const SPOT_VENUE_NAMES = { gate:'Gate.io', binance:'Binance', bitget:'Bitget', kraken:'Kraken', okx:'OKX' };
+const SPOT_PERP_VENUES = { gate:{name:'Gate.io',settlesPerDay:3}, binance:{name:'Binance',settlesPerDay:3}, bitget:{name:'Bitget',settlesPerDay:3}, tradexyz:{name:'trade.xyz',settlesPerDay:24}, okx:{name:'OKX',settlesPerDay:3} };
 
 const ASSET_META = {
   // ── Tokenized Gold ──
@@ -8774,13 +9059,16 @@ const ISSUER_STYLES = {
   'Reality':        { bg:'rgba(255,149,0,0.08)', color:'#B35F00', border:'rgba(255,149,0,0.18)' },
   'xStocks':        { bg:'rgba(50,173,230,0.08)', color:'#1677A3', border:'rgba(50,173,230,0.18)' },
   'Binance bStocks':{ bg:'rgba(240,185,11,0.10)', color:'#8A6D00', border:'rgba(240,185,11,0.22)' },
+  'OKX Unified Tokenized Stocks':{ bg:'rgba(17,24,39,0.08)', color:'#111827', border:'rgba(17,24,39,0.20)' },
 };
-const ISSUER_SHORT = { 'Paxos':'Paxos','Tether':'Tether','Backed Finance':'Backed','Ondo Finance':'Ondo','Reality':'Reality','xStocks':'xStocks','Binance bStocks':'bStocks' };
+const ISSUER_SHORT = { 'Paxos':'Paxos','Tether':'Tether','Backed Finance':'Backed','Ondo Finance':'Ondo','Reality':'Reality','xStocks':'xStocks','Binance bStocks':'bStocks','OKX Unified Tokenized Stocks':'OKX UTS' };
 function issuerShort(n) { return ISSUER_SHORT[n] || n; }
 
 const SPOT_FEES = {
-  spot:  { gate:{maker:0.001,taker:0.001}, binance:{maker:0.001,taker:0.001}, bitget:{maker:0.001,taker:0.001}, kraken:{maker:0.0016,taker:0.0026} },
-  perp:  { gate:{maker:0.0002,taker:0.0005}, binance:{maker:0.0002,taker:0.0005}, bitget:{maker:0.0002,taker:0.0006}, tradexyz:{maker:0.0003,taker:0.0009} },
+  // OKX values are generic estimates only; actual Spot and derivatives fees
+  // depend on region, product group and account tier.
+  spot:  { gate:{maker:0.001,taker:0.001}, binance:{maker:0.001,taker:0.001}, bitget:{maker:0.001,taker:0.001}, kraken:{maker:0.0016,taker:0.0026}, okx:{maker:0.001,taker:0.001,estimated:true} },
+  perp:  { gate:{maker:0.0002,taker:0.0005}, binance:{maker:0.0002,taker:0.0005}, bitget:{maker:0.0002,taker:0.0006}, tradexyz:{maker:0.0003,taker:0.0009}, okx:{maker:0.0002,taker:0.0005,estimated:true} },
 };
 let SPOT_HOLD_DAYS = 0; // 0 = "No Fees" mode (show gross funding APR)
 
@@ -9009,7 +9297,11 @@ function renderSpotVenueTable(venue) {
     const changeH = numberOrNull(a.chg) !== null ? cs+a.chg.toFixed(2)+'%' : '<span class="dim">—</span>';
     const volumeH = numberOrNull(a.vol) !== null ? '$'+spotFV(a.vol) : '<span class="dim">—</span>';
     const spreadH = spBps === '—' ? '<span class="dim">—</span>' : spBps+' bps';
-    h += '<tr'+intelligenceAttrs+'><td style="text-align:left;font-family:Inter,sans-serif;font-weight:600">'+a.coin+renderMarketTags(a)+spotState+'</td><td>'+fieldValueWithStatus(lastH,a.fieldStatus.last,'Official last-price coverage')+'</td><td>'+refH+'</td><td>'+devH+'</td><td>'+markH+'</td><td>'+basisH+'</td>';
+    const venuePair = a.pair || a.venueSymbol || '';
+    const venuePairH = venuePair
+      ? '<span data-i18n-skip style="display:block;font-size:9px;font-weight:500;color:var(--foreground-dim);margin-top:1px">'+escapeHtml(venuePair)+'</span>'
+      : '';
+    h += '<tr'+intelligenceAttrs+'><td style="text-align:left;font-family:Inter,sans-serif;font-weight:600">'+a.coin+renderMarketTags(a)+venuePairH+spotState+'</td><td>'+fieldValueWithStatus(lastH,a.fieldStatus.last,'Official last-price coverage')+'</td><td>'+refH+'</td><td>'+devH+'</td><td>'+markH+'</td><td>'+basisH+'</td>';
     h += '<td class="'+cc+'">'+fieldValueWithStatus(changeH,a.fieldStatus.change,'24h change coverage')+'</td><td>'+fieldValueWithStatus(volumeH,a.fieldStatus.volume,'24h volume coverage')+'</td>';
     h += '<td style="font-size:11px;color:var(--foreground-sec)">'+fieldValueWithStatus(hiLoH,a.fieldStatus.highLow,'24h high/low coverage')+'</td>';
     h += '<td>'+fieldValueWithStatus(spreadH,a.fieldStatus.bidAsk,'Best bid/ask coverage')+'</td><td class="'+depthCls+'">'+fieldValueWithStatus(depthH,a.fieldStatus.depth2,'Partial = up to 50 order-book levels; Unavailable = not fetched or unsupported')+'</td><td>'+fundH+'</td><td>'+arbH+'</td></tr>';
@@ -9164,7 +9456,7 @@ function updateSpotKpis() {
 }
 
 // ── Dynamic Exchange Summary Cards ──
-const _CAT_COLORS = {equity:'#AF52DE',commodity:'var(--gold)',index:'#007AFF',etf:'#32ADE6','pre-ipo':'#FF9500',other:'var(--foreground-dim)'};
+const _CAT_COLORS = {equity:'#AF52DE',commodity:'var(--gold)',index:'#007AFF',etf:'#32ADE6','pre-ipo':'#FF9500',bond:'#8E8E93',other:'var(--foreground-dim)'};
 function renderSpotVenueGrid() {
   const grid = document.getElementById('spotVenueGrid');
   if (!grid) return;
@@ -9187,7 +9479,7 @@ function renderSpotVenueGrid() {
       const cat = KNOWN_CATEGORIES[underlying] || KNOWN_CATEGORIES[a.coin] || inferCategory(underlying);
       cats[cat] = (cats[cat]||0) + 1;
     });
-    const feeSrc = v === 'bitget' ? 'api' : 'default';
+    const feeSrc = fees.estimated ? 'estimated' : v === 'bitget' ? 'api' : 'default';
     html += '<div class="spot-vc">'
       + '<div class="spot-vc-head"><span class="venue-dot '+v+'"></span><span class="spot-vc-name">'+name+'</span><span class="spot-vc-pairs">'+assets.length+'</span></div>'
       + '<div class="spot-vc-row"><span class="spot-vc-row-label">24h Volume</span><span class="spot-vc-row-val">$'+spotFV(totalVol)+'</span></div>'
@@ -9321,7 +9613,7 @@ function renderSpotArbRank() {
       : '';
     h += '<tr'+intelligenceAttrs+'>'
        + '<td style="text-align:left;color:var(--foreground-dim);font-size:11px">'+(i+1)+'</td>'
-       + '<td style="text-align:left;font-family:Inter,sans-serif;font-weight:600">'+r.coin+renderMarketTags(r.marketTags)+'</td>'
+       + '<td style="text-align:left;font-family:Inter,sans-serif;font-weight:600">'+r.coin+renderMarketTags(r.marketTags)+'<span data-i18n-skip style="display:block;font-size:9px;font-weight:500;color:var(--foreground-dim);margin-top:1px">'+escapeHtml(r.spotAsset?.pair || r.spotAsset?.venueSymbol || '')+'</span></td>'
        + '<td style="text-align:left">'+routeH+'</td>'
        + '<td>'+spotFP(r.spot)+'</td>'
        + '<td>'+spotFP(r.mark)+'</td>'
@@ -9433,9 +9725,9 @@ function renderSpotAllAssets() {
   });
   document.getElementById('spotCatFilters').innerHTML = chipH;
 
-  const vColors = {gate:'var(--gate)', binance:'var(--binance)', bitget:'var(--bitget)', kraken:'var(--kraken)'};
-  const perpVenueKeys = ['gate','binance','bitget','tradexyz'];
-  const perpVenueColors = {gate:'var(--gate)', binance:'var(--binance)', bitget:'var(--bitget)', tradexyz:'var(--tradexyz)'};
+  const vColors = {gate:'var(--gate)', binance:'var(--binance)', bitget:'var(--bitget)', kraken:'var(--kraken)', okx:'var(--okx)'};
+  const perpVenueKeys = ['gate','binance','bitget','tradexyz','okx'];
+  const perpVenueColors = {gate:'var(--gate)', binance:'var(--binance)', bitget:'var(--bitget)', tradexyz:'var(--tradexyz)', okx:'var(--okx)'};
 
   function bpsRange(entries) {
     const arr = entries.map(spotSpreadRate).filter(v=>v!==null).map(v=>v*10000);
@@ -9459,7 +9751,7 @@ function renderSpotAllAssets() {
       const venueCount = new Set(entries.map(e=>e.venue)).size;
       const spreadArr = entries.map(spotSpreadRate).filter(v=>v!==null).map(v=>v*10000);
       const avgSpread = spreadArr.length ? spreadArr.reduce((a,b)=>a+b,0)/spreadArr.length : -1;
-      const perpVKeys = ['gate','binance','bitget','tradexyz'];
+      const perpVKeys = ['gate','binance','bitget','tradexyz','okx'];
       const perpSet = new Set();
       coinKeys.forEach(c=>{ perpVKeys.forEach(pv=>{ if(_hasMatchingPerp(pv,c,group.category)) perpSet.add(pv); }); });
       return { underlying, group, _name: underlying, _cat: group.category, _price: avgPrice, _chg: avgChg, _vol: totalVol, _exchanges: venueCount, _spread: avgSpread, _perp: perpSet.size };
@@ -9574,7 +9866,7 @@ function renderSpotAllAssets() {
         const spBps = spreadRate === null ? '—' : (spreadRate*10000).toFixed(1)+' bps';
         h += '<tr class="spot-row-child hidden-row" data-parent="'+midId+'">';
         h += '<td></td><td></td><td></td><td></td><td></td>';
-        h += '<td style="font-size:12px;font-family:Inter,sans-serif;padding-left:4px"><span class="venue-dot '+a.venue+'"></span> '+(SPOT_VENUE_NAMES[a.venue]||a.venue)+'</td>';
+        h += '<td style="font-size:12px;font-family:Inter,sans-serif;padding-left:4px"><span class="venue-dot '+a.venue+'"></span> '+(SPOT_VENUE_NAMES[a.venue]||a.venue)+'<span data-i18n-skip style="display:block;font-size:9px;color:var(--foreground-dim);padding-left:13px">'+escapeHtml(a.pair || a.venueSymbol || '')+'</span></td>';
         h += '<td></td>';
         h += '<td style="font-size:12px">'+(a.last>0?spotFP(a.last):'—')+'</td>';
         h += '<td class="'+cc+'">'+(a.last>0?cs+a.chg.toFixed(2)+'%':'—')+'</td>';

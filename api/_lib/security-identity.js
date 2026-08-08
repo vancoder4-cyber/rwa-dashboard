@@ -4,7 +4,7 @@
 // lifecycle registry may then refine an already verified security, but it must
 // never turn a crypto/coin/token category into a security.
 
-const CATEGORY_SET = new Set(['equity', 'etf', 'commodity', 'index', 'fx', 'pre-ipo']);
+const CATEGORY_SET = new Set(['equity', 'etf', 'commodity', 'index', 'fx', 'bond', 'pre-ipo']);
 
 const OFFICIAL_TYPE_CATEGORIES = Object.freeze({
   PREIPO: 'pre-ipo',
@@ -21,10 +21,15 @@ const OFFICIAL_TYPE_CATEGORIES = Object.freeze({
   INDICES: 'index',
   FOREX: 'fx',
   FX: 'fx',
+  BOND: 'bond',
+  BONDS: 'bond',
+  FIXEDINCOME: 'bond',
   STOCK: 'equity',
   STOCKS: 'equity',
   EQUITY: 'equity',
   EQUITIES: 'equity',
+  HKEQUITY: 'equity',
+  KREQUITY: 'equity',
   SHARE: 'equity',
   SHARES: 'equity',
   PREFERREDSTOCK: 'equity',
@@ -67,6 +72,12 @@ const INDEX_ALIASES = Object.freeze({
   GER40:'DAX', UK100:'FTSE',
 });
 
+// Some official RWA catalogs expose a broad "stock(s)" product class for
+// equity indices. Refine only these exact, currently audited underlyings after
+// the venue identity gate; never infer an index from a ticker substring.
+export const BROAD_STOCK_INDEX_UNDERLYINGS = Object.freeze(['SP500', 'NDX100', 'KR200']);
+const BROAD_STOCK_INDEX_SET = new Set(BROAD_STOCK_INDEX_UNDERLYINGS);
+
 const EQUITY_ALIASES = Object.freeze({
   SAMSUNGUSD:'SAMSUNG', SKHYNIXUSD:'SKHYNIX', HYUNDAIUSD:'HYUNDAI',
   BBX:'BB', BRKB:'BRK-B', HK0700:'TENCENT', HK1810:'XIAOMI',
@@ -81,9 +92,9 @@ export const SECURITY_ETF_UNDERLYINGS = Object.freeze([
   'FXI','GDX','GLD','GLTR','HYG','IAU','IBB','IBIT','ICLN','IEF','IEMG','IEFA','IGV','IJH',
   'INDA','ITOT','ITA','IVV','IWF','IWM','IWN','JAAA','JEPQ','KWEB','LABD','LABU','LIT','MAGS',
   'NVDL','OIH','PALL','PDBC','PPLT','PSQ','QQQ','QQQI','QQQM','REMX','SCHD','SGOV','SHY','SLV',
-  'SMH','SNXX','SOXL','SOXS','SOXX','SPMO','SPY','SPXU','SQQQ','TAN','TIP','TLT','TNA','TQQQ',
+  'SHLD','SMH','SNXX','SOXL','SOXS','SOXX','SPMO','SPY','SPXU','SQQQ','TAN','TIP','TLT','TMF','TNA','TQQQ',
   'TZA','UNG','UPRO','URA','URNM','USFR','USO','UVXY','VGT','VNQ','VOO','VTI','VTV','VXUS','XLK',
-  'XLE','XLU','XLV','YANG','YINN','EWT','DRAM','KORU','KSTR','LYTE','NCLD','EWH','DFEN','MUU',
+  'XBI','XLE','XLU','XLV','YANG','YINN','EWT','DRAM','KORU','KSTR','LYTE','NCLD','EWH','DFEN','MUU',
 ]);
 const SECURITY_ETF_SET = new Set(SECURITY_ETF_UNDERLYINGS);
 
@@ -136,6 +147,11 @@ export function normalizeSignalIdentity(symbol, category, { allowBinanceBstock =
     return { symbol: INDEX_ALIASES[raw] || raw, category: resolvedCategory };
   }
   if (['equity', 'etf', 'pre-ipo'].includes(resolvedCategory)) {
+    // Bitget and OKX broad stock classes include these exact equity indices.
+    // A crypto-category lookalike still fails the CATEGORY_SET gate above.
+    if (BROAD_STOCK_INDEX_SET.has(raw)) {
+      return { symbol:INDEX_ALIASES[raw] || raw, category:'index' };
+    }
     if (TOKENIZED_ETF_WRAPPERS[raw]) {
       raw = TOKENIZED_ETF_WRAPPERS[raw];
       resolvedCategory = 'etf';

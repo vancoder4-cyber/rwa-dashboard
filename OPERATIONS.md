@@ -10,19 +10,19 @@
    - Traditional ranking and quotes load only while the Traditional page is active. Rendering a hidden section must not start official-source requests.
 
 2. **Vercel health probe**
-   - `GET /api/health` verifies the production shell, USD and FX-converted Reference Prices, and 24-hour Funding History sentinels for trade.xyz, Bitget, Gate and Binance.
+   - `GET /api/health` verifies the production shell, USD and FX-converted Reference Prices, and 24-hour Funding History sentinels for trade.xyz, Bitget, Gate, Binance and OKX. The OKX probe also checks the fixed-purpose Perp/Spot snapshots, official identity gate, listing/canonical baselines and mandatory ticker/OI/mark coverage.
    - The response is `healthy`, `degraded` or `unhealthy`. A critical dashboard/reference failure, or two failed checks, returns HTTP 503.
    - Vercel Cron invokes it daily at 01:00 UTC (09:00 Asia/Shanghai). Results are visible in Function logs under `[rwa-health]`.
    - The endpoint is intentionally read-only and returns no credentials or private configuration.
 
 3. **GitHub Actions**
    - `.github/workflows/data-health.yml` runs every day at 01:20 UTC and on demand.
-   - It runs contract tests, inline-script parsing, live reference/funding/Nasdaq/OCC data contracts and the production health endpoint. Traditional checks include Top 100 cardinality, adjacent-session alignment and rank-change invariants.
+   - It runs contract tests, inline-script parsing, live reference/funding/Nasdaq/OCC/OKX data contracts and the production health endpoint. Traditional checks include Top 100 cardinality, adjacent-session alignment and rank-change invariants. OKX checks keep Crypto `instCategory=1` excluded, preserve SWAP + X-Perp listings, and inner-join OI to the live catalog.
    - A failing run must be reviewed before promoting another production deployment.
 
 4. **Codex scheduled reviews**
    - Daily at 09:10 Asia/Shanghai: production status, live data contracts, deployment state and recent errors.
-   - Monday at 10:00 Asia/Shanghai: full venue catalogs, identity collisions, listing lifecycle, classification/tags, Traditional candidate/ranking rules, previous-session selection and comparison coverage, false `NEW` detection, deterministic tie-breaks, adjusted-options handling, reference pricing and historical coverage.
+   - Monday at 10:00 Asia/Shanghai: full venue catalogs, identity collisions, listing lifecycle, classification/tags, OKX SWAP/X-Perp and UTS/gold composition, Traditional candidate/ranking rules, previous-session selection and comparison coverage, false `NEW` detection, deterministic tie-breaks, adjusted-options handling, reference pricing and historical coverage.
    - Scheduled reviews are read-only. They report P0/P1/P2 findings and must not modify, push or deploy without user confirmation.
 
 ## Vercel usage guardrails
@@ -34,9 +34,11 @@ The main resource risk is request fan-out, not response payload size. One browse
 | Gate market catalogs | One fixed, field-projected `perp-snapshot` request replaces futures contracts + tickers; one fixed, field-projected `spot-snapshot` replaces currency pairs + tickers. The Spot pair catalog is mandatory. The former broad `/api/gate/:path*` and `/api/gate-spot/:path*` proxies are not exposed in production. | 30-second fresh snapshot, 120-second stale-while-revalidate. |
 | Gate volume growth | One fixed `/api/gate-bulk?type=growth` request per visible client at most every 15 minutes. The server re-discovers the official Gate RWA catalog, fails closed above 500 contracts and fetches with bounded concurrency. | 15-minute fresh snapshot, 60-minute stale-while-revalidate. |
 | Gate spot depth | One sorted bulk request for at most 80 already-verified pairs per spot refresh; server concurrency is bounded. No per-pair production proxy calls. | 30-second fresh snapshot, 120-second stale-while-revalidate. |
+| OKX market snapshots | One fixed `perp-snapshot` joins the separately discovered live SWAP/X-Perp catalogs to bulk ticker, mark and OI; one fixed `spot-snapshot` joins the official UTS/exact-gold catalog to bulk Spot tickers. Market rows never expand the catalog, and the browser makes no per-symbol snapshot calls. | 30-second fresh snapshot, 120-second stale-while-revalidate; failed optional funding fields remain null and downgrade status. |
+| OKX 30-day volume | One sorted, unique request for at most 80 already-admitted contract IDs. The server fetches daily candles with bounded concurrency and accepts only complete `1Dutc` bars. | Deterministic cache key; 30 complete bars = Full, 1–29 = Partial, and `24h×30` fallback = Estimated. |
 | Traditional ranking | Load only on entry to the Traditional page, with one canonical `limit=100` cache key. Client memory TTL is 1 hour. | 1-hour fresh snapshot, 24-hour stale-while-revalidate. |
 | Traditional quotes | Load only on the active Traditional page. Client memory TTL is 60 seconds during the US regular session and 15 minutes while closed. | 60-second fresh snapshot, 120-second stale-while-revalidate. |
-| Signal Radar | One fixed `/api/signal-snapshot` request only while the Radar page is visible. The server reads four fixed official RWA catalogs/snapshots, monitors one activity-ranked Top 100 universe and never accepts browser observations or symbol lists. | 5-minute CDN fresh snapshot, 10-minute stale-while-revalidate; client memory TTL 5 minutes. The hourly writer uses the separate no-store Cron route. |
+| Signal Radar | One fixed `/api/signal-snapshot` request only while the Radar page is visible. The server reads five fixed official RWA catalogs/snapshots, monitors one activity-ranked Top 100 universe and never accepts browser observations or symbol lists. | 5-minute CDN fresh snapshot, 10-minute stale-while-revalidate; client memory TTL 5 minutes. The hourly writer uses the separate no-store Cron route. |
 
 Bulk symbol lists must be unique uppercase values in lexical order; time windows must use deterministic buckets. Browsers revalidate, while `Vercel-CDN-Cache-Control` owns the shared snapshot. Validation errors and total upstream failures are `no-store`; partial results retain explicit missing values and the UI merges successful symbols into its per-venue last-good snapshot. Failed venues retry on their own five-minute backoff instead of inheriting another venue's success TTL.
 
@@ -52,9 +54,11 @@ Review Vercel Usage and top routes daily for the first 48 hours after a resource
 
 The machine-readable baseline is exported from `api/_lib/health.js` and mirrors `RWA_DATA_RULES.md`. It is a drift alarm, not a permanent allowlist.
 
-- Perpetuals: trade.xyz 108, Bitget 273, Gate 360, Binance 155; total 896.
-- Spot: Gate 60, Kraken 167, Bitget 627, Binance 68; total 922.
-- Canonical perpetual underlyings: 471.
+- Perpetuals: trade.xyz 108, Bitget 273, Gate 360, Binance 155, OKX 183; total 1,079.
+- Spot: Gate 60, Kraken 167, Bitget 627, Binance 68, OKX 51; total 973.
+- Canonical perpetual underlyings: 469.
+
+OKX Perpetuals must additionally reconcile to 149 SWAP + 34 X-Perp listings and 149 OKX canonical underlyings. OKX Spot must reconcile to 48 UTS + 3 exact gold listings and 50 OKX canonical assets. These are separate listing and canonical gauges; never add 149 to the cross-venue canonical total without recomputing the union.
 
 Investigate when a venue changes by more than 10% or the total changes by more than 5%. Confirm official listings before updating the baseline.
 
@@ -67,19 +71,21 @@ Before production promotion:
 3. Deploy a Preview.
 4. `DASHBOARD_URL=<preview-url> npm run audit:data`
 5. `DASHBOARD_URL=<preview-url> npm run audit:health`
-6. Request the same normalized Gate bulk URL twice. After a cold `MISS` (or an already warm response), the second response must be `HIT`/`STALE`; 4xx/5xx responses must be `no-store`.
-7. Browser-check venue counts, Spot Reference status, Funding History and target lifecycle/tag fixes. For Traditional, verify 50 rows initially, More expands to at most 100, row 51–100 quotes are not truncated, and rank arrows/`NEW` match the API comparison session. For Signal Radar, verify the server snapshot status/persistence status are distinct, Warming never reads as Normal, More expands from 50 to at most 100, and a row opens the same canonical Asset Intelligence Drawer.
-8. Push the verified commit, promote the same Preview artifact, then repeat both audits and the same-URL cache check on production.
-9. Check production 5xx logs and document any platform-only warning separately.
-10. After 30–60 minutes and again after 24 hours, compare Edge Requests and top-route distribution with the pre-release baseline. Gate client traffic should scale with refreshes/cache keys, never with the number of assets.
+6. Request the same normalized Gate bulk URL and the same fixed OKX `perp-snapshot`/`spot-snapshot` URLs twice. After a cold `MISS` (or an already warm response), the second response must be `HIT`/`STALE`; validation and total-upstream 4xx/5xx responses must be `no-store`.
+7. Assert OKX 183 Perp listings / 149 canonical and 51 Spot listings / 50 canonical; preserve both AAPL SWAP and X-Perp, reject category-1 CAT/LIT/QNT, and confirm no expired OI-only instrument appears. Verify derivative volume and generic fees read Estimated, missing fees read Unavailable, and exact gold consists only of PAXG-USD/PAXG-USDT/XAUT-USDT.
+8. Browser-check venue counts, Spot Reference status, Funding History and target lifecycle/tag fixes. Top 30 must not count an incomplete current OKX day; 30 confirmed bars are Full and any fallback is visibly Partial/Estimated. For Traditional, verify 50 rows initially, More expands to at most 100, row 51–100 quotes are not truncated, and rank arrows/`NEW` match the API comparison session. For Signal Radar, verify five source states, snapshot/persistence status are distinct, Warming never reads as Normal, More expands from 50 to at most 100, and a row opens the same canonical Asset Intelligence Drawer.
+9. Switch `EN → 中文 → EN`; confirm the OKX venue, loading state, X-Perp copy and Top 30 loading sentence translate while ticker, venue identity and current page/filter state remain unchanged.
+10. Push the verified commit, promote the same Preview artifact, then repeat both audits, `/api/health`, baseline assertions and same-URL cache checks on production.
+11. Check production 5xx logs and document any platform-only warning separately.
+12. After 30–60 minutes and again after 24 hours, compare Edge Requests and top-route distribution with the pre-release baseline. Gate/OKX client traffic should scale with refreshes/cache keys, never with the number of assets.
 
 ## Signal snapshot operations
 
 - Vercel Cron requests the uncached `/api/signal-snapshot-cron` route at minute 07 every UTC hour. Production must define a sensitive `CRON_SECRET`; Vercel sends it as `Authorization: Bearer …`, and the route rejects missing/mismatched credentials before source work. The public `/api/signal-snapshot` read route remains CDN cached and must never be used as the Cron target because a cache hit would skip the writer Function.
 - The writer uses a stable hourly bucket, replaces the same bucket on retry, and retains at most 168 hourly snapshots. The response and persisted history share the same activity-ranked Top 100 canonical universe.
-- The four source collectors are independent. A complete source outage is Unavailable; partial optional market fields remain null and downgrade the response. A snapshot is written into the anomaly baseline only when all four source snapshots are Full; an incomplete current snapshot may still be displayed as Partial, but must not create a false recovery/drop anomaly or a Normal conclusion. If every source or every identity-verified asset is unavailable, the endpoint returns 502 with `no-store` rather than caching an empty Radar.
-- Runtime Cache namespace is `rwa-signal-radar`; each item is kept below 1.75 MB, below the platform 2 MB limit. Retention is seven days and region is pinned to `iad1` for consistent Cron/UI history.
+- The five source collectors are independent. A complete source outage is Unavailable; partial optional market fields remain null and downgrade the response. A snapshot is written into the anomaly baseline only when all five source snapshots are Full; an incomplete current snapshot may still be displayed as Partial, but must not create a false recovery/drop anomaly or a Normal conclusion. The OKX rollout uses a new history namespace/version so five-source Volume/OI is never scored against the old four-source distribution. If every source or every identity-verified asset is unavailable, the endpoint returns 502 with `no-store` rather than caching an empty Radar.
+- Runtime Cache namespace is `rwa-signal-radar-v2`; the version isolates the five-source OKX rollout from the former four-source distribution. Each item is kept below 1.75 MB, below the platform 2 MB limit. Retention is seven days and region is pinned to `iad1` for consistent Cron/UI history.
 - Runtime Cache is not the system of record. Its production status is intentionally Partial/regional best effort. An eviction or new empty regional cache must show `Baseline warming`, not `No anomalies`.
 - The browser loads Radar data only on the active, visible page, promise-shares concurrent refreshes and backs off after failure. It never posts observations and never writes KPI/Radar history to localStorage.
-- Review the first two Cron executions in Function logs after release. Confirm the Cron route returns 200 rather than 401, `storedSnapshots` increases across two distinct hour buckets, repeated requests inside one bucket do not increase the count, source counts are plausible, and known sentinels such as QNT remain Equity only when official RWA category evidence is present.
+- Review the first two Cron executions in Function logs after release. Confirm the Cron route returns 200 rather than 401, `storedSnapshots` increases across two distinct hour buckets, repeated requests inside one bucket do not increase the count, all five source counts are plausible, and known sentinels such as QNT remain Equity only when official RWA category evidence is present. On OKX, category-1 QNT/CAT/LIT must remain absent.
 - Treat any identity conflict admitted into `assets`, a crypto-typed listing, or a stale/unknown price used in dispersion as P0. Treat a single unavailable venue, Runtime Cache eviction, or a warming baseline as P1 until continuity recovers.

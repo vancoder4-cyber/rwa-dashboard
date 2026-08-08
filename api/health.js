@@ -1,7 +1,14 @@
 import { assessChecks, checkResult, PRODUCTION_BASELINES } from './_lib/health.js';
+import {
+  OKX_SPOT_GOLD_EXCEPTIONS,
+  canonicalOkxPerpSymbol,
+  canonicalOkxSpotSymbol,
+  isOkxRwaPerpInstrument,
+  isOkxRwaSpotInstrument,
+} from './_lib/okx.js';
 import { fetchJsonWithPolicy, fetchWithPolicy, mapWithConcurrency } from './_lib/upstream.js';
 
-export const config = { regions: ['sin1'], maxDuration: 30 };
+export const config = { regions: ['sin1'], maxDuration: 60 };
 
 const REFERENCE_SYMBOLS = ['AAPL', 'XAU', 'SKHYNIX', 'MINIMAX'];
 const FUNDING_PROBES = Object.freeze({
@@ -9,7 +16,10 @@ const FUNDING_PROBES = Object.freeze({
   bitget: 'AAPLUSDT',
   gate: 'AAPLX_USDT',
   binance: 'AAPLUSDT',
+  okx: 'AAPL-USDT-SWAP',
 });
+const OKX_EXPECTED_PERP_SPLIT = Object.freeze({ swap: 149, xperp: 34 });
+const OKX_EXPECTED_SPOT_SPLIT = Object.freeze({ uts: 48, gold: 3 });
 
 function deploymentBaseUrl(req) {
   const forwarded = String(req.headers?.['x-forwarded-host'] || req.headers?.host || '').toLowerCase();
@@ -86,6 +96,179 @@ async function probeFunding(baseUrl, venue, symbol) {
   }
 }
 
+function normalized(value) {
+  return String(value ?? '').trim();
+}
+
+function normalizedUpper(value) {
+  return normalized(value).toUpperCase();
+}
+
+function summarizeResourceCoverage(rows, expectedIds, declared) {
+  const values = Array.isArray(rows) ? rows : [];
+  const ids = values.map(row => normalizedUpper(row?.instId)).filter(Boolean);
+  const uniqueIds = new Set(ids);
+  const duplicateCount = ids.length - uniqueIds.size;
+  const missingIds = [...expectedIds].filter(instId => !uniqueIds.has(instId));
+  const unexpectedIds = [...uniqueIds].filter(instId => !expectedIds.has(instId));
+  const declaredFull = normalized(declared?.status).toLowerCase() === 'full' &&
+    Number(declared?.observed) === expectedIds.size &&
+    Number(declared?.expected) === expectedIds.size;
+  return {
+    valid: declaredFull && duplicateCount === 0 && missingIds.length === 0 &&
+      unexpectedIds.length === 0 && values.length === expectedIds.size,
+    observed: values.length,
+    expected: expectedIds.size,
+    duplicateCount,
+    missingCount: missingIds.length,
+    unexpectedCount: unexpectedIds.length,
+    missingSample: missingIds.slice(0, 5),
+    unexpectedSample: unexpectedIds.slice(0, 5),
+    declaredStatus: normalized(declared?.status).toLowerCase() || 'unavailable',
+  };
+}
+
+function okxPerpIdentity(instrument) {
+  const canonical = canonicalOkxPerpSymbol(instrument);
+  return isOkxRwaPerpInstrument(instrument) && canonical !== null &&
+    normalizedUpper(instrument?.canonicalSymbol) === canonical;
+}
+
+function okxSpotIdentity(instrument) {
+  const canonical = canonicalOkxSpotSymbol(instrument);
+  return isOkxRwaSpotInstrument(instrument) && canonical !== null &&
+    normalizedUpper(instrument?.canonicalSymbol) === canonical;
+}
+
+function validationReason(issues) {
+  return issues.length ? issues.join('; ') : null;
+}
+
+export function validateOkxPerpSnapshot(payload) {
+  const instruments = Array.isArray(payload?.instruments) ? payload.instruments : [];
+  const instIds = instruments.map(row => normalizedUpper(row?.instId)).filter(Boolean);
+  const uniqueIds = new Set(instIds);
+  const duplicateCount = instIds.length - uniqueIds.size;
+  const invalidIdentityIds = instruments
+    .filter(row => !okxPerpIdentity(row))
+    .map(row => normalizedUpper(row?.instId) || '(missing instId)');
+  const swapListings = instruments.filter(row => normalizedUpper(row?.instType) === 'SWAP').length;
+  const xPerpListings = instruments.filter(row =>
+    normalizedUpper(row?.instType) === 'FUTURES' &&
+    normalized(row?.ruleType).toLowerCase() === 'xperp'
+  ).length;
+  const expectedListings = PRODUCTION_BASELINES.perpetuals.okx;
+  const tickerCoverage = summarizeResourceCoverage(payload?.tickers, uniqueIds, payload?.coverage?.tickers);
+  const markCoverage = summarizeResourceCoverage(payload?.marks, uniqueIds, payload?.coverage?.marks);
+  const openInterestCoverage = summarizeResourceCoverage(
+    payload?.openInterest,
+    uniqueIds,
+    payload?.coverage?.openInterest,
+  );
+  const identityValid = invalidIdentityIds.length === 0 && duplicateCount === 0;
+  const countValid = instruments.length === expectedListings && uniqueIds.size === expectedListings &&
+    swapListings === OKX_EXPECTED_PERP_SPLIT.swap &&
+    xPerpListings === OKX_EXPECTED_PERP_SPLIT.xperp;
+  const marketCoverageValid = tickerCoverage.valid && markCoverage.valid && openInterestCoverage.valid;
+  const issues = [];
+  if (!identityValid) issues.push(`identity rejected ${invalidIdentityIds.length} rows; duplicates ${duplicateCount}`);
+  if (!countValid) {
+    issues.push(`expected ${expectedListings} listings (${OKX_EXPECTED_PERP_SPLIT.swap} SWAP + ${OKX_EXPECTED_PERP_SPLIT.xperp} X-Perp), got ${instruments.length} (${swapListings} + ${xPerpListings})`);
+  }
+  if (!marketCoverageValid) issues.push('ticker, mark, or open-interest coverage is not a complete catalog join');
+  return {
+    valid: identityValid && countValid && marketCoverageValid,
+    identityValid,
+    countValid,
+    marketCoverageValid,
+    expectedListings,
+    listingCount: instruments.length,
+    uniqueListingCount: uniqueIds.size,
+    swapListings,
+    xPerpListings,
+    duplicateCount,
+    invalidIdentityCount: invalidIdentityIds.length,
+    invalidIdentitySample: invalidIdentityIds.slice(0, 5),
+    coverage: { tickers: tickerCoverage, marks: markCoverage, openInterest: openInterestCoverage },
+    reason: validationReason(issues),
+  };
+}
+
+export function validateOkxSpotSnapshot(payload) {
+  const instruments = Array.isArray(payload?.instruments) ? payload.instruments : [];
+  const instIds = instruments.map(row => normalizedUpper(row?.instId)).filter(Boolean);
+  const uniqueIds = new Set(instIds);
+  const duplicateCount = instIds.length - uniqueIds.size;
+  const invalidIdentityIds = instruments
+    .filter(row => !okxSpotIdentity(row))
+    .map(row => normalizedUpper(row?.instId) || '(missing instId)');
+  const utsListings = instruments.filter(row => normalized(row?.instCategory) === '3').length;
+  const goldIds = new Set(instruments
+    .filter(row => normalized(row?.instCategory) === '1' && OKX_SPOT_GOLD_EXCEPTIONS[normalizedUpper(row?.instId)])
+    .map(row => normalizedUpper(row?.instId)));
+  const expectedListings = PRODUCTION_BASELINES.spot.okx;
+  const tickerCoverage = summarizeResourceCoverage(payload?.tickers, uniqueIds, payload?.coverage?.tickers);
+  const identityValid = invalidIdentityIds.length === 0 && duplicateCount === 0;
+  const countValid = instruments.length === expectedListings && uniqueIds.size === expectedListings &&
+    utsListings === OKX_EXPECTED_SPOT_SPLIT.uts &&
+    goldIds.size === OKX_EXPECTED_SPOT_SPLIT.gold &&
+    Object.keys(OKX_SPOT_GOLD_EXCEPTIONS).every(instId => goldIds.has(instId));
+  const marketCoverageValid = tickerCoverage.valid;
+  const issues = [];
+  if (!identityValid) issues.push(`identity rejected ${invalidIdentityIds.length} rows; duplicates ${duplicateCount}`);
+  if (!countValid) {
+    issues.push(`expected ${expectedListings} listings (${OKX_EXPECTED_SPOT_SPLIT.uts} UTS + ${OKX_EXPECTED_SPOT_SPLIT.gold} gold), got ${instruments.length} (${utsListings} + ${goldIds.size})`);
+  }
+  if (!marketCoverageValid) issues.push('ticker coverage is not a complete catalog join');
+  return {
+    valid: identityValid && countValid && marketCoverageValid,
+    identityValid,
+    countValid,
+    marketCoverageValid,
+    expectedListings,
+    listingCount: instruments.length,
+    uniqueListingCount: uniqueIds.size,
+    utsListings,
+    goldListings: goldIds.size,
+    duplicateCount,
+    invalidIdentityCount: invalidIdentityIds.length,
+    invalidIdentitySample: invalidIdentityIds.slice(0, 5),
+    coverage: { tickers: tickerCoverage },
+    reason: validationReason(issues),
+  };
+}
+
+export async function probeOkxMarkets(baseUrl) {
+  const definitions = [
+    ['perp', 'perp-snapshot', validateOkxPerpSnapshot],
+    ['spot', 'spot-snapshot', validateOkxSpotSnapshot],
+  ];
+  const checks = [];
+  // These self-probes deliberately run one at a time. Each route already uses
+  // bulk OKX resources, so retrying or fanning them out would amplify a cold start.
+  for (const [market, type, validate] of definitions) {
+    const startedAt = Date.now();
+    try {
+      const payload = await fetchJsonWithPolicy(
+        `${baseUrl}/api/okx-market?type=${type}`,
+        {},
+        { timeoutMs: 10_000, retries: 0 },
+      );
+      const validation = validate(payload);
+      checks.push(checkResult(`okx-${market}-market`, validation.valid ? 'pass' : 'fail', {
+        latencyMs: Date.now() - startedAt,
+        ...validation,
+      }, { critical: !validation.identityValid }));
+    } catch (error) {
+      checks.push(checkResult(`okx-${market}-market`, 'warn', {
+        latencyMs: Date.now() - startedAt,
+        reason: error.message,
+      }));
+    }
+  }
+  return checks;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');
@@ -93,12 +276,18 @@ export default async function handler(req, res) {
   }
 
   const baseUrl = deploymentBaseUrl(req);
-  // Keep self-probes bounded. Fanning six sibling Function calls out at once
-  // can create a false outage signal during cold starts or regional scaling.
-  const checks = [await probePage(baseUrl), await probeReferences(baseUrl)];
-  const fundingChecks = await mapWithConcurrency(Object.entries(FUNDING_PROBES), 2,
-    ([venue, symbol]) => probeFunding(baseUrl, venue, symbol));
-  checks.push(...fundingChecks);
+  // Keep self-probes bounded to two sibling Functions at a time. The two OKX
+  // snapshots are one sequential job, preventing catalog cold starts from
+  // multiplying while the other coverage checks run.
+  const checks = [await probePage(baseUrl)];
+  const probeJobs = [
+    () => probeReferences(baseUrl),
+    () => probeOkxMarkets(baseUrl),
+    ...Object.entries(FUNDING_PROBES).map(([venue, symbol]) =>
+      () => probeFunding(baseUrl, venue, symbol)),
+  ];
+  const groupedChecks = await mapWithConcurrency(probeJobs, 2, job => job());
+  checks.push(...groupedChecks.flat());
   const assessment = assessChecks(checks);
   const payload = {
     service: 'avenir-rwa-analyst',

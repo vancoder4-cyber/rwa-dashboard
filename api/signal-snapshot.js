@@ -19,14 +19,30 @@ import {
 
 export const config = { regions: ['iad1'], maxDuration: 60 };
 
-const HISTORY_NAMESPACE = 'rwa-signal-radar';
-const HISTORY_KEY = 'hourly-history-v1';
+// Adding a source changes aggregate Volume/OI baselines. Keep the five-source
+// history isolated so the rollout is not scored as an anomaly against v1.
+const HISTORY_NAMESPACE = 'rwa-signal-radar-v2';
+const HISTORY_KEY = 'hourly-history-v2';
 const HISTORY_TTL_SECONDS = 7 * 24 * 60 * 60;
 const HISTORY_MAX_SNAPSHOTS = 168;
 const HISTORY_MAX_BYTES = 1_750_000;
 const SOURCE_TIMEOUT_MS = 20_000;
 const BITGET_BASE = 'https://api.bitget.com';
-const SIGNAL_SOURCE_NAMES = Object.freeze(['gate', 'binance', 'bitget', 'tradexyz']);
+const SIGNAL_SOURCE_NAMES = Object.freeze(['gate', 'binance', 'bitget', 'tradexyz', 'okx']);
+export const TRADE_XYZ_UNTYPED_RWA_CATEGORIES = Object.freeze({
+  URANIUM:'commodity',
+  TTF:'commodity',
+  H100:'commodity',
+  NIFTY:'index',
+  IBOV:'index',
+});
+
+const OKX_SIGNAL_CATEGORIES = Object.freeze({
+  3: 'equity',
+  4: 'commodity',
+  5: 'fx',
+  6: 'bond',
+});
 
 function finiteOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -42,8 +58,111 @@ function firstNumber(...values) {
   return null;
 }
 
+function positiveDeltaHours(later, earlier) {
+  const laterMs = finiteOrNull(later);
+  const earlierMs = finiteOrNull(earlier);
+  if (laterMs === null || earlierMs === null || laterMs <= earlierMs) return null;
+  return (laterMs - earlierMs) / 3_600_000;
+}
+
+function okxFundingIntervalHours(row) {
+  return positiveDeltaHours(row?.nextFundingTime, row?.fundingTime)
+    ?? positiveDeltaHours(row?.fundingTime, row?.prevFundingTime);
+}
+
+function okxRowsByInstrument(rows) {
+  return new Map((Array.isArray(rows) ? rows : [])
+    .filter(row => row && typeof row === 'object' && row.instId)
+    .map(row => [String(row.instId).toUpperCase(), row]));
+}
+
+function okxCoverageStatus(coverage) {
+  if (typeof coverage === 'string') return coverage.trim().toLowerCase();
+  return String(coverage?.status || coverage?.overall || '').trim().toLowerCase();
+}
+
+export function normalizeOkxSignalSnapshot(payload) {
+  const instruments = Array.isArray(payload?.instruments) ? payload.instruments : [];
+  const tickerMap = okxRowsByInstrument(payload?.tickers);
+  const markMap = okxRowsByInstrument(payload?.marks);
+  const oiMap = okxRowsByInstrument(payload?.openInterest);
+  const fundingMap = okxRowsByInstrument(payload?.funding);
+  const listings = [];
+
+  for (const instrument of instruments) {
+    const venueSymbol = String(instrument?.instId || '').toUpperCase();
+    const instType = String(instrument?.instType || '').toUpperCase();
+    const ruleType = String(instrument?.ruleType || '').toLowerCase();
+    const officialCategory = OKX_SIGNAL_CATEGORIES[String(instrument?.instCategory || '')] || null;
+    const isPerpetual = instType === 'SWAP' || (instType === 'FUTURES' && ruleType === 'xperp');
+    if (String(instrument?.state || '').toLowerCase() !== 'live' || !isPerpetual || !officialCategory) continue;
+    if (!/^[A-Z0-9_-]{3,80}$/.test(venueSymbol)) continue;
+
+    // ctValCcy is official contract metadata. Parsing an ambiguous ticker is
+    // intentionally not a fallback identity source.
+    const venueBase = String(instrument?.ctValCcy || '').toUpperCase();
+    const identity = normalizeSignalIdentity(venueBase, officialCategory);
+    if (!identity) continue;
+
+    const ticker = tickerMap.get(venueSymbol) || {};
+    const mark = markMap.get(venueSymbol) || {};
+    const openInterest = oiMap.get(venueSymbol) || {};
+    const funding = fundingMap.get(venueSymbol) || {};
+    const price = firstNumber(mark.markPx, ticker.last);
+    const open24h = finiteOrNull(ticker.open24h);
+    const last = finiteOrNull(ticker.last);
+    const baseVolume = finiteOrNull(ticker.volCcy24h);
+    const directQuoteVolume = firstNumber(ticker.volCcyQuote24h, ticker.quoteVolume);
+    const oiBase = firstNumber(openInterest.oiCcy,
+      finiteOrNull(openInterest.oi) !== null && finiteOrNull(instrument.ctVal) !== null
+        ? Number(openInterest.oi) * Number(instrument.ctVal)
+        : null);
+
+    listings.push({
+      symbol: identity.symbol,
+      category: identity.category,
+      venue: 'okx',
+      venueSymbol,
+      priceUsd: price,
+      volume24hUsd: directQuoteVolume ?? (baseVolume !== null && price !== null ? baseVolume * price : null),
+      openInterestUsd: firstNumber(openInterest.oiUsd,
+        oiBase !== null && price !== null ? oiBase * price : null),
+      fundingRate: firstNumber(funding.fundingRate, funding.settFundingRate),
+      fundingIntervalHours: okxFundingIntervalHours(funding),
+      change24hPct: last !== null && open24h > 0 ? ((last - open24h) / open24h) * 100 : null,
+    });
+  }
+
+  const admittedIds = listings.map(listing => listing.venueSymbol);
+  const fieldMaps = [
+    ['TICKERS_INCOMPLETE', tickerMap],
+    ['MARKS_INCOMPLETE', markMap],
+    ['OPEN_INTEREST_INCOMPLETE', oiMap],
+    ['FUNDING_INCOMPLETE', fundingMap],
+  ];
+  const warnings = fieldMaps
+    .filter(([, fieldMap]) => admittedIds.some(instId => !fieldMap.has(instId)))
+    .map(([warning]) => warning);
+  if (!instruments.length) warnings.unshift('INSTRUMENTS_UNAVAILABLE');
+  const upstreamWarnings = Array.isArray(payload?.coverage?.warnings) ? payload.coverage.warnings : [];
+  warnings.push(...upstreamWarnings.map(value => String(value)).filter(Boolean));
+  const explicitCoverage = okxCoverageStatus(payload?.coverage);
+  if (explicitCoverage && explicitCoverage !== 'full') {
+    warnings.push(`UPSTREAM_COVERAGE_${explicitCoverage.toUpperCase()}`);
+  }
+  const completeness = listings.length && warnings.length === 0 && (!explicitCoverage || explicitCoverage === 'full')
+    ? 'full'
+    : 'partial';
+  return { listings, completeness, warnings: [...new Set(warnings)] };
+}
+
 function isExplicitTrue(value) {
   return value === true || value === 1 || ['1', 'true', 'yes'].includes(String(value || '').trim().toLowerCase());
+}
+
+export function tradeXyzSignalCategory(symbol, officialType) {
+  return categoryFromOfficialSignalType(officialType) ||
+    TRADE_XYZ_UNTYPED_RWA_CATEGORIES[String(symbol || '').trim().toUpperCase()] || null;
 }
 
 function deploymentBaseUrl(req) {
@@ -126,11 +245,13 @@ async function collectBinance(baseUrl) {
   const tickerMap = new Map(tickers.map(row => [row.symbol, row]));
   const intervalMap = new Map(fundingInfo.map(row => [row.symbol, finiteOrNull(row.fundingIntervalHours)]));
   const listings = [];
+  let admittedCatalogListings = 0;
   for (const contract of info.symbols) {
     const venueSymbol = String(contract.symbol || '').toUpperCase();
     const venueBase = String(contract.baseAsset || '').toUpperCase();
     const isMetalException = contract.contractType === 'PERPETUAL' && ['PAXG', 'XAUT'].includes(venueBase);
     if (contract.status !== 'TRADING' || (contract.contractType !== 'TRADIFI_PERPETUAL' && !isMetalException)) continue;
+    admittedCatalogListings += 1;
     const category = isMetalException ? 'commodity' : categoryFromOfficialSignalType(contract.underlyingType);
     const identity = normalizeSignalIdentity(venueBase, category, {
       allowBinanceBstock: contract.contractType === 'TRADIFI_PERPETUAL',
@@ -153,10 +274,14 @@ async function collectBinance(baseUrl) {
   }
   if (!listings.length) throw new Error('trusted Binance TradFi catalog is empty');
   const missing = optionalAvailable.filter(available => !available).length;
+  const identityCoverageComplete = listings.length === admittedCatalogListings;
+  const warnings = [];
+  if (missing) warnings.push('OPTIONAL_MARKET_FIELDS_UNAVAILABLE');
+  if (!identityCoverageComplete) warnings.push('IDENTITY_COVERAGE_INCOMPLETE');
   return {
     listings,
-    completeness: missing ? 'partial' : 'full',
-    warnings: missing ? ['OPTIONAL_MARKET_FIELDS_UNAVAILABLE'] : [],
+    completeness: missing || !identityCoverageComplete ? 'partial' : 'full',
+    warnings,
   };
 }
 
@@ -238,7 +363,10 @@ async function collectTradeXyz(baseUrl) {
     const venueSymbol = String(meta.name || '');
     const symbol = (venueSymbol.includes(':') ? venueSymbol.split(':').pop() : venueSymbol).toUpperCase();
     const officialType = officialTypes.get(venueSymbol.toLowerCase()) || officialTypes.get(`xyz:${symbol}`.toLowerCase());
-    const category = categoryFromOfficialSignalType(officialType);
+    // perpCategories currently omits five rows from the otherwise dedicated
+    // xyz DEX universe. Admit only the exact audited fallback map used by the
+    // client; an arbitrary blank-category ticker still fails closed.
+    const category = tradeXyzSignalCategory(symbol, officialType);
     const identity = normalizeSignalIdentity(symbol, category);
     if (!identity || !symbol || !venueSymbol) continue;
     const price = finiteOrNull(context.markPx);
@@ -258,9 +386,21 @@ async function collectTradeXyz(baseUrl) {
     });
   }
   if (!listings.length) throw new Error('trusted trade.xyz RWA catalog is empty');
-  const completeness = contexts.length === universe.length && universe.every((_, index) =>
-    contexts[index] && typeof contexts[index] === 'object') ? 'full' : 'partial';
-  return { listings, completeness, warnings: completeness === 'full' ? [] : ['MARKET_CONTEXT_INCOMPLETE'] };
+  const marketContextComplete = contexts.length === universe.length && universe.every((_, index) =>
+    contexts[index] && typeof contexts[index] === 'object');
+  const identityCoverageComplete = listings.length === universe.length;
+  const warnings = [];
+  if (!marketContextComplete) warnings.push('MARKET_CONTEXT_INCOMPLETE');
+  if (!identityCoverageComplete) warnings.push('IDENTITY_COVERAGE_INCOMPLETE');
+  const completeness = marketContextComplete && identityCoverageComplete ? 'full' : 'partial';
+  return { listings, completeness, warnings };
+}
+
+async function collectOkx(baseUrl) {
+  const payload = await fetchSameOrigin(baseUrl, '/api/okx-market?type=perp-snapshot');
+  const normalized = normalizeOkxSignalSnapshot(payload);
+  if (!normalized.listings.length) throw new Error('trusted OKX RWA catalog is empty');
+  return normalized;
 }
 
 export function mergeSignalHistory(history, currentSnapshot, nowMs = Date.now()) {
@@ -299,8 +439,8 @@ async function updateRuntimeHistory(currentSnapshot, nowMs, { writeAllowed = tru
     const merged = mergeSignalHistory(stored, currentSnapshot, nowMs);
     await cache.set(HISTORY_KEY, merged, {
       ttl: HISTORY_TTL_SECONDS,
-      tags: ['rwa-signal-history'],
-      name: 'RWA Signal Radar hourly history',
+      tags: ['rwa-signal-history-v2'],
+      name: 'RWA Signal Radar five-source hourly history',
     });
     return { status: 'partial', previous, stored: merged, writeStatus: 'stored', error: null };
   } catch (error) {
@@ -327,8 +467,11 @@ function aggregateHistoryPoints(snapshots) {
   });
 }
 
-export function isSignalSnapshotComparable(sources) {
-  return SIGNAL_SOURCE_NAMES.every(name => sources?.[name]?.status === 'full');
+export function isSignalSnapshotComparable(sources, expectedSourceNames = null) {
+  const names = Array.isArray(expectedSourceNames) && expectedSourceNames.length
+    ? expectedSourceNames
+    : Object.keys(sources || {});
+  return names.length > 0 && names.every(name => sources?.[name]?.status === 'full');
 }
 
 export async function serveSignalSnapshot(req, res, { publicCache = true } = {}) {
@@ -349,6 +492,7 @@ export async function serveSignalSnapshot(req, res, { publicCache = true } = {})
     binance: () => collectBinance(baseUrl),
     bitget: () => collectBitget(),
     tradexyz: () => collectTradeXyz(baseUrl),
+    okx: () => collectOkx(baseUrl),
   };
   const settled = await Promise.allSettled(SIGNAL_SOURCE_NAMES.map(name => collectors[name]()));
   const sources = {};
@@ -382,7 +526,7 @@ export async function serveSignalSnapshot(req, res, { publicCache = true } = {})
 
   const capturedAtMs = Date.now();
   const compact = compactSignalSnapshot(normalized.assets, capturedAtMs, SIGNAL_ASSET_LIMIT);
-  const snapshotComparable = isSignalSnapshotComparable(sources);
+  const snapshotComparable = isSignalSnapshotComparable(sources, SIGNAL_SOURCE_NAMES);
   const runtimeHistory = await updateRuntimeHistory(compact, capturedAtMs, { writeAllowed: snapshotComparable });
   const assets = attachSignalAnalysis(normalized.assets, runtimeHistory.previous, capturedAtMs, {
     snapshotComparable,
@@ -416,6 +560,7 @@ export async function serveSignalSnapshot(req, res, { publicCache = true } = {})
       rejectedListings: normalized.rejected.length,
       identityConflicts: normalized.conflicts.length,
       assetCount: normalized.assets.length,
+      canonicalAssetCount: normalized.totalAssetCount,
       monitoredAssetLimit: SIGNAL_ASSET_LIMIT,
     },
     methodology: {

@@ -28,6 +28,7 @@
     'Equity':'股票',
     'Commodity':'大宗商品',
     'Index':'指数',
+    'Bond':'债券',
     'ETF':'ETF',
     'Etf':'ETF',
     'Fx':'外汇',
@@ -35,6 +36,7 @@
     'Equities':'股票',
     'Commodities':'大宗商品',
     'Indices':'指数',
+    'Bonds':'债券',
     'ETFs':'ETF',
     'Pre-IPO':'上市前',
     'FX':'外汇',
@@ -50,6 +52,11 @@
     'Bitget (USDT-FUTURES)':'Bitget（USDT 合约）',
     'Gate.io (USDT Perpetual)':'Gate.io（USDT 永续）',
     'Binance (USDT-M Perpetual)':'Binance（USDT-M 永续）',
+    'OKX RWA SWAP + official X-Perp · Funding interval is contract-specific · Default fee values are indicative and account-tier dependent':'OKX RWA SWAP + 官方 X-Perp · 资金费率周期以合约为准 · 默认手续费仅为指示性估算，并取决于账户等级',
+    'Official instCategory gate · Auto-refresh: 60s':'官方 instCategory 身份门控 · 自动刷新：60 秒',
+    'Fetching OKX official RWA contract snapshot...':'正在获取 OKX 官方 RWA 合约快照…',
+    'OKX official RWA catalog is empty':'OKX 官方 RWA 目录为空',
+    'OKX official catalog produced no identity-verified RWA contracts':'OKX 官方目录未生成任何通过身份验证的 RWA 合约',
     'Standard Maker 0.03% / Taker 0.09% (Growth Mode may be lower)':'标准 Maker 0.03% / Taker 0.09%（Growth Mode 可能更低）',
     'Fees vary per contract (default Maker 0.02% / Taker 0.06%)':'手续费因合约而异（默认 Maker 0.02% / Taker 0.06%）',
     'Fees vary per contract (default Maker 0.015% / Taker 0.05%)':'手续费因合约而异（默认 Maker 0.015% / Taker 0.05%）',
@@ -487,6 +494,7 @@
     'Top 30 RWA Perps by 30-Day Volume':'RWA 永续合约 30 日成交量 Top 30',
     'Building a rolling 30-day view from exchange klines; any missing venue history is explicitly labeled Estimated.':'正在通过交易所 K 线构建滚动 30 日视图；缺少历史数据的交易场所会明确标记为“估算”。',
     'Loading 30-day kline data from Binance, Bitget, Gate.io, and trade.xyz…':'正在加载 Binance、Bitget、Gate.io 与 trade.xyz 的 30 日 K 线数据…',
+    'Loading 30-day kline data from Binance, Bitget, Gate.io, trade.xyz, and OKX…':'正在加载 Binance、Bitget、Gate.io、trade.xyz 与 OKX 的 30 日 K 线数据…',
     'Rolling window':'滚动窗口',
     'auto-refresh every 5 min':'每 5 分钟自动刷新',
     '30d Volume':'30 日成交量',
@@ -502,6 +510,7 @@
     'EQUITY':'股票',
     'COMMODITY':'大宗商品',
     'INDEX':'指数',
+    'BOND':'债券',
     'PRE-IPO':'上市前',
     'Demo v3':'演示版 v3',
     'Listed':'已上线',
@@ -528,6 +537,7 @@
     'etf':'ETF',
     'commodity':'大宗商品',
     'index':'指数',
+    'bond':'债券',
     'fx':'外汇',
     'pre-ipo':'上市前',
     'other':'其他',
@@ -619,6 +629,7 @@
     [/^(\d[\d,]*) warnings?$/, function (m) { return m[1] + ' 条警告'; }],
     [/^(\d[\d,]*) Perp listings?$/, function (m) { return m[1] + ' 个永续合约标的'; }],
     [/^(\d[\d,]*) Spot listings?$/, function (m) { return m[1] + ' 个现货标的'; }],
+    [/^OKX: (\d[\d,]*) official RWA contracts processed$/, function (m) { return 'OKX：已处理 ' + m[1] + ' 个官方 RWA 合约'; }],
     [/^(\d[\d,]*) market routes?$/, function (m) { return m[1] + ' 条市场路径'; }],
     [/^(\d[\d,]*) verified listings?$/, function (m) { return m[1] + ' 个已验证标的'; }],
     [/^(\d[\d,]*) volume fields? available$/, function (m) { return m[1] + ' 个成交量字段可用'; }],
@@ -664,8 +675,8 @@
     [/^(\d[\d,]*) server snapshots available\.?$/, function (m) { return '已有 ' + m[1] + ' 个服务端快照。'; }],
     [/^(\d[\d,]*) server snapshots available\. Normal classifications are withheld until the server reports sufficient history\.$/, function (m) { return '已有 ' + m[1] + ' 个服务端快照。服务端积累足够历史数据之前，不会给出“正常”分类。'; }],
     [/^(\d[\d,]*) (Full|Partial|Estimated|Unavailable)$/, function (m) { return m[1] + ' ' + translateCore(m[2], 'zh-CN'); }],
-    [/^(Equity|Commodity|Index|ETF|Etf|FX|Fx|Pre-IPO|Pre-Ipo) \((\d[\d,]*)\)$/, function (m) { return translateCore(m[1], 'zh-CN') + '（' + m[2] + '）'; }],
-    [/^(equity|commodity|index|etf|fx|pre-ipo) \((\d[\d,]*)\)$/, function (m) { return translateCore(m[1], 'zh-CN') + '（' + m[2] + '）'; }],
+    [/^(Equity|Commodity|Index|Bond|ETF|Etf|FX|Fx|Pre-IPO|Pre-Ipo) \((\d[\d,]*)\)$/, function (m) { return translateCore(m[1], 'zh-CN') + '（' + m[2] + '）'; }],
+    [/^(equity|commodity|index|bond|etf|fx|pre-ipo) \((\d[\d,]*)\)$/, function (m) { return translateCore(m[1], 'zh-CN') + '（' + m[2] + '）'; }],
     [/^(.+): Full \((\d[\d,]*)\)$/, function (m) { return m[1] + '：完整（' + m[2] + '）'; }],
     [/^(.+): Partial \((\d[\d,]*)\)$/, function (m) { return m[1] + '：部分（' + m[2] + '）'; }],
     [/^(.+): Unavailable \((\d[\d,]*)\)$/, function (m) { return m[1] + '：不可用（' + m[2] + '）'; }],
@@ -753,15 +764,15 @@
     [/^(.+)\. Retry remains subject to the current backoff window\.$/, function (m) {
       return m[1] + '。重试仍受当前退避窗口限制。';
     }],
-    [/^(trade\.xyz|Bitget|Gate\.io|Binance|Kraken) Spot$/, function (m) { return m[1] + ' 现货'; }],
-    [/^(trade\.xyz|Bitget|Gate\.io|Binance|Kraken) Perp$/, function (m) { return m[1] + ' 永续'; }],
-    [/^(trade\.xyz|Bitget|Gate\.io|Binance|Kraken) (Perp|Spot) → (trade\.xyz|Bitget|Gate\.io|Binance|Kraken) (Perp|Spot)$/, function (m) {
+    [/^(trade\.xyz|Bitget|Gate\.io|Binance|Kraken|OKX) Spot$/, function (m) { return m[1] + ' 现货'; }],
+    [/^(trade\.xyz|Bitget|Gate\.io|Binance|Kraken|OKX) Perp$/, function (m) { return m[1] + ' 永续'; }],
+    [/^(trade\.xyz|Bitget|Gate\.io|Binance|Kraken|OKX) (Perp|Spot) → (trade\.xyz|Bitget|Gate\.io|Binance|Kraken|OKX) (Perp|Spot)$/, function (m) {
       return m[1] + ' ' + translateCore(m[2], 'zh-CN') + ' → ' + m[3] + ' ' + translateCore(m[4], 'zh-CN');
     }],
-    [/^(trade\.xyz|Bitget|Gate\.io|Binance|Kraken) (Perp|Spot) (.+) → (trade\.xyz|Bitget|Gate\.io|Binance|Kraken) (Perp|Spot)$/, function (m) {
+    [/^(trade\.xyz|Bitget|Gate\.io|Binance|Kraken|OKX) (Perp|Spot) (.+) → (trade\.xyz|Bitget|Gate\.io|Binance|Kraken|OKX) (Perp|Spot)$/, function (m) {
       return m[1] + ' ' + translateCore(m[2], 'zh-CN') + ' ' + m[3] + ' → ' + m[4] + ' ' + translateCore(m[5], 'zh-CN');
     }],
-    [/^(.+) → (trade\.xyz|Bitget|Gate\.io|Binance|Kraken) (Perp|Spot)$/, function (m) {
+    [/^(.+) → (trade\.xyz|Bitget|Gate\.io|Binance|Kraken|OKX) (Perp|Spot)$/, function (m) {
       return translateCore(m[1], 'zh-CN') + ' → ' + m[2] + ' ' + translateCore(m[3], 'zh-CN');
     }],
     [/^(Perp|Spot) 24h volume: (\d[\d,]*) volume fields? available$/, function (m) {

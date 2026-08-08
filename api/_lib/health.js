@@ -1,7 +1,9 @@
 export const PRODUCTION_BASELINES = Object.freeze({
-  perpetuals: Object.freeze({ tradexyz: 108, bitget: 273, gate: 360, binance: 155, total: 896 }),
-  spot: Object.freeze({ gate: 60, kraken: 167, bitget: 627, binance: 68, total: 922 }),
-  canonicalPerpetualAssets: 471,
+  perpetuals: Object.freeze({ tradexyz: 108, bitget: 273, gate: 360, binance: 155, okx: 183, total: 1079 }),
+  spot: Object.freeze({ gate: 60, kraken: 167, bitget: 627, binance: 68, okx: 51, total: 973 }),
+  // Recompute this dynamically after OKX is present in the cross-venue audit;
+  // raw OKX listings cannot be added because many share an existing canonical.
+  canonicalPerpetualAssets: 469,
   reviewedAt: '2026-08-08',
 });
 

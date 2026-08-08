@@ -159,7 +159,7 @@ export function aggregateSignalListings(listings, limit = SIGNAL_ASSET_LIMIT) {
     const rightActivity = (right.volume24hUsd ?? 0) + (right.openInterestUsd ?? 0);
     return rightActivity - leftActivity || left.symbol.localeCompare(right.symbol);
   });
-  return { assets: assets.slice(0, limit), conflicts, rejected };
+  return { assets: assets.slice(0, limit), totalAssetCount: assets.length, conflicts, rejected };
 }
 
 export function compactSignalSnapshot(assets, capturedAtMs, limit = SIGNAL_ASSET_LIMIT) {

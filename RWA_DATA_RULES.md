@@ -34,6 +34,9 @@
 | Bitget | `isRwa=YES`、`status=online`，且类型属于 stock/metal/commodity | 普通 crypto；只有精确审计 exception 可以覆盖错误的官方类型 |
 | Gate.io | `status=trading` 且 `contract_type` 属于 stocks/metals/commodities/indices/forex | `contract_type` 为空或其他类型的普通 crypto perpetual |
 | Binance | `contractType=TRADIFI_PERPETUAL`；PAXG/XAUT 可使用普通 PERPETUAL | 普通 `PERPETUAL + COIN` 合约 |
+| OKX | `state=live`，且 `instCategory` 精确属于 `3=Stocks / 4=Commodities / 5=Forex / 6=Bonds`；`SWAP` 与 `FUTURES + ruleType=xperp` 分开准入 | `instCategory=1` Crypto、空/未知类别、普通 dated `FUTURES`、`preopen`，以及只凭 `groupId` 或 ticker 猜测的产品 |
+
+trade.xyz 当前专用 `xyz` DEX universe 有 5 个 `perpCategories` 空缺：`URANIUM`、`TTF`、`H100`、`NIFTY`、`IBOV`。它们只能通过这份逐项审计的 venue-scoped fallback 映射分别进入 Commodity / Index；任意其他空类别 ticker 仍拒绝。Binance 的 `HK_EQUITY`、`KR_EQUITY` 是官方 regional equity product class，归一化后属于 Equity；不能把任意包含 `EQUITY` 的未知字符串模糊放行。
 
 ### Spot
 
@@ -43,6 +46,7 @@
 | Kraken | `asset_class=tokenized_asset` 且 wrapper 为官方 xStocks；另允许已审计贵金属 token |
 | Binance | `B` suffix 只是候选，underlying 还必须出现在官方 TradFi catalog；PAXG/XAUT 单独允许 |
 | Gate.io | 不再仅凭 `X/ON` suffix 放行；必须是精确审计 wrapper，或 underlying 已被其他官方 tokenized catalog 交叉确认 |
+| OKX | Unified Tokenized Stocks 必须为 `state=live + instType=SPOT + instCategory=3 + quoteCcy=USDT`，再从官方大写 `X` wrapper 精确剥一层；`PAXG-USD`、`PAXG-USDT`、`XAUT-USDT` 是唯一 `instCategory=1` 精确例外 |
 
 ## 4. 同名 crypto 的处理
 
@@ -57,10 +61,17 @@
 
 这条规则说明：**同一个裸 ticker 可以在一个场所是股票、在另一个场所是 crypto；准入必须绑定 venue metadata。**
 
+### OKX `instCategory=1`
+
+- OKX 官方 `instCategory=1` 表示 Crypto，Perp 与 Spot 默认一律拒绝；证券 registry、名称、价格相似度、`groupId` 或裸 ticker 都不能反向放行。
+- 唯一例外是已按 pair、base/quote 和审计日期锁定的 `PAXG-USD`、`PAXG-USDT`、`XAUT-USDT` 三个黄金现货交易对；例外不得扩大为其他 PAXG/XAUT quote，也不得扩大为所有“gold-like” ticker。
+- 当前官方目录中 `CAT` 现货和 `LIT` 现货/永续均为 `instCategory=1` Crypto，不能误认 Caterpillar 或 Global X Lithium ETF。这两组应保留为生产身份冲突 sentinel。
+
 ### Spot wrapper
 
 - `AAPLX`、`TSLAON`、`QNTB` 等 suffix 不能单独证明身份。
 - 先验证 issuer/catalog，再解析 underlying。
+- OKX 的大写 `X` 只能在官方 `instCategory=3` UTS 门控之后精确剥一层；例如 `XXLE -> XLE`。禁止先剥 `X` 再判断类别，否则 XRP、XLM 等 Crypto 会被误收。
 - 普通股票 ticker（如 `CAT`、`PEP`、`AI`、`GME`）不能直接作为 spot RWA；现货股票通常应有 issuer wrapper 或官方 Reality/bStock 身份。
 - `CORN/BRN/OIL/WHEAT` 等普通 crypto ticker 不能按商品名称误收。
 
@@ -70,6 +81,7 @@
    - Commodity：`CL -> WTI`、`BZ -> BRENTOIL`、`GC -> XAU`。
    - Index：`SP500 -> SPX`、`NAS100 -> NDX`。
    - Security：`QNTX/QNTSTOCK -> QNT`。
+   - Bitget/OKX 的宽泛 Stock(s) 类别只对当前审计过的 `SP500`、`NDX100`、`KR200` 精确改标为 Index；禁止按名称或 ticker 子串泛化。
 2. `CL` 也可能是 Colgate-Palmolive，`PL` 也可能是 Planet Labs，因此不能使用全局 alias。
 3. Wrapper 可以保留 venue ticker 展示，但跨场所匹配必须使用 underlying。
 4. 同一 canonical asset 在多个 venue 出现时，类别必须一致；出现冲突应阻止发布并人工核对。
@@ -126,11 +138,13 @@ Gate 当前另有 `BP + is_pre_market=true`，但其 `contract_type` 为空，�
 
 身份确认与字段完整度是两件事。资产可以是已确认 RWA，但 OI/Depth 等字段仍为 Partial 或 Unavailable。
 
+OKX 页面中的默认 Spot/Perp 手续费不是账户鉴权后的费率，只能标 **Estimated**；如果没有可信默认值或对应产品不支持该字段，则标 **Unavailable**，不得标 Full。OKX 衍生品 `volCcy24h × last/mark` 是美元成交额估算，也必须标 Estimated；官方 `oiUsd` 可在当前 catalog join 完整时标 Full。
+
 ## 9. 上线前审计清单
 
 每次更新资产规则至少完成以下检查：
 
-1. 拉取四家 perp 官方 catalog，统计准入数量和官方类型分布。
+1. 拉取五家 perp 官方 catalog，统计准入数量和官方类型分布；OKX 还要分别统计 SWAP、X-Perp、raw listings 与 canonical underlyings。
 2. 明确断言普通 QNT crypto 等已知冲突不会进入结果。
 3. 检查所有 canonical ticker 是否存在跨 venue 类别冲突。
 4. 检查 Equity 名称中是否出现 ETF/Fund/Trust/Index 等明显错标。
@@ -138,7 +152,8 @@ Gate 当前另有 `BP + is_pre_market=true`，但其 `contract_type` 为空，�
 6. 检查 spot 是否存在裸股票 ticker、普通 crypto ticker 或未经确认的 suffix wrapper。
 7. 对现货价格与股票参考价做异常比率扫描；异常只触发复核，不自动决定身份。
 8. Preview 中核对 venue counts、目标资产标签、Top 30 和 Cross-Venue Coverage。
-9. 推送 Git 后再 promote 到生产，最后复查生产 DOM、Vercel `Ready` 和 5xx 日志。
+9. OKX 断言 `instCategory=1` 的 CAT/LIT/QNT 不进入，UTS 只在 category 3 后剥一层 `X`，普通 FUTURES 不进入，且同一 underlying 的 SWAP/X-Perp listing 都保留。
+10. 推送 Git 后再 promote 到生产，最后复查生产 DOM、Vercel `Ready`、`/api/health` 和 5xx 日志。
 
 ## 10. 已知精确例外
 
@@ -150,6 +165,14 @@ Bitget 当前同时返回 `isRwa=YES` 和 `symbolType=crypto`，但该产品对�
 
 聚合器可能把同名 ticker 合并错。例如 RWA CLI 的 `resolve qnt` 曾把 Bitget `QNTUSDT` 解析为 Equity，而 Bitget 官方 catalog 明确说明它是 crypto 且 `isRwa=NO`。因此 CLI 只负责 discovery/候选解析，最终身份必须回到场所官方 catalog。
 
+### OKX tokenized gold
+
+截至 2026-08-08，OKX Spot 的 `PAXG-USD`、`PAXG-USDT` 与 `XAUT-USDT` 虽由通用目录标为 `instCategory=1`，但 OKX 官方 listing/资产说明确认其为黄金支持 token，因此作为三个精确 pair 例外纳入。两条 PAXG pair 是同一个 canonical `PAXG`；listing 数与 canonical 数不能混用。
+
+### 宽泛 Stock 类别中的指数
+
+截至 2026-08-08，Bitget 官方 RWA catalog 将 `SP500`、`NDX100` 标为 `stock`，OKX Stocks catalog 将 `KR200` 纳入同一宽泛类别。它们仅在通过各自官方 RWA admission gate 后，按这三个精确 ticker 改标为 Index；crypto 类别的同名 ticker 仍然拒绝。
+
 ## 11. 2026-08-08 基线
 
 该数字只用于发现突然缺失或暴增，不应被当成永久硬编码：
@@ -160,12 +183,14 @@ Bitget 当前同时返回 `isRwa=YES` 和 `symbolType=crypto`，但该产品对�
 | Perpetuals | Bitget | 273 |
 | Perpetuals | Gate.io | 360 |
 | Perpetuals | Binance | 155 |
+| Perpetuals | OKX | 183 |
 | Spot | Gate.io | 60 |
 | Spot | Binance | 68 |
 | Spot | Bitget | 627 |
 | Spot | Kraken | 167 |
+| Spot | OKX | 51 |
 
-合约合计 896 listings、471 个 canonical assets；现货合计 922 listings。
+合约合计 1,079 listings、469 个跨场所 canonical assets；现货合计 973 listings。OKX 合约的 183 listings = 149 个 SWAP + 34 个 X-Perp，归并为 149 个 OKX canonical underlyings；同一个 underlying 的 SWAP 与 X-Perp 是两个独立 listing，不能互相覆盖。OKX 现货的 51 listings = 48 个 UTS + 3 个精确黄金 pair，归并为 50 个 canonical assets（PAXG 有两个 quote pair）。
 
 ## 12. 维护约定
 
@@ -237,6 +262,16 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 - 生产前端不得再按 Gate symbol 调用 Vercel rewrite。同一数据窗口必须共享稳定 cache key；symbol 列表排序，kline `from/to` 对齐固定时间桶。
 - 单个上游失败保留 `null` 并降级为 Partial；客户端按 venue、按 symbol 合并成功值，失败 symbol 继续显示 last-good，不能把缺失填成 `0`，也不能由其他 venue 的成功延后本 venue 的重试。全部上游失败必须返回错误且 `no-store`，禁止 CDN 缓存空结果。
 
+### OKX 双目录、批量行情与 30 日成交量
+
+- OKX `perp-snapshot` 必须分别读取 `instType=SWAP` 和 `instType=FUTURES` 的 live official catalog。SWAP 与 `ruleType=xperp` 的 FUTURES 是两类独立 listing；ordinary dated FUTURES 即使 `instCategory` 看似 TradFi 也不能进入 Perpetuals。页面按 canonical 汇总时保留 `listings[]`，同一 venue 的 venue count 只计一次，但 Volume/OI 与 Drawer 明细不得静默丢掉另一份合约。
+- Ticker、mark 与 OI 可以按 `instType` 批量拉取，但都必须 inner join 当前 live identity catalog。OKX OI bulk 可能短暂保留已到期周合约，market response 绝不能反向扩充 allowlist；任何不在本轮 live catalog 的 `instId` 必须丢弃。
+- OKX 衍生品 ticker 的 `volCcy24h` 是 underlying/base 数量；24h USD volume 使用 `volCcy24h × positive(last, mark)`，状态为 Estimated。若改用 contract 数 `vol24h`，必须乘官方 `ctVal` 后再乘价格；`ctVal` 不恒为 1，且不能与 `volCcy24h` 重复相乘。OI 优先直接使用官方 `oiUsd`。
+- OKX Spot 的 `volCcy24h` 是 quote-currency turnover；本项目准入的 UTS/gold quote 为 USD/USDT，因此可作为美元近似值展示。quote 或字段不符合门控时保留 null，不做跨单位相加。
+- Top 30 的 OKX 30d volume 只累计 `1Dutc` 中 `confirm=1` 的完整日 K 线，按 timestamp 去重后必须有 30 根才为 Full；1–29 根为 Partial，0 根为 Unavailable。当前未完成日不得混入。无法取得完整 K 线时可显示 `24h × 30`，但必须明确标 Estimated，不能伪装为真实 rolling 30d。
+- OKX 当前资金费率快照通过固定的 `/public/funding-rate?instId=ANY` 一次批量读取，再 inner join 本轮 live catalog；浏览器不得按 ticker 无界 fan-out。Funding History 仍按已准入的具体 `instId` 以受控并发、超时和有限分页读取。真实字符串 `"0"` 必须保留为有效零值。
+- OKX 通用 maker/taker 默认值取决于地区、产品组和账户等级。未使用账户鉴权费率接口时，所有默认 fee 值标 Estimated；没有可信值时标 Unavailable。不得用默认费率生成 Full 状态或暗示可执行净收益。
+
 页面可见性只影响请求调度，不影响数据语义：页面 hidden 时暂停轮询，恢复可见后只更新已过期数据。Traditional 排名只在用户进入该页时按需加载，客户端保留 1 小时，服务端 CDN 新鲜期 1 小时、stale-while-revalidate 24 小时；Traditional quote 仅在该页激活时请求，美股常规时段客户端保留 60 秒，休市时保留 15 分钟。
 
 ## 15. 主要核验来源
@@ -245,6 +280,7 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 - Bitget perpetual/Reality catalogs：`/api/v3/market/instruments`。
 - Gate futures/spot catalogs：`/api/v4/futures/usdt/contracts` 与 `/api/v4/spot/currency_pairs`。
 - Binance futures/spot catalogs：`/fapi/v1/exchangeInfo` 与 `/api/v3/exchangeInfo`。
+- OKX official catalogs/market data：`/api/v5/public/instruments`、`/api/v5/market/tickers`、`/api/v5/public/mark-price`、`/api/v5/public/open-interest` 与 `funding-rate-history`；产品身份以 `state`、`instType`、`ruleType`、`instCategory` 为准，参考 [OKX API Guide](https://app.okx.com/docs-v5/en/)、[Stock Perpetuals](https://www.okx.com/en-us/help/stock-perpetuals) 与 [Unified Tokenized Stock terms](https://www.okx.com/en-us/help/unified-tokenized-stock-trading-terms-and-conditions)。
 - Nasdaq Market Activity（股票/ETF Share Volume、Average Volume）：<https://www.nasdaq.com/market-activity>。
 - OCC Volume Query / batch processing（期权成交量）：<https://www.theocc.com/market-data/market-data-reports/volume-and-open-interest/volume-query>。
 - Quantinuum 上市状态：[Quantinuum Announces Closing of Upsized Initial Public Offering](https://ir.quantinuum.com/news-releases/news-release-details/quantinuum-announces-closing-upsized-initial-public-offering)。
@@ -260,7 +296,7 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 
 生产运维、阈值、定时机制与发布门禁统一记录在 `OPERATIONS.md`：
 
-- Vercel 每日健康探针检查页面 shell、Reference Price 和四个合约场所的 Funding History sentinel。
+- Vercel 每日健康探针检查页面 shell、Reference Price、五个合约场所的 Funding History sentinel，以及 OKX Perp/Spot catalog 与身份/字段完整度 sentinel。
 - GitHub Actions 每日执行静态语法、数据契约和生产健康检查。
 - Codex 每日生成只读健康摘要，每周重新核对完整场所 catalog、身份冲突、上市生命周期、分类标签和历史覆盖。
 - 自动检查不得直接修改 allowlist、分类、基线或生产；发现漂移时必须给出官方证据并等待人工确认。
@@ -280,7 +316,7 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 
 ### 服务端信号快照
 
-- `GET /api/signal-snapshot` 是固定来源、GET-only、无 query 的服务端分析接口。来源只能是 Gate、Binance、Bitget 与 trade.xyz 的官方 catalog/market snapshot；官方 identity/category 缺失的 listing 必须 fail closed。监控 universe 是在身份 quarantine 后按 `24h USD volume + USD OI` 排序的 Top 100，响应与历史使用同一 universe，不能返回永远没有历史资格的后排资产。
+- `GET /api/signal-snapshot` 是固定来源、GET-only、无 query 的服务端分析接口。来源只能是 Gate、Binance、Bitget、trade.xyz 与 OKX 的官方 catalog/market snapshot；官方 identity/category 缺失的 listing 必须 fail closed。OKX 的 SWAP/X-Perp 保留为 listing 后再按 canonical 聚合，`instCategory=1` 直接拒绝。监控 universe 是在身份 quarantine 后按 `24h USD volume + USD OI` 排序的 Top 100，响应与历史使用同一 universe，不能返回永远没有历史资格的后排资产。
 - 普通 `crypto/coin/token/meme` category 在服务端直接拒绝。相同 canonical symbol 出现互斥 category 时，该 symbol 整体 quarantine 并计入 `identityConflicts`，不得选择价格更像股票的一侧。
 - 服务端证券生命周期、ETF underlying、显式 wrapper alias、精确官方类型和 Binance bStock 映射集中在 `api/_lib/security-identity.js`。结尾 `B` 不能通用剥离；只有审计过的 bStock wrapper 表可以映射 underlying。客户端 `SECURITY_LISTING_REGISTRY` / `ETF_SYMBOLS` / `TOKENIZED_ETF_WRAPPERS` 与服务端 registry 必须由 contract test 校验一致，避免场所笼统的 `stock` 类型把 QQQ、SPY、SOXL、MUU 等 ETF 错标 Equity。
 - Funding 年化必须使用每个合约实际 interval：`rate × (24 / intervalHours) × 365`。真实零费率保留为 0；缺失保持 null。
@@ -290,8 +326,8 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 
 ### 历史连续性
 
-- 当前首版通过受 `CRON_SECRET` 保护且 `no-store` 的 `/api/signal-snapshot-cron`，按 UTC 小时桶幂等写入 Vercel Runtime Cache；公开的 `/api/signal-snapshot` 是 CDN 缓存读接口，不能直接作为 Cron target。最多保留 168 个服务端快照、每个资产最多返回 48 点；浏览器 `localStorage` 不再是 KPI 或 Radar 历史的数据源。
-- 只有 Gate、Binance、Bitget、trade.xyz 四份 source snapshot 都为 Full 时才把当前桶写进历史。来源不完整时允许返回当前 Partial 监控结果，但不写基线，且没有越过绝对阈值的资产不能显示为 Normal。
+- 当前五源版本通过受 `CRON_SECRET` 保护且 `no-store` 的 `/api/signal-snapshot-cron`，按 UTC 小时桶幂等写入 Vercel Runtime Cache namespace `rwa-signal-radar-v2`；公开的 `/api/signal-snapshot` 是 CDN 缓存读接口，不能直接作为 Cron target。最多保留 168 个服务端快照、每个资产最多返回 48 点；浏览器 `localStorage` 不再是 KPI 或 Radar 历史的数据源。
+- 只有 Gate、Binance、Bitget、trade.xyz、OKX 五份 source snapshot 都为 Full 时才把当前桶写进历史。来源不完整时允许返回当前 Partial 监控结果，但不写基线，且没有越过绝对阈值的资产不能显示为 Normal。新增 OKX 改变 Volume/OI 分布时必须启用新的历史 namespace/version，不能把五源数据与旧四源基线直接比较。
 - Runtime Cache 跨部署保留但属于区域 best-effort cache，可能被逐出，不是永久数据库。因此 API 的 persistence 主状态最多为 Partial，并明确返回 continuity、region、storedSnapshots 和 baseline coverage。
 - 如需 30 日以上、跨 region 严格连续、可审计的历史，应迁移到 Neon/Postgres（run 表 + observation 表 + signal/fingerprint 表）；在迁移前不得把本缓存描述为永久数据库。
 

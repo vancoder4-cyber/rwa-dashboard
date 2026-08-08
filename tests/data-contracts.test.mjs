@@ -15,6 +15,7 @@ import {
   compactSignalSnapshot,
 } from '../api/_lib/signal-analysis.js';
 import {
+  BROAD_STOCK_INDEX_UNDERLYINGS,
   SECURITY_ETF_UNDERLYINGS,
   SECURITY_LISTING_REGISTRY,
   TOKENIZED_ETF_WRAPPERS,
@@ -175,13 +176,17 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
   assert.deepEqual(normalizeSignalIdentity('SOXLB', 'equity', { allowBinanceBstock:true }), { symbol:'SOXL', category:'etf' });
   assert.deepEqual(normalizeSignalIdentity('MUU', 'equity'), { symbol:'MUU', category:'etf' });
   assert.deepEqual(normalizeSignalIdentity('SPYX', 'equity'), { symbol:'SPY', category:'etf' });
+  assert.deepEqual(normalizeSignalIdentity('SP500', 'equity'), { symbol:'SPX', category:'index' });
+  assert.deepEqual(normalizeSignalIdentity('NDX100', 'equity'), { symbol:'NDX', category:'index' });
   assert.deepEqual(normalizeSignalIdentity('FOOB', 'equity', { allowBinanceBstock:true }), { symbol:'FOOB', category:'equity' });
+  assert.deepEqual(BROAD_STOCK_INDEX_UNDERLYINGS, ['SP500', 'NDX100', 'KR200']);
   assert.equal(categoryFromOfficialSignalType('ETF'), 'etf');
   assert.equal(categoryFromOfficialSignalType('stock_etf'), 'etf');
   assert.equal(categoryFromOfficialSignalType('crypto_etf_token'), null);
   assert.equal(categoryFromOfficialSignalType('ETFCOIN'), null);
 
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  assert.match(html, /const BROAD_STOCK_INDEX_SYMBOLS = new Set\(\['SP500','NDX100','KR200'\]\)/);
   const registrySource = sourceBetween(
     html,
     'const SECURITY_LISTING_REGISTRY = Object.freeze({',
@@ -247,6 +252,7 @@ test('signal response and history share one activity-ranked Top 100 universe', (
     fundingIntervalHours:8,
   }));
   const assets = aggregateSignalListings(listings).assets;
+  assert.equal(aggregateSignalListings(listings).totalAssetCount, 125);
   const compact = compactSignalSnapshot(assets, 2_000_000_000_000);
   assert.equal(SIGNAL_ASSET_LIMIT, 100);
   assert.equal(assets.length, SIGNAL_ASSET_LIMIT);
@@ -291,8 +297,8 @@ test('signal analysis keeps Full at 168 total samples and detects a zero-varianc
   assert.ok(analyzed.signal.reasonCodes.includes('VOLUME_ROBUST_Z'));
 });
 
-test('incomplete source coverage cannot become comparable anomaly history', () => {
-  const fullSources = Object.fromEntries(['gate', 'binance', 'bitget', 'tradexyz'].map(name => [name, { status:'full' }]));
+test('incomplete five-source coverage cannot become comparable anomaly history', () => {
+  const fullSources = Object.fromEntries(['gate', 'binance', 'bitget', 'tradexyz', 'okx'].map(name => [name, { status:'full' }]));
   assert.equal(isSignalSnapshotComparable(fullSources), true);
   assert.equal(isSignalSnapshotComparable({ ...fullSources, gate:{ status:'partial' } }), false);
   assert.equal(isSignalSnapshotComparable({ ...fullSources, gate:{ status:'unavailable' } }), false);

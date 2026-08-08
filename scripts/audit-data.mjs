@@ -21,6 +21,44 @@ for (const result of fundingResults) {
   if (result.observed >= result.expected && result.status !== 'full') throw new Error('Complete funding coverage was not labeled Full');
 }
 
+const okxPerp = await getJson('/api/okx-market?type=perp-snapshot', { timeoutMs:60_000 });
+const okxPerpInstruments = Array.isArray(okxPerp.instruments) ? okxPerp.instruments : [];
+if (okxPerpInstruments.length < 183) throw new Error(`OKX perp catalog regressed below 183 listings: ${okxPerpInstruments.length}`);
+const okxPerpIds = new Set(okxPerpInstruments.map(row => row.instId));
+if (okxPerpIds.size !== okxPerpInstruments.length) throw new Error('OKX perp catalog contains duplicate instrument IDs');
+for (const row of okxPerpInstruments) {
+  const validProduct = row.instType === 'SWAP' || (row.instType === 'FUTURES' && row.ruleType === 'xperp');
+  if (row.state !== 'live' || !['3','4','5','6'].includes(String(row.instCategory)) || !validProduct) {
+    throw new Error(`OKX non-RWA or non-perpetual product leaked into catalog: ${row.instId}`);
+  }
+}
+const okxXPerps = okxPerpInstruments.filter(row => row.instType === 'FUTURES' && row.ruleType === 'xperp');
+if (okxXPerps.length < 34 || !okxXPerps.some(row => String(row.instId).includes('_XPERP-'))) {
+  throw new Error(`OKX X-Perp coverage regressed: ${okxXPerps.length}`);
+}
+const okxAaplContracts = okxPerpInstruments.filter(row => row.canonicalSymbol === 'AAPL');
+if (okxAaplContracts.length < 2) throw new Error('OKX AAPL SWAP/X-Perp variants were collapsed');
+for (const field of ['tickers','marks','openInterest','funding']) {
+  const ids = new Set((okxPerp[field] || []).map(row => row.instId));
+  if (okxAaplContracts.some(row => !ids.has(row.instId))) throw new Error(`OKX AAPL ${field} coverage is incomplete`);
+}
+
+const okxSpot = await getJson('/api/okx-market?type=spot-snapshot', { timeoutMs:30_000 });
+const okxSpotInstruments = Array.isArray(okxSpot.instruments) ? okxSpot.instruments : [];
+if (okxSpotInstruments.length < 51) throw new Error(`OKX spot catalog regressed below 51 listings: ${okxSpotInstruments.length}`);
+const exactOkxGold = new Set(['PAXG-USD','PAXG-USDT','XAUT-USDT']);
+for (const row of okxSpotInstruments) {
+  const isUts = row.state === 'live' && row.instType === 'SPOT' && String(row.instCategory) === '3' && row.quoteCcy === 'USDT';
+  const isGold = exactOkxGold.has(row.instId);
+  if (!isUts && !isGold) throw new Error(`OKX crypto spot leaked into RWA catalog: ${row.instId}`);
+}
+if (okxSpotInstruments.some(row => ['XRP-USDT','XLM-USDT','CAT-USDT','LIT-USDT'].includes(row.instId))) {
+  throw new Error('OKX same-ticker crypto collision entered the spot catalog');
+}
+if (new Set(okxSpotInstruments.map(row => row.canonicalSymbol)).size < 50) {
+  throw new Error('OKX spot canonical coverage regressed below 50 assets');
+}
+
 const traditional = await getJson('/api/tradfi-activity?limit=100', { timeoutMs:55_000 });
 const traditionalRows = Array.isArray(traditional.rows) ? traditional.rows : [];
 if (!traditionalRows.length || traditionalRows.length > 100) throw new Error(`Traditional rows: expected 1-100, received ${traditionalRows.length}`);
@@ -179,6 +217,14 @@ console.log(JSON.stringify({
   baseUrl,
   references: referenceRows.map(row => ({ status: row.status, source: row.source, currency: row.nativeCurrency, session: row.session })),
   funding: fundingResults.map(row => ({ status: row.status, observed: row.observed, firstAt: row.firstAt, lastAt: row.lastAt })),
+  okx: {
+    perpListings: okxPerpInstruments.length,
+    xPerps: okxXPerps.length,
+    canonicalPerpAssets: new Set(okxPerpInstruments.map(row => row.canonicalSymbol)).size,
+    spotListings: okxSpotInstruments.length,
+    canonicalSpotAssets: new Set(okxSpotInstruments.map(row => row.canonicalSymbol)).size,
+    coverage: { perp:okxPerp.coverage, spot:okxSpot.coverage },
+  },
   traditional: {
     scope: traditional.scope,
     rankingSession,
