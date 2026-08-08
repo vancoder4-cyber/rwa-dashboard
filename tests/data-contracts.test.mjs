@@ -5,6 +5,8 @@ import { readFile } from 'node:fs/promises';
 import { historyCoverage, normalizeHistoryRows } from '../api/funding-history.js';
 import { assessChecks } from '../api/_lib/health.js';
 import { FX_REFERENCE_MAP, yahooSymbolFor } from '../api/_lib/reference-map.js';
+import { setNoStore, setPublicCache } from '../api/_lib/upstream.js';
+import gateBulkHandler from '../api/gate-bulk.js';
 import tradfiActivityHandler, {
   buildTraditionalCandidates,
   canAcceptNasdaqHistorical,
@@ -35,6 +37,33 @@ function responseRecorder() {
     status(code) { this.statusCode = code; return this; },
     json(payload) { this.payload = payload; return this; },
   };
+}
+
+function jsonResponse(payload, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get() { return null; } },
+    async json() { return payload; },
+  };
+}
+
+async function withFetchStub(stub, operation) {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = stub;
+  try {
+    return await operation();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+function sourceBetween(source, startMarker, endMarker) {
+  const start = source.indexOf(startMarker);
+  const end = source.indexOf(endMarker, start + startMarker.length);
+  assert.notEqual(start, -1, `missing source marker: ${startMarker}`);
+  assert.notEqual(end, -1, `missing source marker: ${endMarker}`);
+  return source.slice(start, end);
 }
 
 test('reference map resolves non-US and commodity underlyings', () => {
@@ -397,9 +426,15 @@ test('traditional ranking has no arbitrary share-price floor', async () => {
   assert.match(source, /filter\(row => Number\(row\?\.traditionalTotalValue\) > 0\)/);
   assert.match(source, /!hasCompleteTraditionalAlignment\(alignment\)/);
   assert.doesNotMatch(source, /fetchOccBundle\(\)\.catch/);
+  assert.match(source, /export const config = \{ maxDuration:300 \}/);
 });
 
 test('traditional endpoints reject cache-busting query parameters before upstream work', async () => {
+  const omittedLimitResponse = responseRecorder();
+  await tradfiActivityHandler({ method:'GET', query:{} }, omittedLimitResponse);
+  assert.equal(omittedLimitResponse.statusCode, 400);
+  assert.equal(omittedLimitResponse.payload.error, 'Invalid limit');
+
   const activityResponse = responseRecorder();
   await tradfiActivityHandler({ method:'GET', query:{ limit:'30', refresh:'123' } }, activityResponse);
   assert.equal(activityResponse.statusCode, 400);
@@ -409,6 +444,11 @@ test('traditional endpoints reject cache-busting query parameters before upstrea
   await tradfiActivityHandler({ method:'GET', query:{ limit:'101' } }, excessiveActivityResponse);
   assert.equal(excessiveActivityResponse.statusCode, 400);
   assert.equal(excessiveActivityResponse.payload.error, 'Invalid limit');
+
+  const variantActivityResponse = responseRecorder();
+  await tradfiActivityHandler({ method:'GET', query:{ limit:'99' } }, variantActivityResponse);
+  assert.equal(variantActivityResponse.statusCode, 400);
+  assert.equal(variantActivityResponse.payload.error, 'Invalid limit');
 
   const pricesResponse = responseRecorder();
   await tradfiPricesHandler({ method:'GET', query:{ symbols:'AAPL', refresh:'123' } }, pricesResponse);
@@ -447,4 +487,356 @@ test('traditional spot overlay resolves venue-verified wrappers before joining',
   assert.doesNotMatch(html, /row\.perpVolume \+= Number\(asset\.volume\) \|\| 0/);
   assert.doesNotMatch(html, /row\.spotVolume \+= Number\(asset\.vol\) \|\| 0/);
   assert.match(html, /U\.S\.-listed securities in Nasdaq Trader directory/);
+});
+
+test('shared cache helpers separate browser revalidation from Vercel CDN caching', () => {
+  const cached = responseRecorder();
+  setPublicCache(cached, 900, 3600);
+  assert.deepEqual(cached.headers, {
+    'Cache-Control':'public, max-age=0, must-revalidate',
+    'Vercel-CDN-Cache-Control':'public, max-age=900, stale-while-revalidate=3600',
+  });
+
+  const uncached = responseRecorder();
+  setNoStore(uncached);
+  assert.deepEqual(uncached.headers, {
+    'Cache-Control':'private, no-store, max-age=0',
+    'Vercel-CDN-Cache-Control':'no-store',
+  });
+
+  for (const [maxAge, stale] of [
+    [0, 60],
+    [-1, 60],
+    [1.5, 60],
+    [31_536_001, 60],
+    [60, -1],
+    [60, 1.5],
+    [60, 31_536_001],
+  ]) {
+    assert.throws(() => setPublicCache(responseRecorder(), maxAge, stale), /safe integer/);
+  }
+});
+
+test('Gate bulk rejects unstable, oversized, and cache-busting queries before fetching', async () => {
+  const tooManySymbols = Array.from(
+    { length:81 },
+    (_, index) => `S${String(index).padStart(3, '0')}_USDT`,
+  ).join(',');
+  const invalidQueries = [
+    { type:'unknown' },
+    { type:'growth', refresh:'1' },
+    { type:'perp-snapshot', refresh:'1' },
+    { type:'spot-depth', symbols:tooManySymbols, limit:'50' },
+    { type:'spot-depth', symbols:'aapl_USDT', limit:'50' },
+    { type:'spot-depth', symbols:'AAPL_USDT,AAPL_USDT', limit:'50' },
+    { type:'spot-depth', symbols:'TSLA_USDT,AAPL_USDT', limit:'50' },
+    { type:'spot-depth', symbols:'AAPL_USDT', limit:'49' },
+  ];
+  let fetchCount = 0;
+  await withFetchStub(async () => {
+    fetchCount += 1;
+    throw new Error('invalid request reached upstream');
+  }, async () => {
+    for (const query of invalidQueries) {
+      const response = responseRecorder();
+      await gateBulkHandler({ method:'GET', query }, response);
+      assert.equal(response.statusCode, 400, JSON.stringify(query));
+      assert.match(response.payload.error, /Invalid|Unexpected|symbols/);
+      assert.equal(response.headers['Cache-Control'], 'private, no-store, max-age=0');
+      assert.equal(response.headers['Vercel-CDN-Cache-Control'], 'no-store');
+    }
+  });
+  assert.equal(fetchCount, 0);
+});
+
+test('Gate fixed market snapshots replace the broad public proxy', async () => {
+  const calls = [];
+  await withFetchStub(async url => {
+    const value = String(url);
+    calls.push(value);
+    if (value.endsWith('/futures/usdt/contracts')) {
+      return jsonResponse([
+        { name:'AAPL_USDT', status:'trading', contract_type:'stocks' },
+        { name:'BTC_USDT', status:'trading', contract_type:'crypto' },
+      ]);
+    }
+    if (value.endsWith('/futures/usdt/tickers')) {
+      return jsonResponse([
+        { contract:'AAPL_USDT', mark_price:'100' },
+        { contract:'BTC_USDT', mark_price:'100000' },
+      ]);
+    }
+    if (value.endsWith('/spot/currency_pairs')) {
+      return jsonResponse([{ id:'AAPLX_USDT', base:'AAPLX', quote:'USDT', trade_status:'tradable' }]);
+    }
+    if (value.endsWith('/spot/tickers')) {
+      return jsonResponse([{ currency_pair:'AAPLX_USDT', last:'100' }]);
+    }
+    throw new Error(`unexpected upstream ${value}`);
+  }, async () => {
+    const perpResponse = responseRecorder();
+    await gateBulkHandler({ method:'GET', query:{ type:'perp-snapshot' } }, perpResponse);
+    assert.equal(perpResponse.statusCode, 200);
+    assert.equal(perpResponse.payload.contracts[0].name, 'AAPL_USDT');
+    assert.equal(perpResponse.payload.tickers[0].contract, 'AAPL_USDT');
+    assert.equal(perpResponse.payload.contracts.length, 1);
+    assert.equal(perpResponse.payload.tickers.length, 1);
+    assert.equal(
+      perpResponse.headers['Vercel-CDN-Cache-Control'],
+      'public, max-age=30, stale-while-revalidate=120',
+    );
+
+    const spotResponse = responseRecorder();
+    await gateBulkHandler({ method:'GET', query:{ type:'spot-snapshot' } }, spotResponse);
+    assert.equal(spotResponse.statusCode, 200);
+    assert.equal(spotResponse.payload.pairs[0].id, 'AAPLX_USDT');
+    assert.equal(spotResponse.payload.tickers[0].currency_pair, 'AAPLX_USDT');
+  });
+  assert.equal(calls.length, 4);
+
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  assert.match(html, /fetch\('\/api\/gate-bulk\?type=perp-snapshot'\)/);
+  assert.match(html, /fetch\('\/api\/gate-bulk\?type=spot-snapshot'\)/);
+  const vercelConfig = JSON.parse(await readFile(new URL('../vercel.json', import.meta.url), 'utf8'));
+  assert.doesNotMatch(JSON.stringify(vercelConfig), /api\/gate(?:-spot)?\/:path/);
+});
+
+test('Gate spot snapshot fails closed when the authoritative pair catalog is unavailable', async () => {
+  await withFetchStub(async url => {
+    if (String(url).endsWith('/spot/currency_pairs')) throw new Error('catalog timeout');
+    return jsonResponse([{ currency_pair:'AAPLX_USDT', last:'100' }]);
+  }, async () => {
+    const response = responseRecorder();
+    await gateBulkHandler({ method:'GET', query:{ type:'spot-snapshot' } }, response);
+    assert.equal(response.statusCode, 502);
+    assert.deepEqual(response.payload, { error:'Gate market snapshot unavailable' });
+    assert.equal(response.headers['Cache-Control'], 'private, no-store, max-age=0');
+    assert.equal(response.headers['Vercel-CDN-Cache-Control'], 'no-store');
+  });
+
+  await withFetchStub(async url => {
+    if (String(url).endsWith('/spot/currency_pairs')) {
+      return jsonResponse([{ id:'BTC_ETH', base:'BTC', quote:'ETH', trade_status:'tradable' }]);
+    }
+    return jsonResponse([{ currency_pair:'BTC_ETH', last:'1' }]);
+  }, async () => {
+    const response = responseRecorder();
+    await gateBulkHandler({ method:'GET', query:{ type:'spot-snapshot' } }, response);
+    assert.equal(response.statusCode, 502);
+    assert.equal(response.headers['Vercel-CDN-Cache-Control'], 'no-store');
+  });
+});
+
+test('Gate spot depth serves a sorted multi-symbol request through one cached bulk response', async () => {
+  const calls = [];
+  await withFetchStub(async url => {
+    calls.push(String(url));
+    const pair = new URL(url).searchParams.get('currency_pair');
+    return jsonResponse({
+      id:pair,
+      bids:[['100', '2']],
+      asks:[['101', '3']],
+    });
+  }, async () => {
+    const response = responseRecorder();
+    await gateBulkHandler({
+      method:'GET',
+      query:{ type:'spot-depth', symbols:'AAPL_USDT,TSLA_USDT', limit:'50' },
+    }, response);
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(Object.keys(response.payload), ['AAPL_USDT', 'TSLA_USDT']);
+    assert.equal(response.payload.AAPL_USDT.id, 'AAPL_USDT');
+    assert.equal(response.payload.TSLA_USDT.id, 'TSLA_USDT');
+    assert.equal(response.headers['Cache-Control'], 'public, max-age=0, must-revalidate');
+    assert.equal(
+      response.headers['Vercel-CDN-Cache-Control'],
+      'public, max-age=30, stale-while-revalidate=120',
+    );
+  });
+  assert.deepEqual(
+    calls.map(url => new URL(url).searchParams.get('currency_pair')),
+    ['AAPL_USDT', 'TSLA_USDT'],
+  );
+});
+
+test('Gate growth discovers only official RWA contract types and calculates two complete 24h halves', async () => {
+  const calls = [];
+  await withFetchStub(async url => {
+    const value = String(url);
+    calls.push(value);
+    if (value.endsWith('/futures/usdt/contracts')) {
+      return jsonResponse([
+        { name:'BTC_USDT', status:'trading', contract_type:'crypto' },
+        { name:'HALTED_USDT', status:'delisting', contract_type:'stocks' },
+        { name:'XAU_USDT', status:'trading', contract_type:'metals' },
+        { name:'AAPL_USDT', status:'trading', contract_type:'stocks' },
+      ]);
+    }
+    const parsed = new URL(value);
+    const contract = parsed.searchParams.get('contract');
+    const from = Number(parsed.searchParams.get('from'));
+    const to = Number(parsed.searchParams.get('to'));
+    const midpoint = to - 24 * 60 * 60;
+    const currentVolume = contract === 'AAPL_USDT' ? 3 : 1;
+    const candles = [
+      ...Array.from({ length:10 }, (_, index) => ({ t:from + index * 3600, v:2, c:5 })),
+      ...Array.from({ length:10 }, (_, index) => ({ t:midpoint + index * 3600, v:currentVolume, c:5 })),
+    ];
+    return jsonResponse(candles);
+  }, async () => {
+    const response = responseRecorder();
+    await gateBulkHandler({ method:'GET', query:{ type:'growth' } }, response);
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(Object.keys(response.payload), ['AAPL_USDT', 'XAU_USDT']);
+    assert.deepEqual(response.payload.AAPL_USDT, { prevVol:100, currVol:150, growth:50 });
+    assert.deepEqual(response.payload.XAU_USDT, { prevVol:100, currVol:50, growth:-50 });
+    assert.equal(
+      response.headers['Vercel-CDN-Cache-Control'],
+      'public, max-age=900, stale-while-revalidate=3600',
+    );
+  });
+  assert.equal(calls.length, 3);
+  assert.ok(calls.some(url => url.includes('contract=AAPL_USDT')));
+  assert.ok(calls.some(url => url.includes('contract=XAU_USDT')));
+  assert.ok(calls.every(url => !url.includes('BTC_USDT') && !url.includes('HALTED_USDT')));
+});
+
+test('Gate growth fails closed and is never CDN cached when every RWA candle fails', async () => {
+  await withFetchStub(async url => {
+    if (String(url).endsWith('/futures/usdt/contracts')) {
+      return jsonResponse([{ name:'AAPL_USDT', status:'trading', contract_type:'stocks' }]);
+    }
+    return jsonResponse([]);
+  }, async () => {
+    const response = responseRecorder();
+    await gateBulkHandler({ method:'GET', query:{ type:'growth' } }, response);
+    assert.equal(response.statusCode, 502);
+    assert.deepEqual(response.payload, { error:'Gate growth data unavailable' });
+    assert.equal(response.headers['Cache-Control'], 'private, no-store, max-age=0');
+    assert.equal(response.headers['Vercel-CDN-Cache-Control'], 'no-store');
+  });
+});
+
+test('browser resource contracts keep Gate fan-out stable and pause polling while hidden', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  assert.match(html, /const GROWTH_FETCH_INTERVAL = 15 \* 60 \* 1000/);
+
+  const growthSource = sourceBetween(
+    html,
+    'async function fetchVolumeGrowthGate()',
+    '// ═══════════════════════════════════════════════\n// ASSET DETAIL MODAL',
+  );
+  assert.equal((growthSource.match(/fetch\(/g) || []).length, 1);
+  assert.match(growthSource, /fetch\('\/api\/gate-bulk\?type=growth'\)/);
+  assert.doesNotMatch(growthSource, /candlestick|symbols=|from=|to=/i);
+
+  const gateSpotSource = sourceBetween(
+    html,
+    'async function fetchSpotRwaGate()',
+    '// ── Kraken Spot Fetch ──',
+  );
+  assert.equal((gateSpotSource.match(/type=spot-depth/g) || []).length, 1);
+  assert.match(gateSpotSource, /if \(!_isDev && depthAssets\.length\)/);
+  assert.match(gateSpotSource, /depthAssets\.map\(asset => asset\.pair\)\.sort\(\)\.join\(','\)/);
+  const productionDepthBranch = sourceBetween(
+    gateSpotSource,
+    'if (!_isDev && depthAssets.length)',
+    '} else {',
+  );
+  assert.match(productionDepthBranch, /fetch\(`\/api\/gate-bulk\?type=spot-depth/);
+  assert.doesNotMatch(productionDepthBranch, /GATE_SPOT_BASE.*order_book/);
+
+  const gateTopThirtySource = sourceBetween(
+    html,
+    '// ── Gate.io: bulk klines via serverless function',
+    '// ── trade.xyz: aggregate 1h HIP-3 candles server-side and return totals only ──',
+  );
+  assert.match(gateTopThirtySource, /\.map\(a => a\.symbol \|\| \(a\.coin \+ '_USDT'\)\)\.sort\(\)/);
+  assert.match(gateTopThirtySource, /const gateToSec = Math\.floor\(nowSec \/ 300\) \* 300/);
+
+  const visibilitySource = sourceBetween(
+    html,
+    "document.addEventListener('visibilitychange'",
+    '(async function init()',
+  );
+  assert.match(visibilitySource, /if \(!pageIsVisible\(\)\) \{\s*stopPolling\(\);\s*return;/);
+  assert.match(visibilitySource, /startPolling\(\);\s*resumeVisibleRefreshes\(\)/);
+  const pollingSource = sourceBetween(html, 'function startPolling()', "document.addEventListener('visibilitychange'");
+  assert.match(pollingSource, /stopPolling\(\);\s*if \(!pageIsVisible\(\)\) return;/);
+  assert.match(pollingSource, /ensureTraditionalActivity\(false\)/);
+
+  const growthCoordinator = sourceBetween(
+    html,
+    'async function fetchVolumeGrowthAll()',
+    '// Rate-limited batch executor',
+  );
+  assert.match(growthCoordinator, /const previous = volumeGrowthData\[key\] \|\| \{\}/);
+  assert.match(growthCoordinator, /else if \(previous\[coin\]\) merged\[coin\] = previous\[coin\]/);
+  assert.match(growthCoordinator, /volumeGrowthFetchState\[key\]\.lastSuccessAt/);
+
+  const visibleRenderer = sourceBetween(
+    html,
+    'function renderVisibleDataPage()',
+    '// ═══════════════════════════════════════════════\n// VIEW SWITCH',
+  );
+  assert.match(visibleRenderer, /if \(!pageIsVisible\(\)\) return/);
+  assert.match(visibleRenderer, /if \(topPageIsActive\('perps'\)\)/);
+});
+
+test('Traditional activity renders without I/O and loads only while its page is active', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const renderSource = sourceBetween(
+    html,
+    'function renderTraditionalActivity()',
+    'function setVenueFilter(venue, cat, el)',
+  );
+  assert.doesNotMatch(renderSource, /\bfetch\s*\(/);
+  assert.doesNotMatch(renderSource, /loadTraditional(?:Activity|Prices)\s*\(/);
+  assert.doesNotMatch(renderSource, /ensureTraditionalActivity\s*\(/);
+
+  const switchSource = sourceBetween(
+    html,
+    'function switchTopPage(page)',
+    '// ═══════════════════════════════════════════════\n// SPOT DATA & LOGIC',
+  );
+  assert.match(
+    switchSource,
+    /if \(page === 'traditional'\) \{\s*renderTraditionalActivity\(\);\s*ensureTraditionalActivity\(false\)/,
+  );
+
+  const ensureSource = sourceBetween(
+    html,
+    'async function ensureTraditionalActivity(force = false)',
+    'async function refreshTraditionalActivity()',
+  );
+  assert.match(ensureSource, /if \(!pageIsVisible\(\) \|\| !active\) return/);
+  assert.match(ensureSource, /await loadTraditionalActivity\(force\)/);
+  assert.match(ensureSource, /if \(!pageIsVisible\(\) \|\| !stillActive\) return/);
+  assert.match(ensureSource, /await loadTraditionalPrices\(rows, force\)/);
+
+  const activityLoader = sourceBetween(
+    html,
+    'async function loadTraditionalActivity(force = false)',
+    'async function loadTraditionalPrices(rows, force = false)',
+  );
+  assert.match(activityLoader, /Date\.now\(\) < tradfiActivityRetryAt/);
+  assert.match(activityLoader, /tradfiActivityRetryAt = Date\.now\(\) \+ retryDelay/);
+
+  const priceLoader = sourceBetween(
+    html,
+    'async function loadTraditionalPrices(rows, force = false)',
+    'async function ensureTraditionalActivity(force = false)',
+  );
+  assert.match(priceLoader, /const inFlightKey = tradfiPricePromiseKey/);
+  assert.match(priceLoader, /if \(!force && inFlightKey === symbolsKey\) return/);
+
+  const spotRefreshSource = sourceBetween(
+    html,
+    'async function refreshSpotArbData(force = false)',
+    'const SPOT_VENUE_NAMES',
+  );
+  assert.doesNotMatch(spotRefreshSource, /renderTraditionalActivity\(\)/);
+  assert.match(spotRefreshSource, /renderVisibleDataPage\(\)/);
+  assert.match(spotRefreshSource, /if \(pageIsVisible\(\)\) \{\s*fetchReferencePrices/);
 });

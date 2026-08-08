@@ -12,6 +12,7 @@ import {
   fetchJsonWithPolicy,
   fetchWithPolicy,
   mapWithConcurrency,
+  setNoStore,
   setPublicCache,
 } from './_lib/upstream.js';
 
@@ -231,14 +232,14 @@ function occUrl(reportType, reportDate) {
   return `${OCC_VOLUME}?${params}`;
 }
 
-async function fetchText(url, timeoutMs = 18000) {
-  const response = await fetchWithPolicy(url, {}, { timeoutMs, retries:1 });
+async function fetchText(url, timeoutMs = 18000, retries = 1) {
+  const response = await fetchWithPolicy(url, {}, { timeoutMs, retries });
   if (!response.ok) throw new Error(`Upstream HTTP ${response.status}`);
   return response.text();
 }
 
-async function fetchJson(url, timeoutMs = 18000) {
-  return fetchJsonWithPolicy(url, { headers:SOURCE_HEADERS }, { timeoutMs, retries:1 });
+async function fetchJson(url, timeoutMs = 18000, retries = 1) {
+  return fetchJsonWithPolicy(url, { headers:SOURCE_HEADERS }, { timeoutMs, retries });
 }
 
 export function parseNasdaqDirectory(text, listingVenue) {
@@ -299,7 +300,7 @@ async function findLatestOccDay() {
   const reportDates = Array.from({ length:7 }, (_, offset) => yyyymmdd(addUtcDays(candidate, -offset)));
   const report = await findFirstNonEmptyOccReport(
     reportDates,
-    reportDate => fetchText(occUrl('D', reportDate)),
+    reportDate => fetchText(occUrl('D', reportDate), 6000, 0),
   );
   if (report) return report;
   throw new Error('No completed OCC trading-day report found');
@@ -310,7 +311,7 @@ async function findPreviousOccDay(reportDate) {
   const reportDates = Array.from({ length:7 }, (_, index) => yyyymmdd(addUtcDays(current, -(index + 1))));
   const report = await findFirstNonEmptyOccReport(
     reportDates,
-    previousReportDate => fetchText(occUrl('D', previousReportDate)),
+    previousReportDate => fetchText(occUrl('D', previousReportDate), 6000, 0),
   );
   if (report) return report;
   throw new Error(`No OCC trading-day report found before ${reportDate}`);
@@ -324,7 +325,7 @@ async function fetchOccBundle() {
     findPreviousOccDay(latest.reportDate),
     Promise.all(comparisonDates.map(async reportDate => {
     try {
-      const report = parseOccReport(await fetchText(occUrl('D', reportDate)));
+      const report = parseOccReport(await fetchText(occUrl('D', reportDate), 6000, 0));
       return { reportDate, ...report, ok:Object.keys(report.standardTotals).length > 0 };
     } catch (error) {
       console.error('[tradfi-activity] OCC comparison report failed', reportDate, error.message);
@@ -440,7 +441,8 @@ async function fetchNasdaqHistorical(symbol, assetClass, sessionDate, comparison
   });
   const payload = await fetchJson(
     `${NASDAQ_SUMMARY}/${encodeURIComponent(symbol)}/historical?${params}`,
-    12000,
+    6000,
+    0,
   );
   const historicalRange = classifyNasdaqHistoricalRange(payload, sessionDate, comparisonSessionDate);
   const { current } = historicalRange;
@@ -616,17 +618,21 @@ export function rankTraditionalRows(rows, limit = MAX_LIMIT, comparisonAvailable
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');
+    setNoStore(res);
     return res.status(405).json({ error:'Method not allowed' });
   }
   const queryKeys = Object.keys(req.query || {});
   if (queryKeys.some(key => key !== 'limit')) {
+    setNoStore(res);
     return res.status(400).json({ error:'Unsupported query parameter' });
   }
-  if (req.query?.limit !== undefined && !/^(?:[1-9]|[1-9]\d|100)$/.test(String(req.query.limit))) {
+  // This is an expensive official-source snapshot. Keep one canonical cache
+  // key instead of exposing 100 equivalent ranking variants.
+  if (String(req.query?.limit || '') !== String(DEFAULT_LIMIT)) {
+    setNoStore(res);
     return res.status(400).json({ error:'Invalid limit' });
   }
-  const requestedLimit = Number.parseInt(req.query.limit, 10);
-  const limit = Math.min(Math.max(Number.isFinite(requestedLimit) ? requestedLimit : DEFAULT_LIMIT, 1), MAX_LIMIT);
+  const limit = DEFAULT_LIMIT;
   try {
     const [directory, movers, occBundle] = await Promise.all([
       fetchTraditionalDirectory(),
@@ -691,7 +697,7 @@ export default async function handler(req, res) {
     });
     const rows = rankTraditionalRows(unrankedRows, limit, comparisonAvailable);
 
-    setPublicCache(res, 900, 3600);
+    setPublicCache(res, 3600, 86400);
     return res.status(200).json({
       generatedAt:new Date().toISOString(),
       scope:'Traditional official candidate-set ranking completed before any crypto coverage is joined',
@@ -741,8 +747,12 @@ export default async function handler(req, res) {
     });
   } catch (error) {
     console.error('[tradfi-activity] request failed', error);
+    setNoStore(res);
     return res.status(502).json({ error:'Traditional activity unavailable', detail:error.message });
   }
 }
 
-export const config = { maxDuration:60 };
+// The endpoint builds one official Top 100 snapshot. Request-level budgets
+// above cap its worst path below this platform limit and return a controlled
+// 502 rather than a 60-second platform timeout.
+export const config = { maxDuration:300 };

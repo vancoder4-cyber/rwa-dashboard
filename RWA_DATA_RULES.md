@@ -227,6 +227,18 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 
 架构约定：超时、重试、并发与缓存策略集中在 `api/_lib/upstream.js`；传统 ticker 与 FX 映射集中在 `api/_lib/reference-map.js`；新服务端数据源优先复用这两个模块，并为 normalization 增加 Node contract test。
 
+### Gate 批量请求与缓存预算
+
+批量接口只是传输/缓存层，不拥有资产准入权：
+
+- `type=perp-snapshot` 与 `type=spot-snapshot` 分别合并并裁剪 Gate 合约/行情和现货 pair/行情；它们只允许固定官方 host/path 和固定 `type` 查询。Spot 官方 pair catalog 是身份权威，缺失时即 fail closed，禁止从 ticker 伪造 catalog。生产环境不再公开任意路径的 `/api/gate/:path*` 或 `/api/gate-spot/:path*` rewrite。
+- `type=spot-depth` 只能接收已经通过 Gate 现货身份门控的 pair；返回深度不能反向证明一个 ticker 是 RWA。单次最多 80 个 pair，列表必须大写、去重并按字典序排列；CDN 新鲜期 30 秒，stale-while-revalidate 120 秒。
+- `type=growth` 不接受客户端 symbol 列表。服务端在每个新缓存窗口重新读取 Gate 官方 futures catalog，仅保留 `status=trading` 且 `contract_type` 属于 stocks/metals/commodities/indices/forex 的产品。过滤后为空或超过 500 必须 fail closed；CDN 新鲜期 15 分钟，stale-while-revalidate 60 分钟。
+- 生产前端不得再按 Gate symbol 调用 Vercel rewrite。同一数据窗口必须共享稳定 cache key；symbol 列表排序，kline `from/to` 对齐固定时间桶。
+- 单个上游失败保留 `null` 并降级为 Partial；客户端按 venue、按 symbol 合并成功值，失败 symbol 继续显示 last-good，不能把缺失填成 `0`，也不能由其他 venue 的成功延后本 venue 的重试。全部上游失败必须返回错误且 `no-store`，禁止 CDN 缓存空结果。
+
+页面可见性只影响请求调度，不影响数据语义：页面 hidden 时暂停轮询，恢复可见后只更新已过期数据。Traditional 排名只在用户进入该页时按需加载，客户端保留 1 小时，服务端 CDN 新鲜期 1 小时、stale-while-revalidate 24 小时；Traditional quote 仅在该页激活时请求，美股常规时段客户端保留 60 秒，休市时保留 15 分钟。
+
 ## 15. 主要核验来源
 
 - Hyperliquid/trade.xyz market identity：`https://api.hyperliquid.xyz/info` 的 `perpCategories` 与 `metaAndAssetCtxs`。

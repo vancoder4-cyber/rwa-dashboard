@@ -2531,10 +2531,19 @@ let allData = [];
 // Volume growth: venue → { coin: { prevVol, currVol, growth% } }
 let volumeGrowthData = { tradexyz: {}, bitget: {}, gate: {}, binance: {} };
 const VENUES_WITH_GROWTH = new Set(['tradexyz', 'bitget', 'gate']); // Only these venues have volume growth fetchers
-let lastGrowthFetch = 0;
-const GROWTH_FETCH_INTERVAL = 300000; // re-fetch every 5 min
+let volumeGrowthInFlight = null;
+const GROWTH_FETCH_INTERVAL = 15 * 60 * 1000; // 24h growth changes slowly; share one 15-minute snapshot
+const GROWTH_RETRY_INTERVAL = 5 * 60 * 1000; // upstream outages must not create a 60-second retry storm
+const volumeGrowthFetchState = {
+  tradexyz:{ lastSuccessAt:0, lastAttemptAt:0 },
+  bitget:{ lastSuccessAt:0, lastAttemptAt:0 },
+  gate:{ lastSuccessAt:0, lastAttemptAt:0 },
+};
 const REFRESH_INTERVAL = 60000; // auto-refresh every 60s; full catalog refresh is request-heavy
 const SPOT_REFRESH_INTERVAL = 300000; // spot catalogs and references refresh every 5 min
+const TRADFI_ACTIVITY_TTL = 60 * 60 * 1000; // completed-session ranking changes at most daily
+const TRADFI_PRICE_OPEN_TTL = 60 * 1000;
+const TRADFI_PRICE_CLOSED_TTL = 15 * 60 * 1000;
 let currentView = 'allvenues';
 let currentSubTab = 'aggregator';
 let assetCatFilter = 'all';
@@ -2542,7 +2551,9 @@ let assetSearch = '';
 let expandedAsset = null;
 let refreshTimer = null;
 let spotRefreshTimer = null;
-let refreshInFlight = false;
+let refreshInFlight = null;
+let lastPerpRefreshAt = 0;
+let lastSpotRefreshAt = 0;
 const lastVenueData = {};
 const venueHealth = {};
 const lastSpotVenueData = {};
@@ -2551,19 +2562,22 @@ let globalSearchTerm = '';
 let alertsData = [];
 let tradfiActivityCache = null;
 let tradfiActivityLoading = false;
+let tradfiActivityPromise = null;
 let tradfiActivityError = '';
+let tradfiActivityFailures = 0;
+let tradfiActivityRetryAt = 0;
 let tradfiActivityFilter = 'all';
 const TRADFI_INITIAL_VISIBLE = 50;
 const TRADFI_MAX_VISIBLE = 100;
 let tradfiVisibleLimit = TRADFI_INITIAL_VISIBLE;
 let tradfiPriceCache = null;
 let tradfiPriceLoading = false;
+let tradfiPricePromise = null;
+let tradfiPricePromiseKey = '';
 let tradfiPriceError = '';
 let tradfiPriceFailures = 0;
 let tradfiPriceRetryAt = 0;
 let tradfiPriceRefreshTimer = null;
-const TRADFI_ACTIVITY_TTL = 15 * 60 * 1000;
-const TRADFI_PRICE_TTL = 60 * 1000;
 
 // Per-venue table state
 let venueTableCatFilter = { tradexyz: 'all', bitget: 'all', gate: 'all', binance: 'all' };
@@ -3032,13 +3046,24 @@ async function fetchGate() {
 
   // Contracts are the authoritative listed catalog. Tickers are optional
   // enrichment: a transient ticker failure must not empty the whole venue.
-  const [tickersRes, contractsRes] = await Promise.all([
-    fetch(`${GATE_API_BASE}/tickers`).catch(() => null),
-    fetch(`${GATE_API_BASE}/contracts`)
-  ]);
-  if (!contractsRes.ok) throw new Error(`Gate contracts HTTP ${contractsRes.status}`);
-  const contracts = await contractsRes.json();
-  const tickers = tickersRes?.ok ? await tickersRes.json() : [];
+  let contracts = [];
+  let tickers = [];
+  if (_isDev) {
+    const [tickersRes, contractsRes] = await Promise.all([
+      fetch(`${GATE_API_BASE}/tickers`).catch(() => null),
+      fetch(`${GATE_API_BASE}/contracts`)
+    ]);
+    if (!contractsRes.ok) throw new Error(`Gate contracts HTTP ${contractsRes.status}`);
+    contracts = await contractsRes.json();
+    tickers = tickersRes?.ok ? await tickersRes.json() : [];
+  } else {
+    const snapshotRes = await fetch('/api/gate-bulk?type=perp-snapshot');
+    if (!snapshotRes.ok) throw new Error(`Gate snapshot HTTP ${snapshotRes.status}`);
+    const snapshot = await snapshotRes.json();
+    contracts = Array.isArray(snapshot.contracts) ? snapshot.contracts : [];
+    tickers = Array.isArray(snapshot.tickers) ? snapshot.tickers : [];
+    if (!contracts.length) throw new Error('Gate snapshot has no contracts');
+  }
 
   // Contract metadata is the authoritative allowlist and also carries contract
   // multipliers/funding intervals needed for notional calculations.
@@ -3118,7 +3143,7 @@ async function fetchGate() {
   if (assets.length > 0) {
     try {
       const depthAssets = [...assets].sort((a, b) => b.volume - a.volume).slice(0, 80);
-      const syms = depthAssets.map(a => a.symbol).join(',');
+      const syms = depthAssets.map(a => a.symbol).sort().join(',');
       const bulkUrl = _isDev
         ? null  // fallback to individual calls in dev
         : `/api/gate-bulk?type=depth&symbols=${encodeURIComponent(syms)}&limit=50`;
@@ -3886,7 +3911,13 @@ async function loadSparkline(venue, asset) {
     cell.innerHTML = '<span style="color:var(--text-muted);font-size:11px">loading...</span>';
     try {
       let raw;
-      if (venue === 'tradexyz') {
+      if (!_isDev && ['tradexyz','gate','binance','bitget'].includes(venue)) {
+        const historySymbol = asset.symbol || (venue === 'gate' ? `${asset.coin}_USDT` : venue === 'tradexyz' ? asset.coin : `${asset.coin}USDT`);
+        const response = await fetch(`/api/funding-history?venue=${venue}&hours=${hours}&symbols=${encodeURIComponent(historySymbol)}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        raw = payload?.results?.[historySymbol]?.rows || [];
+      } else if (venue === 'tradexyz') {
         raw = await fetchFundingHistoryXyz(asset.symbol || asset.coin, hours);
       } else if (venue === 'gate') {
         const contract = asset.symbol || (asset.coin + '_USDT');
@@ -4011,20 +4042,49 @@ function renderSparkSVG(rates, predictedRate) {
 // ═══════════════════════════════════════════════
 
 async function fetchVolumeGrowthAll() {
+  if (!pageIsVisible()) return;
+  if (volumeGrowthInFlight) return volumeGrowthInFlight;
   const now = Date.now();
-  if (now - lastGrowthFetch < GROWTH_FETCH_INTERVAL && Object.keys(volumeGrowthData.tradexyz).length > 0) return;
-  lastGrowthFetch = now;
-  logLoad('Fetching 24h volume growth data...');
-
-  const [xyzG, bgG, gateG] = await Promise.all([
-    fetchVolumeGrowthXyz().catch(e => { console.error('xyz growth error:', e); return {}; }),
-    fetchVolumeGrowthBitget().catch(e => { console.error('bg growth error:', e); return {}; }),
-    fetchVolumeGrowthGate().catch(e => { console.error('gate growth error:', e); return {}; })
-  ]);
-  volumeGrowthData.tradexyz = xyzG;
-  volumeGrowthData.bitget = bgG;
-  volumeGrowthData.gate = gateG;
-  logLoad(`Volume growth: xyz=${Object.keys(xyzG).length}, bitget=${Object.keys(bgG).length}, gate=${Object.keys(gateG).length} assets`);
+  const fetchers = {
+    tradexyz:fetchVolumeGrowthXyz,
+    bitget:fetchVolumeGrowthBitget,
+    gate:fetchVolumeGrowthGate,
+  };
+  const dueKeys = Object.keys(fetchers).filter(key => {
+    const state = volumeGrowthFetchState[key];
+    const hasActiveAssets = allData.some(asset => asset.venue === key);
+    return hasActiveAssets &&
+      (!state.lastSuccessAt || now - state.lastSuccessAt >= GROWTH_FETCH_INTERVAL) &&
+      (!state.lastAttemptAt || now - state.lastAttemptAt >= GROWTH_RETRY_INTERVAL);
+  });
+  if (!dueKeys.length) return;
+  dueKeys.forEach(key => { volumeGrowthFetchState[key].lastAttemptAt = now; });
+  volumeGrowthInFlight = (async () => {
+    logLoad('Fetching 24h volume growth data...');
+    const settled = await Promise.allSettled(dueKeys.map(key => fetchers[key]()));
+    settled.forEach((result, index) => {
+      const key = dueKeys[index];
+      if (result.status === 'fulfilled' && Object.keys(result.value || {}).length) {
+        const activeCoins = new Set(allData.filter(asset => asset.venue === key).map(asset => asset.coin));
+        const previous = volumeGrowthData[key] || {};
+        const merged = {};
+        activeCoins.forEach(coin => {
+          if (result.value[coin]) merged[coin] = result.value[coin];
+          else if (previous[coin]) merged[coin] = previous[coin];
+        });
+        volumeGrowthData[key] = merged;
+        volumeGrowthFetchState[key].lastSuccessAt = Date.now();
+      } else if (result.status === 'rejected') {
+        console.error(`${key} growth error:`, result.reason);
+      }
+    });
+    logLoad(`Volume growth: xyz=${Object.keys(volumeGrowthData.tradexyz).length}, bitget=${Object.keys(volumeGrowthData.bitget).length}, gate=${Object.keys(volumeGrowthData.gate).length} assets`);
+  })();
+  try {
+    return await volumeGrowthInFlight;
+  } finally {
+    volumeGrowthInFlight = null;
+  }
 }
 
 // Rate-limited batch executor: max N concurrent requests
@@ -4046,7 +4106,7 @@ function runEnhancementTasks(tasks, concurrency = 5, label = 'Market enrichment'
   batchFetch(tasks, concurrency).then(() => {
     // Tasks mutate the same asset objects held by allData. Re-render once the
     // optional enrichment is ready without delaying the first usable page.
-    if (Array.isArray(allData) && allData.length > 0) renderCurrentView();
+    if (Array.isArray(allData) && allData.length > 0) renderVisibleDataPage();
   }).catch(error => console.warn(`${label} error:`, error));
 }
 
@@ -4131,34 +4191,17 @@ async function fetchVolumeGrowthBitget() {
 async function fetchVolumeGrowthGate() {
   const assets = allData.filter(d => d.venue === 'gate');
   const results = {};
-  const now = Math.floor(Date.now() / 1000);
-  const startTime = now - 48 * 3600;
-  const midPoint = now - 24 * 3600;
-
-  const tasks = assets.map(asset => async () => {
-    const contract = asset.symbol || (asset.coin + '_USDT');
-    const res = await fetch(`${GATE_API_BASE}/candlesticks?contract=${contract}&from=${startTime}&to=${now}&interval=1h`);
-    if (!res.ok) return;
-    const candles = await res.json();
-    if (!Array.isArray(candles) || candles.length < 10) return;
-    let olderVol = 0, newerVol = 0;
-    candles.forEach(c => {
-      const t = parseInt(c.t || 0);
-      const vol = parseFloat(c.v || 0);
-      const px = parseFloat(c.c || asset.markPx);
-      const volUsd = vol * px;
-      if (t < midPoint) olderVol += volUsd;
-      else newerVol += volUsd;
-    });
-    if (olderVol > 100) {
-      results[asset.coin] = {
-        prevVol: olderVol, currVol: newerVol,
-        growth: ((newerVol - olderVol) / olderVol) * 100
-      };
+  if (!assets.length) return results;
+  const response = await fetch('/api/gate-bulk?type=growth');
+  if (!response.ok) throw new Error(`Gate growth bulk HTTP ${response.status}`);
+  const bulk = await response.json();
+  assets.forEach(asset => {
+    const contract = asset.symbol || `${asset.coin}_USDT`;
+    const growth = bulk?.[contract];
+    if (growth && Number.isFinite(growth.prevVol) && Number.isFinite(growth.currVol) && Number.isFinite(growth.growth)) {
+      results[asset.coin] = growth;
     }
   });
-
-  await batchFetch(tasks, 5);
   return results;
 }
 
@@ -4453,10 +4496,14 @@ async function fetchVenueWithFallback(key, fetcher, timeoutMs = 45000) {
   }
 }
 
-async function refresh(isFirst) {
-  if (refreshInFlight) return;
-  refreshInFlight = true;
-  try {
+async function refresh(isFirst, force = false) {
+  if (!pageIsVisible() && !force) {
+    if (isFirst) document.getElementById('loadingOverlay').style.display = 'none';
+    return;
+  }
+  if (refreshInFlight) return refreshInFlight;
+  const task = (async () => {
+   try {
     const perpFetchers = { tradexyz:fetchTradeXyz, bitget:fetchBitget, gate:fetchGate, binance:fetchBinance };
     const venueDatasets = await Promise.all(
       ENABLED_PERP_VENUES.map(venue => fetchVenueWithFallback(venue, perpFetchers[venue]))
@@ -4465,7 +4512,7 @@ async function refresh(isFirst) {
     allData = venueDatasets.flat()
       .filter(d => !EXCLUDED_SYMBOLS.has(canonicalSymbolForCategory(d.coin, d.category)));
 
-    // Perp quotes are refreshed every 30 seconds; keep spot/perp matching in
+    // Perp quotes are refreshed every minute; keep spot/perp matching in
     // sync even when the slower spot catalog refresh is not running.
     SPOT_PERP = _buildSpotPerpFromAllData();
 
@@ -4473,6 +4520,7 @@ async function refresh(isFirst) {
     const liveCount = ENABLED_PERP_VENUES.filter(venue => venueHealth[venue]?.status === 'live').length;
     const staleCount = ENABLED_PERP_VENUES.filter(venue => venueHealth[venue]?.status === 'stale').length;
     const now = new Date().toLocaleTimeString();
+    lastPerpRefreshAt = Date.now();
     document.getElementById('statusText').textContent =
       `${venueCount} Venues · ${allData.length} Assets · ${liveCount} live${staleCount ? ` · ${staleCount} stale` : ''} · ${now}`;
     const ft = document.getElementById('footerTime');
@@ -4483,21 +4531,28 @@ async function refresh(isFirst) {
     }
 
     computeAlerts();
-    renderCurrentView();
+    renderVisibleDataPage();
 
     // Volume-growth enrichment can fan out into many kline requests and must
     // never block the first usable render. Fetch it in the background, then
     // refresh the current view when the cache is ready.
-    fetchVolumeGrowthAll().then(() => {
-      renderCurrentView();
-    }).catch(e => console.error('Volume growth error:', e));
+    if (pageIsVisible()) {
+      fetchVolumeGrowthAll().then(() => {
+        renderVisibleDataPage();
+      }).catch(e => console.error('Volume growth error:', e));
+    }
   } catch (e) {
     console.error('Refresh error:', e);
     document.getElementById('statusText').textContent = `Error: ${e.message}`;
     // Always hide loader even on error so user isn't stuck
     document.getElementById('loadingOverlay').style.display = 'none';
+   }
+  })();
+  refreshInFlight = task;
+  try {
+    return await task;
   } finally {
-    refreshInFlight = false;
+    if (refreshInFlight === task) refreshInFlight = null;
   }
 }
 
@@ -4695,6 +4750,26 @@ function renderCurrentView() {
   }
   else if (currentView === 'asset') renderAssetView();
   else if (currentView === 'heatmap') renderHeatmap();
+}
+
+function topPageIsActive(page) {
+  return document.querySelector(`.top-tab[data-p="${page}"]`)?.classList.contains('active');
+}
+
+function renderVisibleDataPage() {
+  if (!pageIsVisible()) return;
+  if (topPageIsActive('perps')) {
+    renderCurrentView();
+  } else if (topPageIsActive('traditional')) {
+    renderTraditionalActivity();
+  } else if (topPageIsActive('spot')) {
+    renderSpotVenueGrid();
+    renderSpotArbRank();
+    updateSpotKpis();
+    updateSpotStatusLine();
+    if (spotSubView === 'allAssets') renderSpotAllAssets();
+    else if (spotSubView !== 'overview') renderSpotVenueTable(spotSubView);
+  }
 }
 
 // ═══════════════════════════════════════════════
@@ -5170,8 +5245,10 @@ async function _fetchReal30DayVolumeImpl() {
   const gateAssets = allData.filter(d => d.venue === 'gate').sort((a,b)=>b.volume-a.volume).slice(0,80);
   const gateKlineTasks = [async () => {
     if (gateAssets.length === 0) return;
-    const syms = gateAssets.map(a => a.symbol || (a.coin + '_USDT'));
-    const bulkUrl = _isDev ? null : `/api/gate-bulk?type=klines&symbols=${encodeURIComponent(syms.join(','))}&from=${thirtyDaysAgoSec}&to=${nowSec}&interval=1d`;
+    const syms = gateAssets.map(a => a.symbol || (a.coin + '_USDT')).sort();
+    const gateToSec = Math.floor(nowSec / 300) * 300;
+    const gateFromSec = gateToSec - 30 * 24 * 60 * 60;
+    const bulkUrl = _isDev ? null : `/api/gate-bulk?type=klines&symbols=${encodeURIComponent(syms.join(','))}&from=${gateFromSec}&to=${gateToSec}&interval=1d`;
     if (bulkUrl) {
       try {
         const res = await fetch(bulkUrl);
@@ -5628,69 +5705,131 @@ function formatOccDate(raw) {
   return `${value.slice(0,4)}-${value.slice(4,6)}-${value.slice(6,8)}`;
 }
 
+function pageIsVisible() {
+  return document.visibilityState !== 'hidden';
+}
+
+function isUsRegularMarketWindow(now = new Date()) {
+  try {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+      timeZone:'America/New_York', weekday:'short', hour:'2-digit', minute:'2-digit', hourCycle:'h23'
+    }).formatToParts(now).filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
+    if (!['Mon','Tue','Wed','Thu','Fri'].includes(parts.weekday)) return false;
+    const minuteOfDay = Number(parts.hour) * 60 + Number(parts.minute);
+    return minuteOfDay >= 9 * 60 + 30 && minuteOfDay < 16 * 60;
+  } catch {
+    return false;
+  }
+}
+
+function currentTradfiPriceTtl() {
+  return isUsRegularMarketWindow() ? TRADFI_PRICE_OPEN_TTL : TRADFI_PRICE_CLOSED_TTL;
+}
+
 async function loadTraditionalActivity(force = false) {
-  if (tradfiActivityLoading) return;
+  if (!pageIsVisible() && !force) return;
+  if (tradfiActivityPromise) return tradfiActivityPromise;
+  if (!force && Date.now() < tradfiActivityRetryAt) return;
   const cacheFresh = tradfiActivityCache && Date.now() - tradfiActivityCache.ts < TRADFI_ACTIVITY_TTL;
   if (!force && cacheFresh) return;
 
-  tradfiActivityLoading = true;
-  tradfiActivityError = '';
-  renderTraditionalActivity();
-  try {
-    const response = await fetch('/api/tradfi-activity?limit=100');
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const payload = await response.json();
-    tradfiActivityCache = { ts:Date.now(), payload };
-  } catch (error) {
-    tradfiActivityError = error.message || 'Traditional data unavailable';
-    console.error('[TradFi] activity load failed:', error);
-  } finally {
-    tradfiActivityLoading = false;
+  const task = (async () => {
+    tradfiActivityLoading = true;
+    tradfiActivityError = '';
     renderTraditionalActivity();
+    try {
+      const response = await fetch('/api/tradfi-activity?limit=100');
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      tradfiActivityCache = { ts:Date.now(), payload };
+      tradfiActivityFailures = 0;
+      tradfiActivityRetryAt = 0;
+    } catch (error) {
+      tradfiActivityError = error.message || 'Traditional data unavailable';
+      tradfiActivityFailures += 1;
+      const retryDelay = Math.min(30 * 60 * 1000, 5 * 60 * 1000 * (2 ** Math.min(tradfiActivityFailures - 1, 2)));
+      tradfiActivityRetryAt = Date.now() + retryDelay;
+      console.error('[TradFi] activity load failed:', error);
+    } finally {
+      tradfiActivityLoading = false;
+      renderTraditionalActivity();
+    }
+  })();
+  tradfiActivityPromise = task;
+  try {
+    return await task;
+  } finally {
+    if (tradfiActivityPromise === task) tradfiActivityPromise = null;
   }
 }
 
 async function loadTraditionalPrices(rows, force = false) {
-  if (tradfiPriceLoading || !Array.isArray(rows) || !rows.length) return;
-  if (!force && Date.now() < tradfiPriceRetryAt) return;
+  if (!pageIsVisible() && !force) return;
+  if (!Array.isArray(rows) || !rows.length) return;
   const symbols = rows.map(row => row.symbol);
   const etfSymbols = rows.filter(row => row.category === 'etf').map(row => row.symbol);
   const symbolsKey = symbols.join(',');
-  const cacheFresh = tradfiPriceCache && Date.now() - tradfiPriceCache.ts < TRADFI_PRICE_TTL;
+  while (tradfiPricePromise) {
+    const inFlightKey = tradfiPricePromiseKey;
+    await tradfiPricePromise;
+    if (!force && inFlightKey === symbolsKey) return;
+  }
+  if (!force && Date.now() < tradfiPriceRetryAt) return;
+  const cacheFresh = tradfiPriceCache && Date.now() - tradfiPriceCache.ts < currentTradfiPriceTtl();
   if (!force && cacheFresh && tradfiPriceCache.symbolsKey === symbolsKey) return;
 
-  tradfiPriceLoading = true;
-  tradfiPriceError = '';
-  renderTraditionalActivity();
-  try {
-    const response = await fetch(`/api/tradfi-prices?symbols=${encodeURIComponent(symbolsKey)}&etfs=${encodeURIComponent(etfSymbols.join(','))}`);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    tradfiPriceCache = { ts:Date.now(), symbolsKey, payload:await response.json() };
-    tradfiPriceFailures = 0;
-    tradfiPriceRetryAt = 0;
-  } catch (error) {
-    tradfiPriceError = error.message || 'Traditional quotes unavailable';
-    tradfiPriceFailures += 1;
-    const retryDelay = Math.min(60000, 5000 * (2 ** Math.min(tradfiPriceFailures - 1, 3)));
-    tradfiPriceRetryAt = Date.now() + retryDelay;
-    setTimeout(() => {
-      const active = document.querySelector('.top-tab[data-p="traditional"]')?.classList.contains('active');
-      const retryRows = tradfiActivityCache?.payload?.rows || [];
-      if (active && retryRows.length) loadTraditionalPrices(retryRows, false);
-    }, retryDelay);
-    console.error('[TradFi] quote load failed:', error);
-  } finally {
-    tradfiPriceLoading = false;
+  const task = (async () => {
+    tradfiPriceLoading = true;
+    tradfiPriceError = '';
     renderTraditionalActivity();
+    try {
+      const response = await fetch(`/api/tradfi-prices?symbols=${encodeURIComponent(symbolsKey)}&etfs=${encodeURIComponent(etfSymbols.join(','))}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      tradfiPriceCache = { ts:Date.now(), symbolsKey, payload:await response.json() };
+      tradfiPriceFailures = 0;
+      tradfiPriceRetryAt = 0;
+    } catch (error) {
+      tradfiPriceError = error.message || 'Traditional quotes unavailable';
+      tradfiPriceFailures += 1;
+      const retryDelay = Math.min(60000, 5000 * (2 ** Math.min(tradfiPriceFailures - 1, 3)));
+      tradfiPriceRetryAt = Date.now() + retryDelay;
+      setTimeout(() => {
+        const active = document.querySelector('.top-tab[data-p="traditional"]')?.classList.contains('active');
+        const retryRows = tradfiActivityCache?.payload?.rows || [];
+        if (pageIsVisible() && active && retryRows.length) loadTraditionalPrices(retryRows, false);
+      }, retryDelay);
+      console.error('[TradFi] quote load failed:', error);
+    } finally {
+      tradfiPriceLoading = false;
+      renderTraditionalActivity();
+    }
+  })();
+  tradfiPricePromise = task;
+  tradfiPricePromiseKey = symbolsKey;
+  try {
+    return await task;
+  } finally {
+    if (tradfiPricePromise === task) {
+      tradfiPricePromise = null;
+      tradfiPricePromiseKey = '';
+    }
   }
 }
 
-function refreshTraditionalActivity() {
+async function ensureTraditionalActivity(force = false) {
+  const active = document.querySelector('.top-tab[data-p="traditional"]')?.classList.contains('active');
+  if (!pageIsVisible() || !active) return;
+  await loadTraditionalActivity(force);
+  const stillActive = document.querySelector('.top-tab[data-p="traditional"]')?.classList.contains('active');
+  if (!pageIsVisible() || !stillActive) return;
+  const rows = tradfiActivityCache?.payload?.rows || [];
+  if (rows.length) await loadTraditionalPrices(rows, force);
+}
+
+async function refreshTraditionalActivity() {
   tradfiActivityError = '';
   tradfiPriceError = '';
-  const rows = tradfiActivityCache?.payload?.rows || [];
-  if (rows.length) loadTraditionalPrices(rows, true);
-  loadTraditionalActivity(true);
+  await ensureTraditionalActivity(true);
 }
 
 function setTraditionalActivityFilter(filter, button) {
@@ -5775,31 +5914,21 @@ function renderTraditionalActivity() {
   const section = document.getElementById('tradfiActivitySection');
   if (!section) return;
 
-  const cacheFresh = tradfiActivityCache && Date.now() - tradfiActivityCache.ts < TRADFI_ACTIVITY_TTL;
-  if ((!tradfiActivityCache || !cacheFresh) && !tradfiActivityLoading && !tradfiActivityError) {
-    setTimeout(() => loadTraditionalActivity(false), 0);
-  }
-
   const payload = tradfiActivityCache?.payload;
   if (!payload) {
     section.innerHTML = `
         <div class="section-title">Traditional Market Activity Monitor · Top 100</div>
         <div class="section-subtitle">Ranking the traditional U.S. market first, then overlaying Perpetual and Spot coverage. The first 50 rows are shown by default.</div>
       <div style="text-align:center;padding:34px;color:var(--foreground-dim)">
-        <div class="spin" style="display:inline-block;width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite"></div>
-        <div style="margin-top:10px;font-size:12px">Ranking Nasdaq securities and OCC completed-session options volume…</div>
+        ${tradfiActivityLoading ? '<div class="spin" style="display:inline-block;width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite"></div>' : ''}
+        <div style="margin-top:10px;font-size:12px">${tradfiActivityLoading ? 'Ranking Nasdaq securities and OCC completed-session options volume…' : 'Traditional ranking is temporarily unavailable.'}</div>
         ${tradfiActivityError ? `<div style="margin-top:8px;color:var(--negative)">${escapeHtml(tradfiActivityError)}</div>` : ''}
+        ${tradfiActivityError ? '<button class="sr-btn" style="margin-top:12px" onclick="refreshTraditionalActivity()">Retry now</button>' : ''}
       </div>`;
     return;
   }
 
   const universe = payload.rows || [];
-  const symbolsKey = universe.map(row => row.symbol).join(',');
-  const quoteFresh = tradfiPriceCache && Date.now() - tradfiPriceCache.ts < TRADFI_PRICE_TTL;
-  if ((!tradfiPriceCache || !quoteFresh || tradfiPriceCache.symbolsKey !== symbolsKey) &&
-      !tradfiPriceLoading && Date.now() >= tradfiPriceRetryAt) {
-    setTimeout(() => loadTraditionalPrices(universe, false), 0);
-  }
   const quoteRows = Object.fromEntries((tradfiPriceCache?.payload?.rows || []).map(row => [row.symbol, row]));
   const coverageMap = traditionalCryptoCoverage();
   let rows = universe.map(row => {
@@ -6434,7 +6563,12 @@ function switchTopPage(page) {
     const el = document.getElementById('page-'+p);
     if (el) el.classList.toggle('active', p === page);
   });
-  if (page === 'traditional') renderTraditionalActivity();
+  if (page === 'traditional') {
+    renderTraditionalActivity();
+    ensureTraditionalActivity(false).catch(error => console.error('[TradFi] page load failed:', error));
+  } else if (page !== 'cross') {
+    renderVisibleDataPage();
+  }
 }
 
 // ═══════════════════════════════════════════════
@@ -6444,7 +6578,7 @@ function switchTopPage(page) {
 // ── Live Spot Data (populated by refreshSpotArbData) ──
 let SPOT_DATA = {};   // venue → [{coin, pair, last, chg, vol, hi, lo, bid, ask}]
 let SPOT_PERP = {};   // venue → {COIN: {mark, f}}
-let spotArbLoading = false;
+let spotArbLoading = null;
 let spotArbErrors = [];
 let spotArbLastUpdate = null;
 
@@ -6800,13 +6934,25 @@ async function fetchBinanceSpotPublic(path, optional = false) {
 
 // ── Gate.io Spot Fetch ──
 async function fetchSpotRwaGate() {
-  const [tickersRes, pairsRes] = await Promise.all([
-    fetch(`${GATE_SPOT_BASE}/tickers`).catch(() => null),
-    fetch(`${GATE_SPOT_BASE}/currency_pairs`).catch(() => null),
-  ]);
-  if (!tickersRes?.ok && !pairsRes?.ok) throw new Error('Gate spot catalog and tickers unavailable');
-  const tickers = tickersRes?.ok ? await tickersRes.json() : [];
-  const pairs = pairsRes?.ok ? await pairsRes.json() : [];
+  let tickers = [];
+  let pairs = [];
+  if (_isDev) {
+    const [tickersRes, pairsRes] = await Promise.all([
+      fetch(`${GATE_SPOT_BASE}/tickers`).catch(() => null),
+      fetch(`${GATE_SPOT_BASE}/currency_pairs`).catch(() => null),
+    ]);
+    if (!tickersRes?.ok && !pairsRes?.ok) throw new Error('Gate spot catalog and tickers unavailable');
+    tickers = tickersRes?.ok ? await tickersRes.json() : [];
+    pairs = pairsRes?.ok ? await pairsRes.json() : [];
+  } else {
+    const snapshotRes = await fetch('/api/gate-bulk?type=spot-snapshot');
+    if (!snapshotRes.ok) throw new Error(`Gate spot snapshot HTTP ${snapshotRes.status}`);
+    const snapshot = await snapshotRes.json();
+    tickers = Array.isArray(snapshot.tickers) ? snapshot.tickers : [];
+    pairs = Array.isArray(snapshot.pairs) ? snapshot.pairs : [];
+    if (!pairs.length) throw new Error('Gate spot snapshot has no authoritative pairs');
+    if (!tickers.length) throw new Error('Gate spot snapshot has no tickers');
+  }
   const tickerMap = {};
   (Array.isArray(tickers) ? tickers : []).forEach(t => { tickerMap[t.currency_pair] = t; });
   const catalog = Array.isArray(pairs) && pairs.length
@@ -6840,17 +6986,37 @@ async function fetchSpotRwaGate() {
       isPriced: last > 0,
     });
   }
-  // Fetch orderbook depth for the most liquid assets (parallel, max 5 concurrent)
-  const depthTasks = [...assets].sort((a, b) => b.vol - a.vol).slice(0, 80).map(a => async () => {
+  // Collapse up to 80 public order-book reads into one Vercel request. The
+  // server fan-out is CDN cached, so multiple viewers share the same snapshot.
+  const depthAssets = [...assets].sort((a, b) => b.vol - a.vol).slice(0, 80);
+  if (!_isDev && depthAssets.length) {
     try {
-      const res = await fetch(`${GATE_SPOT_BASE}/order_book?currency_pair=${encodeURIComponent(a.pair)}&limit=50`);
-      if (!res.ok) return;
-      const book = await res.json();
-      a.depth2 = liquidityWithinPct({ bids: (book.bids||[]), asks: (book.asks||[]) });
-    } catch {}
-  });
-  for (let i = 0; i < depthTasks.length; i += 5) {
-    await Promise.allSettled(depthTasks.slice(i, i + 5).map(fn => fn()));
+      const symbols = depthAssets.map(asset => asset.pair).sort().join(',');
+      const response = await fetch(`/api/gate-bulk?type=spot-depth&symbols=${encodeURIComponent(symbols)}&limit=50`);
+      if (response.ok) {
+        const bulk = await response.json();
+        depthAssets.forEach(asset => {
+          const book = bulk?.[asset.pair];
+          if (book && (book.bids || book.asks)) {
+            asset.depth2 = liquidityWithinPct({ bids:book.bids || [], asks:book.asks || [] });
+          }
+        });
+      }
+    } catch (error) {
+      console.warn('[Spot] Gate depth bulk unavailable:', error);
+    }
+  } else {
+    const depthTasks = depthAssets.map(asset => async () => {
+      try {
+        const response = await fetch(`${GATE_SPOT_BASE}/order_book?currency_pair=${encodeURIComponent(asset.pair)}&limit=50`);
+        if (!response.ok) return;
+        const book = await response.json();
+        asset.depth2 = liquidityWithinPct({ bids:book.bids || [], asks:book.asks || [] });
+      } catch {}
+    });
+    for (let i = 0; i < depthTasks.length; i += 5) {
+      await Promise.allSettled(depthTasks.slice(i, i + 5).map(fn => fn()));
+    }
   }
   console.log(`[Spot] Gate.io: ${assets.length} listed · ${assets.filter(a=>a.last>0).length} priced`);
   return assets;
@@ -7429,15 +7595,16 @@ function updateSpotStatusLine(statusEl = document.getElementById('spotArbStatus'
 }
 
 // ── Orchestrator: fetch all spot venues + bridge perp data ──
-async function refreshSpotArbData() {
-  if (spotArbLoading) return;
-  spotArbLoading = true;
-  spotArbErrors = [];
-  const statusEl = document.getElementById('spotArbStatus');
-  const refreshBtn = document.getElementById('spotArbRefreshBtn');
-  if (statusEl) statusEl.innerHTML = '<span style="color:var(--foreground-dim)">Loading spot data…</span>';
-  if (refreshBtn) { refreshBtn.disabled = true; refreshBtn.textContent = '⟳ Loading…'; }
-  try {
+async function refreshSpotArbData(force = false) {
+  if (!pageIsVisible() && !force) return;
+  if (spotArbLoading) return spotArbLoading;
+  const task = (async () => {
+   spotArbErrors = [];
+   const statusEl = document.getElementById('spotArbStatus');
+   const refreshBtn = document.getElementById('spotArbRefreshBtn');
+   if (statusEl) statusEl.innerHTML = '<span style="color:var(--foreground-dim)">Loading spot data…</span>';
+   if (refreshBtn) { refreshBtn.disabled = true; refreshBtn.textContent = '⟳ Loading…'; }
+   try {
     // Load the authoritative Reality catalog first. It registers hundreds of
     // underlyings used by suffix-based discovery on Gate and removes a timing
     // race where the venue could miss newly listed tokenized stocks.
@@ -7492,23 +7659,17 @@ async function refreshSpotArbData() {
       .filter((underlying, index, arr) => arr.indexOf(underlying) === index);
     // Reference enrichment should not block the live market tables. Re-render
     // the active spot views when the chunked background batch completes.
-    fetchReferencePrices(referenceCoins).then(() => {
-      renderSpotArbRank();
-      if (spotSubView === 'allAssets') renderSpotAllAssets();
-      else if (spotSubView !== 'overview') renderSpotVenueTable(spotSubView);
-      updateSpotStatusLine(statusEl);
-    }).catch(e => console.warn('[Ref] price fetch error:', e));
+    if (pageIsVisible()) {
+      fetchReferencePrices(referenceCoins).then(() => {
+        renderVisibleDataPage();
+      }).catch(e => console.warn('[Ref] price fetch error:', e));
+    }
 
     spotArbLastUpdate = new Date();
+    lastSpotRefreshAt = Date.now();
     updateSpotStatusLine(statusEl);
 
-    renderSpotVenueGrid();
-    renderSpotArbRank();
-    updateSpotKpis();
-    // Keep the traditional-market bridge synchronized with the slower spot
-    // catalog refresh; the section itself owns its 15-minute official-source
-    // cache and will only refetch if the linked symbol set changed.
-    renderTraditionalActivity();
+    renderVisibleDataPage();
 
     document.querySelectorAll('#spotSubNav .spot-sub-tab').forEach(tab => {
       const onclick = tab.getAttribute('onclick') || '';
@@ -7520,12 +7681,18 @@ async function refreshSpotArbData() {
       const badge = tab.querySelector('.spot-cnt');
       if (badge) badge.textContent = cnt;
     });
-  } catch (error) {
+   } catch (error) {
     console.error('[Spot] refresh error:', error);
     if (statusEl) statusEl.textContent = `Spot refresh error: ${error.message}`;
-  } finally {
-    spotArbLoading = false;
+   } finally {
     if (refreshBtn) { refreshBtn.disabled = false; refreshBtn.textContent = '⟳ Refresh'; }
+   }
+  })();
+  spotArbLoading = task;
+  try {
+    return await task;
+  } finally {
+    if (spotArbLoading === task) spotArbLoading = null;
   }
 }
 
@@ -8487,17 +8654,62 @@ function spotToggleL2(midId) {
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
-(async function init() {
-  await refresh(true);
+async function resumeVisibleRefreshes() {
+  if (!pageIsVisible()) return;
+  const now = Date.now();
+  if (!allData.length || now - lastPerpRefreshAt >= REFRESH_INTERVAL) {
+    await refresh(!allData.length);
+  }
+  if (!pageIsVisible()) return;
+  const hasSpotData = Object.values(SPOT_DATA).some(rows => Array.isArray(rows) && rows.length);
+  if (!hasSpotData || now - lastSpotRefreshAt >= SPOT_REFRESH_INTERVAL) {
+    await refreshSpotArbData();
+  }
+  if (!pageIsVisible()) return;
+  const traditionalActive = document.querySelector('.top-tab[data-p="traditional"]')?.classList.contains('active');
+  if (traditionalActive) {
+    await ensureTraditionalActivity(false);
+  }
+}
+
+function stopPolling() {
+  if (refreshTimer) clearInterval(refreshTimer);
+  if (spotRefreshTimer) clearInterval(spotRefreshTimer);
+  if (tradfiPriceRefreshTimer) clearInterval(tradfiPriceRefreshTimer);
+  refreshTimer = null;
+  spotRefreshTimer = null;
+  tradfiPriceRefreshTimer = null;
+}
+
+function startPolling() {
+  stopPolling();
+  if (!pageIsVisible()) return;
   refreshTimer = setInterval(() => refresh(false), REFRESH_INTERVAL);
   tradfiPriceRefreshTimer = setInterval(() => {
     const active = document.querySelector('.top-tab[data-p="traditional"]')?.classList.contains('active');
-    const rows = tradfiActivityCache?.payload?.rows || [];
-    if (active && rows.length) loadTraditionalPrices(rows, true);
-  }, TRADFI_PRICE_TTL);
-  // Load spot RWA data (depends on allData from perps refresh above)
-  await refreshSpotArbData().catch(e => console.error('[Spot] init error:', e));
+    if (active) ensureTraditionalActivity(false).catch(error => console.error('[TradFi] scheduled refresh failed:', error));
+  }, TRADFI_PRICE_OPEN_TTL);
   spotRefreshTimer = setInterval(() => refreshSpotArbData(), SPOT_REFRESH_INTERVAL);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!pageIsVisible()) {
+    stopPolling();
+    return;
+  }
+  startPolling();
+  resumeVisibleRefreshes().catch(error => console.error('Resume refresh error:', error));
+});
+
+(async function init() {
+  if (pageIsVisible()) {
+    await refresh(true);
+    if (pageIsVisible()) await refreshSpotArbData().catch(e => console.error('[Spot] init error:', e));
+  } else {
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) overlay.style.display = 'none';
+  }
+  startPolling();
 })();
 
 </script>

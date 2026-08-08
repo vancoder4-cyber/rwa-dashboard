@@ -77,5 +77,22 @@ export async function mapWithConcurrency(items, limit, mapper) {
 }
 
 export function setPublicCache(res, maxAge, staleWhileRevalidate) {
-  res.setHeader('Cache-Control', `s-maxage=${maxAge}, stale-while-revalidate=${staleWhileRevalidate}`);
+  const normalizeSeconds = (value, label, minimum) => {
+    if (!Number.isSafeInteger(value) || value < minimum || value > 31_536_000) {
+      throw new TypeError(`${label} must be a safe integer from ${minimum} to 31536000`);
+    }
+    return value;
+  };
+  const ttl = normalizeSeconds(maxAge, 'maxAge', 1);
+  const stale = normalizeSeconds(staleWhileRevalidate, 'staleWhileRevalidate', 0);
+  // Browsers revalidate while Vercel's shared CDN owns the public snapshot.
+  // The explicit Vercel header avoids ambiguous downstream handling of
+  // s-maxage and allows identical viewers to share a single function result.
+  res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+  res.setHeader('Vercel-CDN-Cache-Control', `public, max-age=${ttl}, stale-while-revalidate=${stale}`);
+}
+
+export function setNoStore(res) {
+  res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+  res.setHeader('Vercel-CDN-Cache-Control', 'no-store');
 }
