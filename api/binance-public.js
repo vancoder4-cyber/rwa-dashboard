@@ -4,10 +4,15 @@
 // official catalog and 24h ticker before performing any candle fan-out.
 
 import { mapWithConcurrency, setNoStore, setPublicCache } from './_lib/upstream.js';
+import {
+  normalizeBinanceSpotTickerCoverage,
+  selectBinanceSpotRwaCatalog,
+} from './_lib/binance-spot.js';
 
 export const config = { regions: ['sin1'], maxDuration: 60 };
 
 const BINANCE_FUTURES_BASE = 'https://fapi.binance.com/fapi/v1';
+const BINANCE_SPOT_BASE = 'https://data-api.binance.vision/api/v3';
 const ENDPOINTS = Object.freeze({
   exchangeInfo: '/exchangeInfo',
   premiumIndex: '/premiumIndex',
@@ -21,6 +26,7 @@ const AUDITED_METAL_EXCEPTIONS = new Set(['PAXG', 'XAUT']);
 const DAY_MS = 24 * 60 * 60 * 1000;
 const EXPECTED_DAILY_CANDLES = 30;
 const FUNCTION_BUDGET_MS = 55_000;
+const SPOT_TICKER_BATCH_SIZE = 80;
 
 function singleQueryValue(value) {
   return typeof value === 'string' ? value : null;
@@ -163,6 +169,43 @@ async function fetchBinanceJson(path, deadlineAt) {
   return upstream.json();
 }
 
+async function fetchBinanceJsonFrom(baseUrl, path, deadlineAt, maximumMs = 8_000) {
+  const upstream = await fetch(`${baseUrl}${path}`, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(timeoutWithinDeadline(deadlineAt, maximumMs)),
+  });
+  if (!upstream.ok) throw new Error(`Binance catalog HTTP ${upstream.status}`);
+  // Consume the body before the request timeout expires. The public spot
+  // exchangeInfo body is large upstream, but it is never forwarded to clients.
+  return upstream.json();
+}
+
+async function fetchBinanceSpotTickerRows(instruments, deadlineAt) {
+  const symbols = instruments.map(row => row.symbol).sort();
+  const batches = [];
+  for (let index = 0; index < symbols.length; index += SPOT_TICKER_BATCH_SIZE) {
+    batches.push(symbols.slice(index, index + SPOT_TICKER_BATCH_SIZE));
+  }
+  let upstreamFailures = 0;
+  const rowsByBatch = await mapWithConcurrency(batches, 3, async batch => {
+    try {
+      const query = encodeURIComponent(JSON.stringify(batch));
+      const rows = await fetchBinanceJsonFrom(
+        BINANCE_SPOT_BASE,
+        `/ticker/24hr?symbols=${query}`,
+        deadlineAt,
+        12_000,
+      );
+      if (!Array.isArray(rows)) throw new TypeError('Invalid Binance spot ticker snapshot');
+      return rows;
+    } catch {
+      upstreamFailures += 1;
+      return [];
+    }
+  });
+  return { rows: rowsByBatch.flat(), upstreamFailures, batches: batches.length };
+}
+
 async function discoverBinanceKlineSymbols(deadlineAt) {
   const [exchangeInfo, tickerRows] = await Promise.all([
     fetchBinanceJson('/exchangeInfo', deadlineAt),
@@ -212,8 +255,9 @@ export default async function handler(req, res) {
 
   const endpoint = singleQueryValue(req.query?.endpoint);
   const isKlines = endpoint === 'klines';
+  const isSpotSnapshot = endpoint === 'spot-snapshot';
   const path = endpoint ? ENDPOINTS[endpoint] : null;
-  if (!isKlines && !path) return sendError(res, 400, 'Invalid endpoint');
+  if (!isKlines && !isSpotSnapshot && !path) return sendError(res, 400, 'Invalid endpoint');
   try {
     rejectUnexpectedQueryKeys(req.query, new Set(['endpoint']));
   } catch (error) {
@@ -237,6 +281,44 @@ export default async function handler(req, res) {
     if (batch.upstreamFailures) setNoStore(res);
     else setPublicCache(res, 300, 600);
     return res.status(200).json(batch.results);
+  }
+
+  if (isSpotSnapshot) {
+    let catalog;
+    try {
+      const [spotExchangeInfo, futuresExchangeInfo] = await Promise.all([
+        fetchBinanceJsonFrom(BINANCE_SPOT_BASE, '/exchangeInfo', deadlineAt, 15_000),
+        fetchBinanceJsonFrom(BINANCE_FUTURES_BASE, '/exchangeInfo', deadlineAt, 10_000),
+      ]);
+      catalog = selectBinanceSpotRwaCatalog(spotExchangeInfo, futuresExchangeInfo);
+    } catch (error) {
+      console.error(`[binance-public] fixed spot catalog unavailable: ${error?.message || 'unknown error'}`);
+      return sendError(res, 502, 'Binance RWA spot catalog unavailable');
+    }
+
+    const tickerBatch = await fetchBinanceSpotTickerRows(catalog.instruments, deadlineAt);
+    const tickerSnapshot = normalizeBinanceSpotTickerCoverage(catalog.instruments, tickerBatch.rows);
+    const payload = {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      catalogStatus: 'full',
+      tickerStatus: tickerSnapshot.coverage.status,
+      catalogCoverage: catalog.coverage,
+      tickerCoverage: {
+        ...tickerSnapshot.coverage,
+        upstreamFailures: tickerBatch.upstreamFailures,
+        upstreamBatches: tickerBatch.batches,
+      },
+      instruments: catalog.instruments,
+      tickers: tickerSnapshot.tickers,
+    };
+    res.setHeader('X-RWA-Catalog-Rows', String(catalog.instruments.length));
+    res.setHeader('X-RWA-Ticker-Rows', String(tickerSnapshot.coverage.observed));
+    res.setHeader('X-RWA-Ticker-Status', tickerSnapshot.coverage.status);
+    if (tickerSnapshot.coverage.status === 'full') setPublicCache(res, 60, 300);
+    else if (tickerSnapshot.coverage.status === 'partial') setPublicCache(res, 15, 45);
+    else setNoStore(res);
+    return res.status(200).json(payload);
   }
 
   try {

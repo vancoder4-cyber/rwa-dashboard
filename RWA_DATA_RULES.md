@@ -158,6 +158,8 @@ Top 30 的 30 天成交量只把完整结束的 30 根 UTC 日线标为 Full；�
 
 生产环境的 Binance 与 trade.xyz 历史接口必须是固定快照：浏览器不得提交 symbol 或时间范围。服务端分别从 Binance active `TRADIFI_PERPETUAL`（另加精确 PAXG/XAUT 例外）以及 trade.xyz `metaAndAssetCtxs + perpCategories` 官方目录中重建身份门控，再按官方当前 quote/day notional 确定 Top 80。目录或完整 ticker 覆盖失败时返回 502/no-store；固定 URL 才能让所有浏览器共享同一个 CDN cache key，避免 Vercel 调用量随任意 symbol 组合扩张。
 
+Binance Spot 生产目录同样必须使用固定的 `/api/binance-public?endpoint=spot-snapshot`。服务端先把 Spot `exchangeInfo` 中结尾为 `B` 的候选与当前 active `TRADIFI_PERPETUAL` 身份做 inner join，再加入精确审计的 `QNTB` 及 PAXG/XAUT 例外；结尾 `B` 本身永远不是 RWA 证明。浏览器不能提交 symbol 或 path，也不再下载完整 Spot `exchangeInfo`。任一身份目录失败时返回 502/no-store；ticker 不完整时保留完整 catalog 并逐字段降级为 Partial/Unavailable，ticker 全失败时响应不得进入共享缓存。
+
 OKX 页面中的默认 Spot/Perp 手续费不是账户鉴权后的费率，只能标 **Estimated**；如果没有可信默认值或对应产品不支持该字段，则标 **Unavailable**，不得标 Full。OKX 衍生品 `volCcy24h × last/mark` 是美元成交额估算，也必须标 Estimated；官方 `oiUsd` 可在当前 catalog join 完整时标 Full。
 
 ## 9. 上线前审计清单
