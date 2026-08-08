@@ -9,7 +9,7 @@ import {
 } from './_lib/upstream.js';
 
 const NASDAQ_INFO = 'https://api.nasdaq.com/api/quote';
-const MAX_SYMBOLS = 30;
+const MAX_SYMBOLS = 100;
 const SOURCE_HEADERS = {
   Accept: 'application/json, text/plain, */*',
   'User-Agent': 'Mozilla/5.0 (compatible; Avenir-RWA-Analyst/1.0)',
@@ -84,9 +84,9 @@ export default async function handler(req, res) {
   const symbols = [...new Set(String(req.query.symbols || '')
     .split(',')
     .map(symbol => symbol.trim().toUpperCase())
-    .filter(symbol => /^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)))]
-    .slice(0, MAX_SYMBOLS);
+    .filter(symbol => /^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)))];
   if (!symbols.length) return res.status(400).json({ error:'No valid symbols' });
+  if (symbols.length > MAX_SYMBOLS) return res.status(400).json({ error:`Too many symbols; maximum is ${MAX_SYMBOLS}` });
 
   const etfs = new Set(String(req.query.etfs || '')
     .split(',')
@@ -94,7 +94,7 @@ export default async function handler(req, res) {
     .filter(symbol => symbols.includes(symbol)));
   const rows = await mapWithConcurrency(
     symbols,
-    6,
+    8,
     symbol => fetchQuote(symbol, etfs.has(symbol) ? 'etf' : 'stocks'),
   );
   setPublicCache(res, 60, 120);
@@ -109,4 +109,4 @@ export default async function handler(req, res) {
   });
 }
 
-export const config = { maxDuration:30 };
+export const config = { maxDuration:60 };

@@ -812,7 +812,14 @@ td:first-child { text-align: left; }
 .tradfi-value-sub strong { color:var(--foreground-sec); font-family:'JetBrains Mono',monospace; font-weight:600; }
 .tradfi-gap { font-family:'JetBrains Mono',monospace; font-weight:700; color:var(--purple); }
 .tradfi-gap-route { margin-top:3px; max-width:160px; overflow:hidden; text-overflow:ellipsis; color:var(--foreground-dim); font:500 9px/1.25 Inter,sans-serif; }
-.tradfi-rank { display:inline-block; min-width:20px; margin-right:5px; color:var(--foreground-dim); font:600 9px/1 'JetBrains Mono',monospace; }
+.tradfi-rank-wrap { display:inline-flex; align-items:center; gap:4px; margin-right:6px; vertical-align:middle; }
+.tradfi-rank { display:inline-block; min-width:28px; color:var(--foreground-dim); font:600 9px/1 'JetBrains Mono',monospace; }
+.tradfi-rank-change { display:inline-flex; align-items:center; justify-content:center; min-width:22px; padding:2px 4px; border-radius:4px; font:700 9px/1 'JetBrains Mono',monospace; border:1px solid transparent; }
+.tradfi-rank-change.up { color:#248A3D; background:rgba(52,199,89,.09); border-color:rgba(52,199,89,.16); }
+.tradfi-rank-change.down { color:#B42318; background:rgba(255,59,48,.08); border-color:rgba(255,59,48,.15); }
+.tradfi-rank-change.new { color:#0055CC; background:rgba(0,122,255,.09); border-color:rgba(0,122,255,.17); }
+.tradfi-rank-change.flat, .tradfi-rank-change.unavailable { color:var(--foreground-dim); background:rgba(120,120,128,.06); border-color:rgba(120,120,128,.11); }
+.tradfi-more-wrap { display:flex; justify-content:center; padding:14px 0 2px; }
 .market-badge { display:inline-flex; align-items:center; padding:1px 5px; border-radius:4px; font:600 9px/1.35 Inter,sans-serif; background:rgba(120,120,128,.08); color:var(--foreground-dim); border:1px solid rgba(120,120,128,.12); }
 .market-badge.active, .market-badge.priced { color:#248A3D; background:rgba(52,199,89,.08); border-color:rgba(52,199,89,.15); }
 .market-badge.inactive, .market-badge.unpriced { color:#9A6700; background:rgba(255,184,0,.08); border-color:rgba(255,184,0,.17); }
@@ -2546,6 +2553,9 @@ let tradfiActivityCache = null;
 let tradfiActivityLoading = false;
 let tradfiActivityError = '';
 let tradfiActivityFilter = 'all';
+const TRADFI_INITIAL_VISIBLE = 50;
+const TRADFI_MAX_VISIBLE = 100;
+let tradfiVisibleLimit = TRADFI_INITIAL_VISIBLE;
 let tradfiPriceCache = null;
 let tradfiPriceLoading = false;
 let tradfiPriceError = '';
@@ -4497,17 +4507,21 @@ async function refresh(isFirst) {
 
 function handleGlobalSearch(value) {
   globalSearchTerm = (value || '').toLowerCase().trim();
+  tradfiVisibleLimit = TRADFI_INITIAL_VISIBLE;
   const clearBtn = document.getElementById('globalSearchClear');
   if (clearBtn) clearBtn.classList.toggle('visible', globalSearchTerm.length > 0);
-  renderCurrentView();
+  if (document.querySelector('.top-tab[data-p="traditional"]')?.classList.contains('active')) renderTraditionalActivity();
+  else renderCurrentView();
 }
 function clearGlobalSearch() {
   globalSearchTerm = '';
+  tradfiVisibleLimit = TRADFI_INITIAL_VISIBLE;
   const input = document.getElementById('globalSearchInput');
   if (input) input.value = '';
   const clearBtn = document.getElementById('globalSearchClear');
   if (clearBtn) clearBtn.classList.remove('visible');
-  renderCurrentView();
+  if (document.querySelector('.top-tab[data-p="traditional"]')?.classList.contains('active')) renderTraditionalActivity();
+  else renderCurrentView();
 }
 // Keyboard shortcut: Cmd/Ctrl+K → focus search
 document.addEventListener('keydown', e => {
@@ -5623,7 +5637,7 @@ async function loadTraditionalActivity(force = false) {
   tradfiActivityError = '';
   renderTraditionalActivity();
   try {
-    const response = await fetch('/api/tradfi-activity?limit=30');
+    const response = await fetch('/api/tradfi-activity?limit=100');
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const payload = await response.json();
     tradfiActivityCache = { ts:Date.now(), payload };
@@ -5681,9 +5695,47 @@ function refreshTraditionalActivity() {
 
 function setTraditionalActivityFilter(filter, button) {
   tradfiActivityFilter = filter;
+  tradfiVisibleLimit = TRADFI_INITIAL_VISIBLE;
   document.querySelectorAll('#tradfiActivitySection .tradfi-filter').forEach(item => item.classList.remove('active'));
   if (button) button.classList.add('active');
   renderTraditionalActivity();
+}
+
+function showMoreTraditionalActivity() {
+  tradfiVisibleLimit = TRADFI_MAX_VISIBLE;
+  renderTraditionalActivity();
+  requestAnimationFrame(() => document.getElementById('traditionalMoreButton')?.focus());
+}
+
+function collapseTraditionalActivity() {
+  tradfiVisibleLimit = TRADFI_INITIAL_VISIBLE;
+  renderTraditionalActivity();
+  requestAnimationFrame(() => document.getElementById('traditionalMoreButton')?.focus());
+}
+
+function traditionalRankChangeHtml(row, comparisonSession) {
+  const change = row?.rankChange || { status:'unavailable', delta:null, previousRank:null };
+  const session = comparisonSession || 'the previous completed session';
+  if (change.status === 'up' && Number(change.delta) > 0) {
+    const label = `Up ${change.delta} rank${change.delta === 1 ? '' : 's'} versus ${session}`;
+    return `<span class="tradfi-rank-change up" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">↑${change.delta}</span>`;
+  }
+  if (change.status === 'down' && Number(change.delta) < 0) {
+    const amount = Math.abs(change.delta);
+    const label = `Down ${amount} rank${amount === 1 ? '' : 's'} versus ${session}`;
+    return `<span class="tradfi-rank-change down" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">↓${amount}</span>`;
+  }
+  if (change.status === 'new') {
+    const previous = Number(change.previousRank) > TRADFI_MAX_VISIBLE ? ` (previously #${change.previousRank})` : '';
+    const label = `Not in the tracked Top 100 on ${session}${previous}; this does not mean newly listed`;
+    return `<span class="tradfi-rank-change new" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">NEW</span>`;
+  }
+  if (change.status === 'flat') {
+    const label = `Unchanged versus ${session}`;
+    return `<span class="tradfi-rank-change flat" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">—</span>`;
+  }
+  const label = `Daily rank comparison unavailable for ${session}`;
+  return `<span class="tradfi-rank-change unavailable" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">N/A</span>`;
 }
 
 function traditionalMaxPriceSpread(row, coverage, quote) {
@@ -5731,8 +5783,8 @@ function renderTraditionalActivity() {
   const payload = tradfiActivityCache?.payload;
   if (!payload) {
     section.innerHTML = `
-      <div class="section-title">Traditional Market Activity Monitor</div>
-      <div class="section-subtitle">Ranking the traditional U.S. market first, then overlaying Perpetual and Spot coverage.</div>
+        <div class="section-title">Traditional Market Activity Monitor · Top 100</div>
+        <div class="section-subtitle">Ranking the traditional U.S. market first, then overlaying Perpetual and Spot coverage. The first 50 rows are shown by default.</div>
       <div style="text-align:center;padding:34px;color:var(--foreground-dim)">
         <div class="spin" style="display:inline-block;width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite"></div>
         <div style="margin-top:10px;font-size:12px">Ranking Nasdaq securities and OCC completed-session options volume…</div>
@@ -5770,6 +5822,8 @@ function renderTraditionalActivity() {
   if (tradfiActivityFilter === 'unusual') rows = rows.filter(row => row.signal.level !== 'normal');
   if (tradfiActivityFilter === 'optionable') rows = rows.filter(row => row.options?.status !== 'unavailable');
   if (tradfiActivityFilter === 'covered') rows = rows.filter(row => row.link.perpVenues.size > 0 || row.link.spotVenues.size > 0);
+  const filteredCount = rows.length;
+  const visibleRows = rows.slice(0, Math.min(tradfiVisibleLimit, TRADFI_MAX_VISIBLE));
 
   const signalCounts = universe.reduce((counts, row) => {
     const signal = traditionalActivitySignal(row);
@@ -5781,7 +5835,7 @@ function renderTraditionalActivity() {
     return link && (link.perpVenues.size > 0 || link.spotVenues.size > 0);
   }).length;
 
-  const htmlRows = rows.map(row => {
+  const htmlRows = visibleRows.map(row => {
     const market = row.market || {};
     const options = row.options || {};
     const marketRel = tradfiMetricNumber(market.relativeVolume);
@@ -5823,13 +5877,13 @@ function renderTraditionalActivity() {
 
     return `<tr>
       <td style="text-align:left">
-        <div style="font-weight:700;font-size:13px"><span class="tradfi-rank">#${row.rank || '—'}</span>${escapeHtml(row.symbol)} ${categoryTag}${renderMarketTags(row.tags || [])}</div>
+        <div style="font-weight:700;font-size:13px"><span class="tradfi-rank-wrap"><span class="tradfi-rank">#${row.rank || '—'}</span>${traditionalRankChangeHtml(row, payload.methodology?.comparisonSession)}</span>${escapeHtml(row.symbol)} ${categoryTag}${renderMarketTags(row.tags || [])}</div>
         <div style="font-size:10px;color:var(--foreground-dim);max-width:260px;overflow:hidden;text-overflow:ellipsis">${escapeHtml(row.name || row.symbol)}</div>
         ${identityLine}
         <div style="margin-top:3px"><span class="tradfi-route ${perpVenues ? '' : 'missing'}" title="Linked perpetual venues">${perpVenues ? `Perp ${perpVenues}` : 'No Perp'}</span><span class="tradfi-route ${spotVenues ? '' : 'missing'}" title="Linked spot venues">${spotVenues ? `Spot ${spotVenues}` : 'No Spot'}</span></div>
       </td>
       <td><div class="mono">${fmtTradfiCount(market.volume)}</div><div class="tradfi-value-sub">shares · <strong>${fmtVolume(market.estimatedValue)}</strong> est.</div></td>
-      <td><div class="mono">${fmtTradfiCount(market.averageVolume)}</div><div style="font-size:9px;color:var(--foreground-dim)">Nasdaq avg</div></td>
+      <td><div class="mono">${fmtTradfiCount(market.averageVolume)}</div><div style="font-size:9px;color:var(--foreground-dim)">${market.averageSamples ? `${market.averageSamples}-session prior avg` : 'Nasdaq history avg'}</div></td>
       <td>${marketRelHtml}</td>
       <td><div class="mono">${fmtTradfiCount(options.volume)}</div><div class="tradfi-value-sub">contracts · <strong>${fmtVolume(options.estimatedNotional)}</strong> est.${Number(options.adjustedVolumeExcluded) > 0 ? ` · ${fmtTradfiCount(options.adjustedVolumeExcluded)} adjusted excluded` : ''}</div></td>
       <td><div class="mono">${fmtTradfiCount(options.averageVolume)}</div><div style="font-size:9px;color:var(--foreground-dim)">4-week same day</div></td>
@@ -5847,18 +5901,23 @@ function renderTraditionalActivity() {
   const marketSource = payload.sources?.market?.url || 'https://www.nasdaq.com/market-activity';
   const optionsSource = payload.sources?.options?.url || 'https://www.theocc.com/market-data/market-data-reports/volume-and-open-interest/volume-query';
   const empty = `<tr><td colspan="13" style="text-align:center;padding:30px;color:var(--foreground-dim)">No assets match this filter.</td></tr>`;
+  const moreControl = filteredCount > TRADFI_INITIAL_VISIBLE
+    ? tradfiVisibleLimit < TRADFI_MAX_VISIBLE
+      ? `<div class="tradfi-more-wrap"><button type="button" id="traditionalMoreButton" class="arb-view-more" aria-expanded="false" aria-controls="traditionalActivityRows" onclick="showMoreTraditionalActivity()">More <span style="color:var(--foreground-dim);font-weight:500">· ${Math.min(TRADFI_INITIAL_VISIBLE, filteredCount)} / ${filteredCount}</span></button></div>`
+      : `<div class="tradfi-more-wrap"><button type="button" id="traditionalMoreButton" class="arb-view-more" aria-expanded="true" aria-controls="traditionalActivityRows" onclick="collapseTraditionalActivity()">Collapse <span style="color:var(--foreground-dim);font-weight:500">· ${Math.min(TRADFI_MAX_VISIBLE, filteredCount)} / ${filteredCount}</span></button></div>`
+    : '';
 
   section.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
       <div>
-        <div class="section-title">Traditional Market Activity Monitor</div>
-        <div class="section-subtitle">Traditional-first ranking within the disclosed official activity candidate set. Perpetual and Spot coverage are joined only after rank is fixed.</div>
+        <div class="section-title">Traditional Market Activity Monitor · Top 100</div>
+        <div class="section-subtitle">Traditional-first ranking within the disclosed official activity candidate set. The first 50 rows are shown by default; Perpetual and Spot coverage are joined only after rank is fixed.</div>
       </div>
       <div class="tradfi-controls">
-        <button class="tradfi-filter ${tradfiActivityFilter === 'all' ? 'active' : ''}" onclick="setTraditionalActivityFilter('all',this)">All ${universe.length}</button>
-        <button class="tradfi-filter ${tradfiActivityFilter === 'unusual' ? 'active' : ''}" onclick="setTraditionalActivityFilter('unusual',this)">Unusual ${signalCounts.high + signalCounts.watch}</button>
-        <button class="tradfi-filter ${tradfiActivityFilter === 'covered' ? 'active' : ''}" onclick="setTraditionalActivityFilter('covered',this)">Crypto Covered ${coveredCount}</button>
-        <button class="tradfi-filter ${tradfiActivityFilter === 'optionable' ? 'active' : ''}" onclick="setTraditionalActivityFilter('optionable',this)">Optionable</button>
+        <button class="tradfi-filter ${tradfiActivityFilter === 'all' ? 'active' : ''}" aria-pressed="${tradfiActivityFilter === 'all'}" onclick="setTraditionalActivityFilter('all',this)">All ${universe.length}</button>
+        <button class="tradfi-filter ${tradfiActivityFilter === 'unusual' ? 'active' : ''}" aria-pressed="${tradfiActivityFilter === 'unusual'}" onclick="setTraditionalActivityFilter('unusual',this)">Unusual ${signalCounts.high + signalCounts.watch}</button>
+        <button class="tradfi-filter ${tradfiActivityFilter === 'covered' ? 'active' : ''}" aria-pressed="${tradfiActivityFilter === 'covered'}" onclick="setTraditionalActivityFilter('covered',this)">Crypto Covered ${coveredCount}</button>
+        <button class="tradfi-filter ${tradfiActivityFilter === 'optionable' ? 'active' : ''}" aria-pressed="${tradfiActivityFilter === 'optionable'}" onclick="setTraditionalActivityFilter('optionable',this)">Optionable</button>
         <button class="sr-btn" onclick="refreshTraditionalActivity()" ${tradfiActivityLoading ? 'disabled' : ''}>${tradfiActivityLoading ? '⟳ Loading' : '⟳ Refresh'}</button>
       </div>
     </div>
@@ -5867,6 +5926,7 @@ function renderTraditionalActivity() {
       <span class="tradfi-signal watch">Watch ${signalCounts.watch}</span>
       <span>Universe: ${Number(payload.methodology?.directoryUniverse || 0).toLocaleString()} U.S.-listed securities in Nasdaq Trader directory · ${Number(payload.methodology?.candidateCount || 0)} official activity candidates → ${universe.length} ranked</span>
       <span>Ranking session: ${escapeHtml(payload.methodology?.rankingSession || 'Unavailable')} · candidate list ${escapeHtml(payload.methodology?.moverAsOf || 'latest')}</span>
+      <span title="${escapeHtml(payload.methodology?.rankComparison?.definition || '')}">Daily rank vs ${escapeHtml(payload.methodology?.comparisonSession || 'Unavailable')} · ${escapeHtml(payload.methodology?.rankComparison?.status || 'unavailable')} · tracked candidate-set Top 100</span>
       <span title="${escapeHtml(payload.methodology?.candidateCaveat || '')}">Scope: official candidate-set ranking${payload.methodology?.alignment ? ` · ${Number(payload.methodology.alignment.alignedCandidateCount || 0)}/${Number(payload.methodology.alignment.eligibleCandidateCount || 0)} eligible aligned${Number(payload.methodology.alignment.ineligibleCandidateCount || 0) ? ` · ${Number(payload.methodology.alignment.ineligibleCandidateCount)} session-ineligible excluded` : ''}` : ''}</span>
       <span>Market: <a href="${escapeHtml(marketSource)}" target="_blank" rel="noopener">Nasdaq official</a> · completed-session shares + close</span>
       <span>Options: <a href="${escapeHtml(optionsSource)}" target="_blank" rel="noopener">OCC official</a> · T+1 as of ${optionsAsOf}</span>
@@ -5878,7 +5938,7 @@ function renderTraditionalActivity() {
     <div class="table-wrap" style="padding:0;overflow-x:auto">
       <table style="min-width:1640px">
         <thead><tr>
-          <th style="text-align:left">Underlying</th>
+          <th style="text-align:left">Rank / Underlying</th>
           <th><span class="th-info">Trad Volume<span class="th-info-icon">i</span><span class="th-info-tip">Nasdaq completed-session share volume aligned to the OCC session. Dollar value is estimated as shares × same-session close, not consolidated tape turnover.</span></span></th>
           <th>Trad Baseline</th>
           <th>Trad RelVol</th>
@@ -5892,9 +5952,10 @@ function renderTraditionalActivity() {
           <th>Signal</th>
           <th>Data Status</th>
         </tr></thead>
-        <tbody>${htmlRows || empty}</tbody>
+        <tbody id="traditionalActivityRows">${htmlRows || empty}</tbody>
       </table>
-    </div>`;
+    </div>
+    ${moreControl}`;
 }
 
 // ═══════════════════════════════════════════════════

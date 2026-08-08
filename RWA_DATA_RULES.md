@@ -181,8 +181,11 @@ Bitget 当前同时返回 `isRwa=YES` 和 `symbolType=crypto`，但该产品对�
 `Traditional Market Activity Monitor` 必须以传统市场为主表。传统 universe、候选池和排名全部完成后，才把已通过本文身份规则的 Perp/Spot 作为 left join 覆盖层；Crypto 是否上币、交易量大小或异常信号都不能改变传统排名。
 
 - 首版身份 universe 使用 Nasdaq Trader 官方 `nasdaqlisted.txt` 与 `otherlisted.txt`。排除 Test Issue、warrant、right、unit、preferred、债券/票据等非普通 Equity/ETF；ADR/ADS 由官方证券名称打 tag。不得设置任意股价下限改变官方榜单。
-- 候选池是 `当前 Nasdaq Most Active by Dollar Volume 快照 ∪ OCC 排名日标准期权合约量 leaders`。候选标的必须存在于官方目录，之后再读取 Nasdaq `companyName` 与 `assetClass` 做二次身份确认；页面必须同时披露候选榜 as-of 与实际排名 session。公开源无法回溯指定日期的完整 Nasdaq leader snapshot 时，只能称“官方候选集内排名”，不得宣称完整全市场 Top 30。
+- Top 100 候选池是 `当前 Nasdaq Most Active by Dollar Volume 快照 ∪ OCC 排名日标准期权合约量 Top 100 ∪ 前一完成交易日 OCC 标准期权合约量 Top 100`。候选标的必须存在于 Nasdaq Trader 官方目录；实时价差层再用 Nasdaq Quote Info 的 `companyName` 与 `assetClass` 二次确认后才接入价格。页面必须同时披露候选榜 as-of 与实际排名 session。公开源无法回溯指定日期的完整 Nasdaq leader snapshot 时，只能称“官方候选集内 Top 100”，不得宣称完整美股全市场 Top 100。
 - 默认排名是 `Estimated Share Value + Estimated Standard-Options Underlying Notional`。该排名不使用 Perp/Spot 成交量，也不按 Crypto coverage 或异动 signal 重排。
+- 日排名变化比较最近两个 Nasdaq/OCC 对齐的已完成交易 session，不是自然日、滚动 24 小时或浏览器本地快照。当前和前日使用同一估算公式与上述联合候选集分别完整排序，`delta = 前一 session rank - 当前 rank`；正数为上升、负数为下降、零为不变。
+- `NEW` 只表示该标的当前进入联合候选集 Top 100、但前一 session 不在 Top 100（前次 rank 缺失或大于 100）；不表示新上市、IPO 或首次被交易所支持。前一 session 的 OCC 报告、Nasdaq 历史结构或候选比较覆盖不完整时，整榜变化统一标 Unavailable，严禁把未知误标成 `NEW`。
+- 页面默认显示前 50 行，More 仅把同一服务端 Top 100 展开到 100；搜索和筛选可作用于完整 Top 100，但不得重新编号或重算排名。
 - 首版覆盖美国上市的 Equity、ETF 与 ADR；纯 HK/KR/TW/JP/CN 本地上市、Pre-IPO、现货商品、商品期货和指数不拿同名美股代替，官方源不支持时显示 Unavailable。
 - 股票/ETF 成交股数和收盘价来自 Nasdaq Market Activity 官方历史接口，并强制与 OCC 最近完成交易日对齐；Nasdaq 展示的 Average Volume 只用于基线。没有同一 session 的历史行时，该标的不得把跨日金额相加排名。
 - OCC 主报告不可用、ranking session 无效、或任一 eligible 官方候选因请求/结构错误缺少 Nasdaq 同日历史时必须 fail closed；不得把当前 Nasdaq 数据降级成同日完整排名，也不得缓存 `200 + 空榜`。Nasdaq 返回业务成功且明确没有该 session 行的标的（例如排名日后才上市或当日无交易）标为 session-ineligible 并从排名分母排除；不得把任意接口失败伪装成 ineligible。响应需披露 aligned / ineligible / dropped candidates；宁可由 CDN 保留上一份正确榜单，也不能让缺失的头部标的扭曲排序。
@@ -191,7 +194,7 @@ Bitget 当前同时返回 `isRwa=YES` 和 `symbolType=crypto`，但该产品对�
 - 期权美元值是 `OCC standard contracts × 100 × Nasdaq displayed underlying price`，代表 underlying notional，不是 option premium。`2AAPL`、`4SPY` 等 adjusted roots 的交割乘数未知，必须从标准 ×100 公式中排除并单独披露。
 - `Est. Total Notional = Estimated Share Value + Estimated Options Underlying Notional`。Perp/Spot 24h USD volume 只做并列覆盖展示，不得加进这个传统总值。
 - Cboe delayed quote table 明确禁止自动抓取，因此生产代码不得调用其网页/JSON 端点。需要真正实时期权时，应采购 OPRA 授权数据或合规的数据供应商。
-- `Trad RelVol = Nasdaq aligned completed-session Share Volume / Nasdaq displayed Average Volume`。
+- `Trad RelVol = Nasdaq aligned completed-session Share Volume / 此前最多 20 个完成交易日的 Nasdaq 官方历史 Share Volume 均值`。历史请求与两日排名共用同一条官方接口；20 个样本齐全为 Full，样本不足为 Partial。
 - `Options RelVol = OCC latest completed-day contracts / prior four same-weekday observations average`。
 - High：`Trad RelVol >= 2.0` 或 `Options RelVol >= 2.5`；Watch：`Trad RelVol >= 1.5` 或 `Options RelVol >= 1.75`。阈值只是监控提示，不构成交易建议。
 - Perp/Spot 只按精确 canonical underlying + Equity/ETF category 联结。Spot wrapper 还必须有官方 catalog 提供的 `underlyingSymbol`、静态可信 issuer wrapper，或与当前 venue 匹配的注册记录；禁止仅凭 token ticker 像股票 ticker 就联结。

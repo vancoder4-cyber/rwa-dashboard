@@ -15,18 +15,18 @@
 
 3. **GitHub Actions**
    - `.github/workflows/data-health.yml` runs every day at 01:20 UTC and on demand.
-   - It runs contract tests, inline-script parsing, live reference/funding/Nasdaq/OCC data contracts and the production health endpoint.
+   - It runs contract tests, inline-script parsing, live reference/funding/Nasdaq/OCC data contracts and the production health endpoint. Traditional checks include Top 100 cardinality, adjacent-session alignment and rank-change invariants.
    - A failing run must be reviewed before promoting another production deployment.
 
 4. **Codex scheduled reviews**
    - Daily at 09:10 Asia/Shanghai: production status, live data contracts, deployment state and recent errors.
-   - Monday at 10:00 Asia/Shanghai: full venue catalogs, identity collisions, listing lifecycle, classification/tags, Traditional candidate/ranking rules, adjusted-options handling, reference pricing and historical coverage.
+   - Monday at 10:00 Asia/Shanghai: full venue catalogs, identity collisions, listing lifecycle, classification/tags, Traditional candidate/ranking rules, previous-session selection and comparison coverage, false `NEW` detection, deterministic tie-breaks, adjusted-options handling, reference pricing and historical coverage.
    - Scheduled reviews are read-only. They report P0/P1/P2 findings and must not modify, push or deploy without user confirmation.
 
 ## Severity policy
 
 - **P0**: production unavailable; RWA identity gate admits known crypto collision; widespread missing venue; materially wrong units/currency; reference or funding data could produce false trading conclusions.
-- **P1**: one venue stale/unavailable; major catalog drift; historical coverage or reference source materially incomplete; persistent 5xx/timeouts.
+- **P1**: one venue stale/unavailable; major catalog drift; historical coverage or reference source materially incomplete; Traditional comparison data mislabeled as a real rank move/`NEW`; persistent 5xx/timeouts.
 - **P2**: isolated metadata/tag gaps, moderate latency, technical debt, non-blocking warnings.
 
 ## Baseline drift
@@ -48,6 +48,6 @@ Before production promotion:
 3. Deploy a Preview.
 4. `DASHBOARD_URL=<preview-url> npm run audit:data`
 5. `DASHBOARD_URL=<preview-url> npm run audit:health`
-6. Browser-check venue counts, Spot Reference status, Funding History and target lifecycle/tag fixes.
+6. Browser-check venue counts, Spot Reference status, Funding History and target lifecycle/tag fixes. For Traditional, verify 50 rows initially, More expands to at most 100, row 51–100 quotes are not truncated, and rank arrows/`NEW` match the API comparison session.
 7. Push the verified commit, promote the same Preview artifact, then repeat both audits on production.
 8. Check production 5xx logs and document any platform-only warning separately.

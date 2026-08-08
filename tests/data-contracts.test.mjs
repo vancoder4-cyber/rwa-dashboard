@@ -8,16 +8,20 @@ import { FX_REFERENCE_MAP, yahooSymbolFor } from '../api/_lib/reference-map.js';
 import tradfiActivityHandler, {
   buildTraditionalCandidates,
   canAcceptNasdaqHistorical,
+  classifyNasdaqHistoricalRange,
   classifyNasdaqHistoricalPayload,
   estimatedOptionsNotional,
   estimatedShareValue,
+  findFirstNonEmptyOccReport,
   hasCompleteTraditionalAlignment,
   nasdaqHistoricalWindow,
   occDateToIso,
   optionActivityForSymbol,
   parseNasdaqDirectory,
+  parseNasdaqHistoricalAverage,
   parseNasdaqHistoricalRow,
   parseOccReport,
+  rankTraditionalRows,
   summarizeTraditionalAlignment,
 } from '../api/tradfi-activity.js';
 import tradfiPricesHandler from '../api/tradfi-prices.js';
@@ -87,6 +91,17 @@ test('traditional activity is a standalone top-level page', async () => {
     /function renderOverview\(\) \{[^}]*renderTraditionalActivity\(\)/,
   );
   assert.match(html, /\['perps','spot','traditional','cross'\]/);
+  assert.match(html, /fetch\('\/api\/tradfi-activity\?limit=100'\)/);
+  assert.match(html, /const TRADFI_INITIAL_VISIBLE = 50/);
+  assert.match(html, /const TRADFI_MAX_VISIBLE = 100/);
+  assert.match(html, /const visibleRows = rows\.slice\(0, Math\.min\(tradfiVisibleLimit, TRADFI_MAX_VISIBLE\)\)/);
+  assert.match(html, /function showMoreTraditionalActivity\(\) \{[\s\S]*tradfiVisibleLimit = TRADFI_MAX_VISIBLE/);
+  assert.match(html, /traditionalRankChangeHtml\(row, payload\.methodology\?\.comparisonSession\)/);
+  const traditionalSearchRender = /if \(document\.querySelector\('\.top-tab\[data-p="traditional"\]'\)\?\.classList\.contains\('active'\)\) renderTraditionalActivity\(\);/g;
+  assert.equal((html.match(traditionalSearchRender) || []).length, 2);
+  assert.match(html, />↑\$\{change\.delta\}</);
+  assert.match(html, />↓\$\{amount\}</);
+  assert.match(html, />NEW</);
 });
 
 test('Nasdaq directory is the authority for equity and ETF identity', () => {
@@ -122,6 +137,33 @@ test('adjusted OCC roots are excluded from standard 100-share notional', () => {
   assert.equal(report.adjustedTotals.AAPL, 5);
 });
 
+test('OCC report discovery skips official empty days but never hides request failures', async () => {
+  const emptyReport = 'Group\tSymbol\tEx.\tCustomer\tFirm\tCustomer/Firm Totals\tMkt Maker\tTotal';
+  const validReport = [
+    emptyReport,
+    'AAPL\tAAPL\tA\t1\t0\t1\t9\t10',
+    'Symbol\tTotal\t\t1\t0\t1\t9\t10',
+  ].join('\n');
+  const calls = [];
+  const found = await findFirstNonEmptyOccReport(['20260808', '20260807'], async reportDate => {
+    calls.push(reportDate);
+    return reportDate === '20260808' ? emptyReport : validReport;
+  });
+  assert.equal(found.reportDate, '20260807');
+  assert.equal(found.standardTotals.AAPL, 10);
+  assert.deepEqual(calls, ['20260808', '20260807']);
+
+  const failedCalls = [];
+  await assert.rejects(
+    findFirstNonEmptyOccReport(['20260808', '20260807'], async reportDate => {
+      failedCalls.push(reportDate);
+      throw new Error('OCC network failure');
+    }),
+    /OCC network failure/,
+  );
+  assert.deepEqual(failedCalls, ['20260808']);
+});
+
 test('traditional estimated amounts use same-session share and standard-option notionals', () => {
   assert.equal(estimatedShareValue(2500, 99.5), 248750);
   assert.equal(estimatedOptionsNotional(10, 99.5), 99500);
@@ -148,8 +190,9 @@ test('traditional estimated amounts use same-session share and standard-option n
 
 test('Nasdaq share volume and close parse on the OCC ranking session', () => {
   const rankingSession = occDateToIso('20260806');
-  assert.deepEqual(nasdaqHistoricalWindow(rankingSession), {
-    fromdate:'2026-08-06',
+  const comparisonSession = occDateToIso('20260805');
+  assert.deepEqual(nasdaqHistoricalWindow(rankingSession, comparisonSession), {
+    fromdate:'2026-07-02',
     todate:'2026-08-07',
   });
   const row = parseNasdaqHistoricalRow({
@@ -159,6 +202,62 @@ test('Nasdaq share volume and close parse on the OCC ranking session', () => {
     ] } },
   }, rankingSession);
   assert.deepEqual(row, { sessionDate:'2026-08-06', close:99.5, volume:2500 });
+  const previousRow = parseNasdaqHistoricalRow({
+    data:{ tradesTable:{ rows:[
+      { date:'08/06/2026', close:'$99.50', volume:'2,500' },
+      { date:'08/05/2026', close:'$98.00', volume:'3,000' },
+    ] } },
+  }, comparisonSession);
+  assert.deepEqual(previousRow, { sessionDate:'2026-08-05', close:98, volume:3000 });
+  assert.equal(parseNasdaqHistoricalRow({
+    data:{ tradesTable:{ rows:[{ date:'08/05/2026', close:'$98.00', volume:null }] } },
+  }, comparisonSession), null);
+  assert.deepEqual(parseNasdaqHistoricalAverage({
+    data:{ tradesTable:{ rows:[
+      { date:'08/06/2026', close:'$99.50', volume:'2,500' },
+      { date:'08/05/2026', close:'$98.00', volume:'3,000' },
+      { date:'08/04/2026', close:'$97.00', volume:'1,000' },
+      { date:'08/03/2026', close:'$96.00', volume:null },
+    ] } },
+  }, rankingSession, 20), { averageVolume:2000, samples:2 });
+  assert.deepEqual(classifyNasdaqHistoricalRange({
+    status:{ rCode:200 },
+    data:{ tradesTable:{ rows:[
+      { date:'08/06/2026', close:'$99.50', volume:'2,500' },
+      { date:'08/05/2026', close:'$98.00', volume:'3,000' },
+    ] }, totalRecords:2 },
+  }, rankingSession, comparisonSession), {
+    current:{ status:'aligned', reason:null, row:{ sessionDate:'2026-08-06', close:99.5, volume:2500 } },
+    previous:{ status:'aligned', reason:null, row:{ sessionDate:'2026-08-05', close:98, volume:3000 } },
+  });
+  assert.deepEqual(classifyNasdaqHistoricalRange({
+    status:{ rCode:200 },
+    data:{ tradesTable:{ rows:[
+      { date:'08/06/2026', close:'$99.50', volume:'2,500' },
+      { date:'08/05/2026', close:'$98.00', volume:null },
+    ] }, totalRecords:2 },
+  }, rankingSession, comparisonSession), {
+    current:{ status:'aligned', reason:null, row:{ sessionDate:'2026-08-06', close:99.5, volume:2500 } },
+    previous:{ status:'invalid', reason:'invalid-session-volume-or-close', row:null },
+  });
+  assert.deepEqual(classifyNasdaqHistoricalRange({
+    status:{ rCode:200 },
+    data:{ tradesTable:{ rows:[
+      { date:'08/06/2026', close:'$99.50', volume:'2,500' },
+    ] }, totalRecords:31 },
+  }, rankingSession, comparisonSession), {
+    current:{ status:'aligned', reason:null, row:{ sessionDate:'2026-08-06', close:99.5, volume:2500 } },
+    previous:{ status:'invalid', reason:'historical-range-truncated', row:null },
+  });
+  assert.deepEqual(classifyNasdaqHistoricalRange({
+    status:{ rCode:200 },
+    data:{ tradesTable:{ rows:[
+      { date:'08/05/2026', close:'$98.00', volume:'3,000' },
+    ] }, totalRecords:1 },
+  }, rankingSession, comparisonSession), {
+    current:{ status:'ineligible', reason:'no-session-row', row:null },
+    previous:{ status:'aligned', reason:null, row:{ sessionDate:'2026-08-05', close:98, volume:3000 } },
+  });
   assert.deepEqual(classifyNasdaqHistoricalPayload({
     status:{ rCode:200 },
     data:{ tradesTable:{ rows:[] }, totalRecords:0 },
@@ -189,15 +288,55 @@ test('traditional candidates come from official market and options leaders witho
   const directory = new Map([
     ['AAPL', { symbol:'AAPL', name:'Apple', category:'equity', tags:[] }],
     ['QQQ', { symbol:'QQQ', name:'Invesco QQQ', category:'etf', tags:[] }],
+    ['SPY', { symbol:'SPY', name:'SPDR S&P 500', category:'etf', tags:[] }],
   ]);
   const rows = buildTraditionalCandidates(
     [{ symbol:'AAPL', lastSalePrice:'$200' }],
     { QQQ:1_000_000 },
     directory,
     10,
+    { SPY:900_000, CRYPTO:2_000_000 },
   );
-  assert.deepEqual(rows.map(row => row.symbol).sort(), ['AAPL', 'QQQ']);
+  assert.deepEqual(rows.map(row => row.symbol).sort(), ['AAPL', 'QQQ', 'SPY']);
   assert.equal(rows.find(row => row.symbol === 'QQQ').categoryHint, 'etf');
+  assert.match(rows.find(row => row.symbol === 'SPY').sourceRanks[0], /Previous OCC options/);
+});
+
+test('traditional daily ranks are deterministic and distinguish movement, NEW, and unavailable', () => {
+  const rows = [
+    { symbol:'A', traditionalTotalValue:400, marketEstimatedValue:300, previousTraditionalTotalValue:300, previousMarketEstimatedValue:200 },
+    { symbol:'B', traditionalTotalValue:300, marketEstimatedValue:200, previousTraditionalTotalValue:400, previousMarketEstimatedValue:300 },
+    { symbol:'C', traditionalTotalValue:200, marketEstimatedValue:100, previousTraditionalTotalValue:200, previousMarketEstimatedValue:100 },
+    { symbol:'E', traditionalTotalValue:100, marketEstimatedValue:50, previousTraditionalTotalValue:0, previousMarketEstimatedValue:0 },
+    { symbol:'D', traditionalTotalValue:0, marketEstimatedValue:0, previousTraditionalTotalValue:100, previousMarketEstimatedValue:50 },
+  ];
+  const ranked = rankTraditionalRows(rows, 4, true, 4);
+  assert.deepEqual(ranked.map(row => [row.symbol, row.rank, row.rankChange.status, row.rankChange.delta]), [
+    ['A', 1, 'up', 1],
+    ['B', 2, 'down', -1],
+    ['C', 3, 'flat', 0],
+    ['E', 4, 'new', null],
+  ]);
+
+  const unavailable = rankTraditionalRows(rows, 4, false, 4);
+  assert.ok(unavailable.every(row => row.rankChange.status === 'unavailable'));
+  assert.ok(unavailable.every(row => row.previousRank === null));
+
+  const enteredFromBelow = rankTraditionalRows([
+    { symbol:'A', traditionalTotalValue:400, marketEstimatedValue:1, previousTraditionalTotalValue:500, previousMarketEstimatedValue:1 },
+    { symbol:'B', traditionalTotalValue:300, marketEstimatedValue:1, previousTraditionalTotalValue:400, previousMarketEstimatedValue:1 },
+    { symbol:'C', traditionalTotalValue:200, marketEstimatedValue:1, previousTraditionalTotalValue:300, previousMarketEstimatedValue:1 },
+    { symbol:'D', traditionalTotalValue:100, marketEstimatedValue:1, previousTraditionalTotalValue:200, previousMarketEstimatedValue:1 },
+    { symbol:'Z', traditionalTotalValue:500, marketEstimatedValue:1, previousTraditionalTotalValue:100, previousMarketEstimatedValue:1 },
+  ], 4, true, 4);
+  assert.deepEqual(enteredFromBelow[0].rankChange, { status:'new', delta:null, previousRank:5 });
+
+  const tied = rankTraditionalRows([
+    { symbol:'ZZZ', traditionalTotalValue:100, marketEstimatedValue:50, previousTraditionalTotalValue:100, previousMarketEstimatedValue:50 },
+    { symbol:'AAA', traditionalTotalValue:100, marketEstimatedValue:50, previousTraditionalTotalValue:100, previousMarketEstimatedValue:50 },
+  ], 2, true, 2);
+  assert.deepEqual(tied.map(row => row.symbol), ['AAA', 'ZZZ']);
+  assert.ok(tied.every(row => row.rankChange.status === 'flat'));
 });
 
 test('traditional alignment exposes dropped symbols instead of silently treating them as current-session rows', () => {
@@ -254,8 +393,8 @@ test('traditional alignment exposes dropped symbols instead of silently treating
 
 test('traditional ranking has no arbitrary share-price floor', async () => {
   const source = await readFile(new URL('../api/tradfi-activity.js', import.meta.url), 'utf8');
-  assert.doesNotMatch(source, /market\.lastPrice\s*[><=]/);
-  assert.match(source, /filter\(row => row\.traditionalTotalValue > 0\)/);
+  assert.doesNotMatch(source, /market\.lastPrice\s*[><=]+\s*[1-9]/);
+  assert.match(source, /filter\(row => Number\(row\?\.traditionalTotalValue\) > 0\)/);
   assert.match(source, /!hasCompleteTraditionalAlignment\(alignment\)/);
   assert.doesNotMatch(source, /fetchOccBundle\(\)\.catch/);
 });
@@ -266,10 +405,21 @@ test('traditional endpoints reject cache-busting query parameters before upstrea
   assert.equal(activityResponse.statusCode, 400);
   assert.equal(activityResponse.payload.error, 'Unsupported query parameter');
 
+  const excessiveActivityResponse = responseRecorder();
+  await tradfiActivityHandler({ method:'GET', query:{ limit:'101' } }, excessiveActivityResponse);
+  assert.equal(excessiveActivityResponse.statusCode, 400);
+  assert.equal(excessiveActivityResponse.payload.error, 'Invalid limit');
+
   const pricesResponse = responseRecorder();
   await tradfiPricesHandler({ method:'GET', query:{ symbols:'AAPL', refresh:'123' } }, pricesResponse);
   assert.equal(pricesResponse.statusCode, 400);
   assert.equal(pricesResponse.payload.error, 'Unsupported query parameter');
+
+  const excessivePricesResponse = responseRecorder();
+  const excessiveSymbols = Array.from({ length:101 }, (_, index) => `S${String(index).padStart(3, '0')}`).join(',');
+  await tradfiPricesHandler({ method:'GET', query:{ symbols:excessiveSymbols } }, excessivePricesResponse);
+  assert.equal(excessivePricesResponse.statusCode, 400);
+  assert.match(excessivePricesResponse.payload.error, /maximum is 100/);
 });
 
 test('traditional spot overlay resolves venue-verified wrappers before joining', async () => {

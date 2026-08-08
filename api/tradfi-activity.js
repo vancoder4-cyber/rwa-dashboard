@@ -20,9 +20,11 @@ const NASDAQ_SUMMARY = 'https://api.nasdaq.com/api/quote';
 const NASDAQ_LISTED = 'https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt';
 const OTHER_LISTED = 'https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt';
 const OCC_VOLUME = 'https://marketdata.theocc.com/onn-volume-download';
-const DEFAULT_LIMIT = 30;
-const MAX_LIMIT = 50;
-const OCC_CANDIDATE_COUNT = 30;
+const DEFAULT_LIMIT = 100;
+const MAX_LIMIT = 100;
+const OCC_CANDIDATE_COUNT = 100;
+const NASDAQ_BASELINE_CALENDAR_DAYS = 35;
+const NASDAQ_BASELINE_SESSIONS = 20;
 
 const SOURCE_HEADERS = {
   Accept: 'application/json, text/plain, */*',
@@ -74,17 +76,25 @@ export function occDateToIso(value) {
   return `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
 }
 
-export function nasdaqHistoricalWindow(sessionDate) {
-  const start = new Date(`${sessionDate}T00:00:00Z`);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(sessionDate || '')) || Number.isNaN(start.getTime())) {
+export function nasdaqHistoricalWindow(
+  sessionDate,
+  comparisonSessionDate = null,
+  baselineCalendarDays = NASDAQ_BASELINE_CALENDAR_DAYS,
+) {
+  const end = new Date(`${sessionDate}T00:00:00Z`);
+  const comparison = comparisonSessionDate ? new Date(`${comparisonSessionDate}T00:00:00Z`) : null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(sessionDate || '')) || Number.isNaN(end.getTime()) ||
+      (comparisonSessionDate && (!/^\d{4}-\d{2}-\d{2}$/.test(String(comparisonSessionDate)) || Number.isNaN(comparison.getTime())))) {
     return null;
   }
+  const baselineStart = addUtcDays(end, -Math.max(Number(baselineCalendarDays) || 0, 0));
+  const start = comparison && comparison < baselineStart ? comparison : baselineStart;
   return {
-    fromdate:sessionDate,
+    fromdate:start.toISOString().slice(0, 10),
     // Nasdaq rejects an equal from/to range with an HTTP-200 business error.
     // Use the next calendar day as the exclusive boundary, then select the
     // requested completed session from the returned rows.
-    todate:addUtcDays(start, 1).toISOString().slice(0, 10),
+    todate:addUtcDays(end, 1).toISOString().slice(0, 10),
   };
 }
 
@@ -100,8 +110,23 @@ export function parseNasdaqHistoricalRow(payload, sessionDate) {
   if (!row) return null;
   const volume = asNumber(row.volume);
   const close = asNumber(row.close);
-  if (!(volume >= 0) || !(close > 0)) return null;
+  if (!Number.isFinite(volume) || volume < 0 || !(close > 0)) return null;
   return { sessionDate, volume, close };
+}
+
+export function parseNasdaqHistoricalAverage(payload, sessionDate, maxSessions = NASDAQ_BASELINE_SESSIONS) {
+  const rows = payload?.data?.tradesTable?.rows;
+  if (!Array.isArray(rows)) return { averageVolume:null, samples:0 };
+  const volumes = rows
+    .map(row => ({ sessionDate:nasdaqDisplayDateToIso(row?.date), volume:asNumber(row?.volume) }))
+    .filter(row => row.sessionDate && row.sessionDate < sessionDate && Number.isFinite(row.volume) && row.volume >= 0)
+    .sort((a, b) => b.sessionDate.localeCompare(a.sessionDate))
+    .slice(0, Math.max(Number(maxSessions) || 0, 0))
+    .map(row => row.volume);
+  return {
+    averageVolume:volumes.length ? volumes.reduce((sum, volume) => sum + volume, 0) / volumes.length : null,
+    samples:volumes.length,
+  };
 }
 
 export function classifyNasdaqHistoricalPayload(payload, sessionDate) {
@@ -125,6 +150,37 @@ export function classifyNasdaqHistoricalPayload(payload, sessionDate) {
   return row
     ? { status:'aligned', reason:null, row }
     : { status:'invalid', reason:'invalid-session-volume-or-close', row:null };
+}
+
+export function classifyNasdaqHistoricalRange(payload, sessionDate, comparisonSessionDate = null) {
+  const historicalRows = payload?.data?.tradesTable?.rows;
+  const totalRecords = asNumber(payload?.data?.totalRecords);
+  const rangeTruncated = Array.isArray(historicalRows) && Number.isFinite(totalRecords) && totalRecords > historicalRows.length;
+  const previousMatchingRow = comparisonSessionDate && Array.isArray(historicalRows)
+    ? historicalRows.find(item => nasdaqDisplayDateToIso(item?.date) === comparisonSessionDate)
+    : null;
+  const previousRow = comparisonSessionDate
+    ? parseNasdaqHistoricalRow(payload, comparisonSessionDate)
+    : null;
+  let current = classifyNasdaqHistoricalPayload(payload, sessionDate);
+  // A valid two-session payload can contain the previous row but no current
+  // row (for example, a delisted or halted previous-session leader). That is
+  // an explicit session ineligibility, not a stale row that may be substituted.
+  if (current.status === 'invalid' && current.reason === 'requested-session-missing' && previousRow && !rangeTruncated) {
+    current = { status:'ineligible', reason:'no-session-row', row:null };
+  }
+  return {
+    current,
+    previous:comparisonSessionDate
+      ? previousRow
+        ? { status:'aligned', reason:null, row:previousRow }
+        : previousMatchingRow
+          ? { status:'invalid', reason:'invalid-session-volume-or-close', row:null }
+          : rangeTruncated
+            ? { status:'invalid', reason:'historical-range-truncated', row:null }
+            : { status:'ineligible', reason:'no-previous-session-row', row:null }
+      : null,
+  };
 }
 
 export function canAcceptNasdaqHistorical(classification, directoryBackedAttempt) {
@@ -230,25 +286,43 @@ async function fetchDollarVolumeLeaders() {
   };
 }
 
+export async function findFirstNonEmptyOccReport(reportDates, loadReportText) {
+  for (const reportDate of reportDates || []) {
+    const report = parseOccReport(await loadReportText(reportDate));
+    if (Object.keys(report.standardTotals).length) return { reportDate, ...report };
+  }
+  return null;
+}
+
 async function findLatestOccDay() {
   const candidate = addUtcDays(new Date(), -1);
-  for (let offset = 0; offset < 7; offset += 1) {
-    const reportDate = yyyymmdd(addUtcDays(candidate, -offset));
-    try {
-      const report = parseOccReport(await fetchText(occUrl('D', reportDate)));
-      if (Object.keys(report.standardTotals).length) return { reportDate, ...report };
-    } catch (error) {
-      if (offset === 6) throw error;
-    }
-  }
+  const reportDates = Array.from({ length:7 }, (_, offset) => yyyymmdd(addUtcDays(candidate, -offset)));
+  const report = await findFirstNonEmptyOccReport(
+    reportDates,
+    reportDate => fetchText(occUrl('D', reportDate)),
+  );
+  if (report) return report;
   throw new Error('No completed OCC trading-day report found');
+}
+
+async function findPreviousOccDay(reportDate) {
+  const current = new Date(`${reportDate.slice(0, 4)}-${reportDate.slice(4, 6)}-${reportDate.slice(6, 8)}T12:00:00Z`);
+  const reportDates = Array.from({ length:7 }, (_, index) => yyyymmdd(addUtcDays(current, -(index + 1))));
+  const report = await findFirstNonEmptyOccReport(
+    reportDates,
+    previousReportDate => fetchText(occUrl('D', previousReportDate)),
+  );
+  if (report) return report;
+  throw new Error(`No OCC trading-day report found before ${reportDate}`);
 }
 
 async function fetchOccBundle() {
   const latest = await findLatestOccDay();
   const latestDate = new Date(`${latest.reportDate.slice(0, 4)}-${latest.reportDate.slice(4, 6)}-${latest.reportDate.slice(6, 8)}T12:00:00Z`);
   const comparisonDates = [7, 14, 21, 28].map(days => yyyymmdd(addUtcDays(latestDate, -days)));
-  const comparisonReports = await Promise.all(comparisonDates.map(async reportDate => {
+  const [previous, comparisonReports] = await Promise.all([
+    findPreviousOccDay(latest.reportDate),
+    Promise.all(comparisonDates.map(async reportDate => {
     try {
       const report = parseOccReport(await fetchText(occUrl('D', reportDate)));
       return { reportDate, ...report, ok:Object.keys(report.standardTotals).length > 0 };
@@ -256,12 +330,16 @@ async function fetchOccBundle() {
       console.error('[tradfi-activity] OCC comparison report failed', reportDate, error.message);
       return { reportDate, standardTotals:{}, adjustedTotals:{}, ok:false };
     }
-  }));
+    })),
+  ]);
   const completedReports = comparisonReports.filter(report => report.ok);
   return {
     asOf:latest.reportDate,
     latestTotals:latest.standardTotals,
     latestAdjustedTotals:latest.adjustedTotals,
+    previousAsOf:previous.reportDate,
+    previousTotals:previous.standardTotals,
+    previousAdjustedTotals:previous.adjustedTotals,
     comparisonReports:completedReports,
     baselineReports:completedReports.map(report => report.reportDate),
     baselineSamples:completedReports.length,
@@ -307,7 +385,13 @@ export function optionActivityForSymbol(symbol, occBundle, lastPrice) {
   };
 }
 
-export function buildTraditionalCandidates(moverRows, latestOptionTotals, directory, optionCandidateCount = OCC_CANDIDATE_COUNT) {
+export function buildTraditionalCandidates(
+  moverRows,
+  latestOptionTotals,
+  directory,
+  optionCandidateCount = OCC_CANDIDATE_COUNT,
+  previousOptionTotals = {},
+) {
   const candidates = new Map();
   function add(symbol, mover = null, source) {
     const normalized = String(symbol || '').trim().toUpperCase();
@@ -334,119 +418,120 @@ export function buildTraditionalCandidates(moverRows, latestOptionTotals, direct
   });
   Object.entries(latestOptionTotals || {})
     .filter(([symbol]) => directory.has(symbol))
-    .sort((a, b) => b[1] - a[1])
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .slice(0, optionCandidateCount)
     .forEach(([symbol], index) => add(symbol, null, `OCC options #${index + 1}`));
+  Object.entries(previousOptionTotals || {})
+    .filter(([symbol]) => directory.has(symbol))
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, optionCandidateCount)
+    .forEach(([symbol], index) => add(symbol, null, `Previous OCC options #${index + 1}`));
   return [...candidates.values()];
 }
 
-async function fetchNasdaqAssetClass(symbol, assetClass) {
-  const payload = await fetchJson(`${NASDAQ_SUMMARY}/${encodeURIComponent(symbol)}/summary?assetclass=${assetClass}`, 12000);
-  return payload?.data?.summaryData || null;
-}
-
-async function fetchNasdaqIdentity(symbol, assetClass) {
-  const payload = await fetchJson(`${NASDAQ_SUMMARY}/${encodeURIComponent(symbol)}/info?assetclass=${assetClass}`, 12000);
-  return payload?.data || null;
-}
-
-async function fetchNasdaqHistorical(symbol, assetClass, sessionDate) {
+async function fetchNasdaqHistorical(symbol, assetClass, sessionDate, comparisonSessionDate = null) {
   if (!sessionDate) return null;
-  const window = nasdaqHistoricalWindow(sessionDate);
+  const window = nasdaqHistoricalWindow(sessionDate, comparisonSessionDate);
   if (!window) return null;
   const params = new URLSearchParams({
     assetclass:assetClass,
     ...window,
-    limit:'10',
+    limit:'30',
   });
   const payload = await fetchJson(
     `${NASDAQ_SUMMARY}/${encodeURIComponent(symbol)}/historical?${params}`,
     12000,
   );
-  const classification = classifyNasdaqHistoricalPayload(payload, sessionDate);
-  if (classification.status === 'invalid') {
-    throw new Error(`Nasdaq historical payload invalid: ${classification.reason}`);
+  const historicalRange = classifyNasdaqHistoricalRange(payload, sessionDate, comparisonSessionDate);
+  const { current } = historicalRange;
+  if (current.status === 'invalid') {
+    throw new Error(`Nasdaq historical payload invalid: ${current.reason}`);
   }
-  return classification;
+  return {
+    ...historicalRange,
+    baseline:parseNasdaqHistoricalAverage(payload, sessionDate),
+  };
 }
 
-async function fetchNasdaqDetail(candidate, rankingSession = null) {
+async function fetchNasdaqSessions(candidate, rankingSession, comparisonSession) {
   const preferred = candidate.categoryHint === 'etf' ? 'etf' : 'stocks';
-  const attempts = preferred === 'etf' ? ['etf', 'stocks'] : ['stocks', 'etf'];
+  const attempts = [preferred];
   const expectedAssetClass = candidate.category === 'etf' ? 'ETF' : 'STOCKS';
-  let summary = null;
-  let identity = null;
   let historical = null;
-  let historicalStatus = rankingSession ? 'unavailable' : 'latest';
+  let previousHistorical = null;
+  let historicalStatus = 'unavailable';
   let historicalReason = null;
+  let previousHistoricalStatus = 'unavailable';
+  let previousHistoricalReason = null;
+  let averageVolume = null;
+  let averageSamples = 0;
   for (const assetClass of attempts) {
-    const [summaryResult, identityResult, historicalResult] = await Promise.allSettled([
-      fetchNasdaqAssetClass(candidate.symbol, assetClass),
-      fetchNasdaqIdentity(candidate.symbol, assetClass),
-      fetchNasdaqHistorical(candidate.symbol, assetClass, rankingSession),
-    ]);
-    const candidateSummary = summaryResult.status === 'fulfilled' ? summaryResult.value : null;
-    const candidateIdentity = identityResult.status === 'fulfilled' ? identityResult.value : null;
-    const candidateHistorical = historicalResult.status === 'fulfilled' ? historicalResult.value : null;
-    const actualAssetClass = String(candidateIdentity?.assetClass || '').toUpperCase();
-    const identityMatches = Boolean(candidateIdentity?.companyName) && actualAssetClass === expectedAssetClass;
+    let candidateHistorical = null;
+    try {
+      candidateHistorical = await fetchNasdaqHistorical(
+        candidate.symbol,
+        assetClass,
+        rankingSession,
+        comparisonSession,
+      );
+    } catch (error) {
+      continue;
+    }
     const directoryBackedAttempt = assetClass === preferred;
-    const requiredMarketDataAvailable = rankingSession
-      ? canAcceptNasdaqHistorical(candidateHistorical, directoryBackedAttempt)
-      : true;
-    if (requiredMarketDataAvailable && (identityMatches || directoryBackedAttempt)) {
-      summary = candidateSummary;
-      identity = identityMatches ? candidateIdentity : null;
-      historical = candidateHistorical?.row || null;
-      historicalStatus = candidateHistorical?.status || historicalStatus;
-      historicalReason = candidateHistorical?.reason || null;
+    if (canAcceptNasdaqHistorical(candidateHistorical?.current, directoryBackedAttempt)) {
+      historical = candidateHistorical?.current?.row || null;
+      historicalStatus = candidateHistorical?.current?.status || historicalStatus;
+      historicalReason = candidateHistorical?.current?.reason || null;
+      previousHistorical = candidateHistorical?.previous?.row || null;
+      previousHistoricalStatus = candidateHistorical?.previous?.status || previousHistoricalStatus;
+      previousHistoricalReason = candidateHistorical?.previous?.reason || null;
+      averageVolume = candidateHistorical?.baseline?.averageVolume ?? null;
+      averageSamples = candidateHistorical?.baseline?.samples || 0;
       break;
     }
   }
-  summary = summary || {};
-  const primary = identity?.primaryData || {};
-  const secondary = identity?.secondaryData || {};
-  const actualAssetClass = String(identity?.assetClass || '').toUpperCase();
-  const acceptedIdentity = actualAssetClass === expectedAssetClass;
-  const sessionAligned = rankingSession ? historical?.sessionDate === rankingSession : acceptedIdentity;
-  const volume = rankingSession
-    ? (sessionAligned ? historical.volume : null)
-    : (asNumber(primary.volume) ?? asNumber(summary.ShareVolume?.value));
-  const lastPrice = rankingSession
-    ? (sessionAligned ? historical.close : null)
-    : (asNumber(primary.lastSalePrice) ?? candidate.lastPrice ?? asNumber(secondary.lastSalePrice) ?? asNumber(summary.PreviousClose?.value));
-  const averageVolume = asNumber(
-    summary.AverageVolume?.value ??
-    summary.AvgDailyVol20Days?.value ??
-    summary.FiftyDayAvgDailyVol?.value ??
-    summary.AvgDailyVol65Days?.value,
-  );
-  const officialName = identity?.companyName || candidate.name;
+  const sessionAligned = historical?.sessionDate === rankingSession;
+  const previousSessionAligned = previousHistorical?.sessionDate === comparisonSession;
+  const volume = sessionAligned ? historical.volume : null;
+  const lastPrice = sessionAligned ? historical.close : null;
   const tags = [...candidate.tags];
-  if (ADR_NAME_PATTERN.test(`${officialName} ${identity?.stockType || ''}`) && !tags.includes('ADR')) tags.push('ADR');
   return {
     symbol:candidate.symbol,
     category:candidate.category,
     tags,
     market:{
       symbol:candidate.symbol,
-      assetClass:actualAssetClass || expectedAssetClass,
-      officialName,
-      stockType:identity?.stockType || null,
-      identityStatus:acceptedIdentity ? 'confirmed' : 'directory-confirmed',
-      exchange:String(summary.Exchange?.value || candidate.exchange || '').trim() || null,
+      assetClass:expectedAssetClass,
+      officialName:candidate.name,
+      stockType:null,
+      identityStatus:'directory-confirmed',
+      exchange:candidate.exchange || null,
       volume,
       averageVolume,
-      averageWindow:summary.AvgDailyVol20Days?.value ? '20 sessions' : 'Nasdaq displayed average',
+      averageSamples,
+      averageWindow:averageSamples ? `${averageSamples} prior completed sessions` : null,
       relativeVolume:volume !== null && averageVolume > 0 ? volume / averageVolume : null,
       lastPrice,
       sessionDate:sessionAligned ? rankingSession : null,
       sessionEligibility:historicalStatus,
       sessionExclusionReason:historicalStatus === 'ineligible' ? historicalReason : null,
-      priceAsOf:sessionAligned ? rankingSession : primary.lastTradeTimestamp || secondary.lastTradeTimestamp || null,
-      previousClose:asNumber(summary.PreviousClose?.value),
+      priceAsOf:sessionAligned ? rankingSession : null,
+      previousClose:null,
       estimatedValue:estimatedShareValue(volume, lastPrice),
-      status:volume !== null && lastPrice > 0 && averageVolume > 0 ? 'full' : volume !== null && lastPrice > 0 ? 'partial' : 'unavailable',
+      status:volume !== null && lastPrice > 0 && averageSamples >= NASDAQ_BASELINE_SESSIONS
+        ? 'full'
+        : volume !== null && lastPrice > 0 ? 'partial' : 'unavailable',
+    },
+    previousMarket:{
+      sessionDate:previousSessionAligned ? comparisonSession : null,
+      volume:previousSessionAligned ? previousHistorical.volume : null,
+      lastPrice:previousSessionAligned ? previousHistorical.close : null,
+      estimatedValue:previousSessionAligned
+        ? estimatedShareValue(previousHistorical.volume, previousHistorical.close)
+        : null,
+      sessionEligibility:previousHistoricalStatus,
+      sessionExclusionReason:previousHistoricalStatus === 'ineligible' ? previousHistoricalReason : null,
+      status:previousSessionAligned ? 'full' : 'unavailable',
     },
   };
 }
@@ -487,6 +572,47 @@ export function hasCompleteTraditionalAlignment(alignment) {
     Number(alignment?.droppedCandidateCount) === 0;
 }
 
+function compareTraditionalRows(a, b, valueKey, marketValueKey) {
+  return Number(b?.[valueKey] || 0) - Number(a?.[valueKey] || 0) ||
+    Number(b?.[marketValueKey] || 0) - Number(a?.[marketValueKey] || 0) ||
+    String(a?.symbol || '').localeCompare(String(b?.symbol || ''));
+}
+
+export function rankTraditionalRows(rows, limit = MAX_LIMIT, comparisonAvailable = true, entryLimit = MAX_LIMIT) {
+  const cappedLimit = Math.min(Math.max(Number(limit) || MAX_LIMIT, 1), MAX_LIMIT);
+  const topBoundary = Math.min(Math.max(Number(entryLimit) || MAX_LIMIT, 1), MAX_LIMIT);
+  const previousRanks = new Map();
+  if (comparisonAvailable) {
+    [...(rows || [])]
+      .filter(row => Number(row?.previousTraditionalTotalValue) > 0)
+      .sort((a, b) => compareTraditionalRows(a, b, 'previousTraditionalTotalValue', 'previousMarketEstimatedValue'))
+      .forEach((row, index) => previousRanks.set(row.symbol, index + 1));
+  }
+
+  return [...(rows || [])]
+    .filter(row => Number(row?.traditionalTotalValue) > 0)
+    .sort((a, b) => compareTraditionalRows(a, b, 'traditionalTotalValue', 'marketEstimatedValue'))
+    .slice(0, cappedLimit)
+    .map((row, index) => {
+      const rank = index + 1;
+      const previousRank = comparisonAvailable ? (previousRanks.get(row.symbol) || null) : null;
+      let rankChange = { status:'unavailable', delta:null, previousRank:null };
+      if (comparisonAvailable) {
+        if (previousRank === null || previousRank > topBoundary) {
+          rankChange = { status:'new', delta:null, previousRank };
+        } else {
+          const delta = previousRank - rank;
+          rankChange = {
+            status:delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat',
+            delta,
+            previousRank,
+          };
+        }
+      }
+      return { ...row, rank, previousRank, rankChange };
+    });
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');
@@ -496,7 +622,7 @@ export default async function handler(req, res) {
   if (queryKeys.some(key => key !== 'limit')) {
     return res.status(400).json({ error:'Unsupported query parameter' });
   }
-  if (req.query?.limit !== undefined && !/^(?:[1-9]|[1-4]\d|50)$/.test(String(req.query.limit))) {
+  if (req.query?.limit !== undefined && !/^(?:[1-9]|[1-9]\d|100)$/.test(String(req.query.limit))) {
     return res.status(400).json({ error:'Invalid limit' });
   }
   const requestedLimit = Number.parseInt(req.query.limit, 10);
@@ -511,13 +637,19 @@ export default async function handler(req, res) {
       movers.rows,
       occBundle?.latestTotals || {},
       directory,
+      OCC_CANDIDATE_COUNT,
+      occBundle?.previousTotals || {},
     );
     const rankingSession = occDateToIso(occBundle?.asOf);
+    const comparisonSession = occDateToIso(occBundle?.previousAsOf);
     if (!rankingSession) throw new Error('OCC completed-session date is unavailable');
+    if (!comparisonSession || comparisonSession >= rankingSession) {
+      throw new Error('Previous OCC completed-session date is unavailable');
+    }
     const detailed = await mapWithConcurrency(
       candidates,
-      6,
-      candidate => fetchNasdaqDetail(candidate, rankingSession),
+      10,
+      candidate => fetchNasdaqSessions(candidate, rankingSession, comparisonSession),
     );
     const alignment = summarizeTraditionalAlignment(detailed, candidates, rankingSession);
     if (!hasCompleteTraditionalAlignment(alignment)) {
@@ -525,10 +657,21 @@ export default async function handler(req, res) {
         `Insufficient Nasdaq/OCC session alignment: ${alignment.alignedCandidateCount}/${alignment.eligibleCandidateCount} eligible candidates`,
       );
     }
+    const comparisonAlignment = summarizeTraditionalAlignment(
+      detailed.map(detail => ({ ...detail, market:detail.previousMarket })),
+      candidates,
+      comparisonSession,
+    );
+    const comparisonAvailable = hasCompleteTraditionalAlignment(comparisonAlignment);
     const candidateBySymbol = Object.fromEntries(candidates.map(candidate => [candidate.symbol, candidate]));
-    const rows = detailed.map(detail => {
+    const unrankedRows = detailed.map(detail => {
       const candidate = candidateBySymbol[detail.symbol];
       const options = optionActivityForSymbol(detail.symbol, occBundle, detail.market.lastPrice);
+      const previousOptionsVolume = Number(occBundle?.previousTotals?.[detail.symbol] || 0);
+      const previousOptionsNotional = detail.previousMarket?.lastPrice > 0
+        ? estimatedOptionsNotional(previousOptionsVolume, detail.previousMarket.lastPrice)
+        : null;
+      const previousMarketEstimatedValue = detail.previousMarket?.estimatedValue || 0;
       return {
         symbol:detail.symbol,
         name:detail.market.officialName || candidate.name,
@@ -537,13 +680,16 @@ export default async function handler(req, res) {
         sourceRanks:candidate.sourceRanks,
         market:detail.market,
         options,
+        previousMarket:detail.previousMarket,
+        previousOptionsVolume,
+        previousOptionsNotional,
+        previousMarketEstimatedValue,
+        marketEstimatedValue:detail.market.estimatedValue || 0,
+        previousTraditionalTotalValue:previousMarketEstimatedValue + (previousOptionsNotional || 0),
         traditionalTotalValue:(detail.market.estimatedValue || 0) + (options.estimatedNotional || 0),
       };
-    })
-      .filter(row => row.traditionalTotalValue > 0)
-      .sort((a, b) => b.traditionalTotalValue - a.traditionalTotalValue || (b.market.estimatedValue || 0) - (a.market.estimatedValue || 0))
-      .slice(0, limit)
-      .map((row, index) => ({ ...row, rank:index + 1 }));
+    });
+    const rows = rankTraditionalRows(unrankedRows, limit, comparisonAvailable);
 
     setPublicCache(res, 900, 3600);
     return res.status(200).json({
@@ -551,15 +697,23 @@ export default async function handler(req, res) {
       scope:'Traditional official candidate-set ranking completed before any crypto coverage is joined',
       methodology:{
         ranking:'Rank within the disclosed official candidate set by estimated share value + estimated standard-options underlying notional',
-        candidatePool:'Current Nasdaq official dollar-volume leader snapshot ∪ OCC ranking-session options-volume leaders',
+        candidatePool:'Current Nasdaq official dollar-volume leader snapshot ∪ current OCC options-volume leaders ∪ previous-session OCC options-volume leaders',
         rankingCompleteness:'official-candidate-set',
-        candidateCaveat:'This is not a full-universe leaderboard when the Nasdaq candidate snapshot and the OCC T+1 ranking session differ.',
+        candidateCaveat:'Nasdaq does not expose the previous dollar-volume-leader snapshot through this public feed, so this is a tracked official candidate-set Top 100 rather than a full U.S. market Top 100.',
         shareValue:'Nasdaq completed-session share volume × same-session close',
         optionsValue:'OCC same-session standard contracts × 100-share multiplier × Nasdaq close',
         caveat:'Estimated notionals; not consolidated share turnover or option-premium volume. Share volume and closing price are aligned to the OCC completed session. Adjusted option roots are excluded from notional.',
         directoryUniverse:directory.size,
         candidateCount:candidates.length,
+        rankableCandidateCount:unrankedRows.filter(row => row.traditionalTotalValue > 0).length,
         rankingSession,
+        comparisonSession,
+        rankComparison:{
+          status:comparisonAvailable ? 'full' : 'unavailable',
+          definition:'Previous completed-session rank minus current rank; NEW means not in the previous candidate-set Top 100',
+          caveat:'Comparison is within the disclosed union of current Nasdaq leaders plus current and previous OCC leaders; it does not reconstruct the previous Nasdaq mover snapshot.',
+          alignment:comparisonAlignment,
+        },
         moverAsOf:movers.asOf,
         alignment,
       },
@@ -578,6 +732,7 @@ export default async function handler(req, res) {
           url:'https://www.theocc.com/market-data/market-data-reports/volume-and-open-interest/volume-query',
           latency:'T+1 completed-session volume',
           asOf:occBundle?.asOf || null,
+          previousAsOf:occBundle?.previousAsOf || null,
           baselineReports:occBundle?.baselineReports || [],
           baselineSamples:occBundle?.baselineSamples || 0,
         },
