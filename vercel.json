@@ -1,6 +1,7 @@
 {
   "crons": [
-    { "path": "/api/health", "schedule": "0 1 * * *" }
+    { "path": "/api/health", "schedule": "0 1 * * *" },
+    { "path": "/api/signal-snapshot-cron", "schedule": "7 * * * *" }
   ],
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }

@@ -5,5 +5,8 @@
     "check:inline": "node scripts/check-inline-js.mjs",
     "audit:data": "node scripts/audit-data.mjs",
     "audit:health": "node scripts/audit-health.mjs"
+  },
+  "dependencies": {
+    "@vercel/functions": "3.9.0"
   }
 }

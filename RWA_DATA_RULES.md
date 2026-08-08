@@ -265,3 +265,32 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 - Codex 每日生成只读健康摘要，每周重新核对完整场所 catalog、身份冲突、上市生命周期、分类标签和历史覆盖。
 - 自动检查不得直接修改 allowlist、分类、基线或生产；发现漂移时必须给出官方证据并等待人工确认。
 - 任何已知 crypto 同名资产泄漏、币种/单位错误或大面积 Reference/Funding 错误均按 P0 处理。
+
+## 17. Asset Intelligence 与 Signal Radar
+
+三处界面必须共享同一个身份键：`assetKey = category + ':' + canonical underlying`。精确 venue ticker / wrapper 只作为 listing 明细，不能作为跨场所聚合键。`AAPL`、`AAPLX`、`AAPLon` 可在官方 wrapper 证据成立后归入同一 underlying；普通 Crypto ticker 即使同名也不得加入。
+
+### Asset Intelligence Drawer
+
+- 旧 `openAssetModal(venue, asset)` 仅保留为兼容入口，实际模型必须在每次打开/刷新时按 canonical identity 重新从当前 Perp、Spot、Traditional 数据解析，不能长期持有旧 row 对象。
+- Equity / ETF / Pre-IPO Spot 只有通过 `spotAssetSecurityIdentity()` 的 wrapper 才能进入 Drawer；商品等非证券 RWA 仍必须先通过场所官方 RWA catalog/category。标题显示 canonical、名称、category 与市场 tag；各场所表保留 venue symbol、wrapper、字段状态与 last-success timestamp。
+- 参考价、Nasdaq/OCC、Perp、Spot、Funding、Volume、OI 和可比价格价差都必须保留 Full / Partial / Estimated / Unavailable。缺失字段不补零；stale price 不进入价差。
+- 最大价差继续使用 `(max - min) / min`、USD/share 同单位及 0.5×–1.5× reference quarantine，且只能称 `Indicative / Estimated`，不称可执行套利。
+- Drawer 和 Signal Radar 必须复用同一 canonical key；Radar 行点击后不得在 Drawer 中重新按裸 ticker 猜身份。
+
+### 服务端信号快照
+
+- `GET /api/signal-snapshot` 是固定来源、GET-only、无 query 的服务端分析接口。来源只能是 Gate、Binance、Bitget 与 trade.xyz 的官方 catalog/market snapshot；官方 identity/category 缺失的 listing 必须 fail closed。监控 universe 是在身份 quarantine 后按 `24h USD volume + USD OI` 排序的 Top 100，响应与历史使用同一 universe，不能返回永远没有历史资格的后排资产。
+- 普通 `crypto/coin/token/meme` category 在服务端直接拒绝。相同 canonical symbol 出现互斥 category 时，该 symbol 整体 quarantine 并计入 `identityConflicts`，不得选择价格更像股票的一侧。
+- 服务端证券生命周期、ETF underlying、显式 wrapper alias、精确官方类型和 Binance bStock 映射集中在 `api/_lib/security-identity.js`。结尾 `B` 不能通用剥离；只有审计过的 bStock wrapper 表可以映射 underlying。客户端 `SECURITY_LISTING_REGISTRY` / `ETF_SYMBOLS` / `TOKENIZED_ETF_WRAPPERS` 与服务端 registry 必须由 contract test 校验一致，避免场所笼统的 `stock` 类型把 QQQ、SPY、SOXL、MUU 等 ETF 错标 Equity。
+- Funding 年化必须使用每个合约实际 interval：`rate × (24 / intervalHours) × 365`。真实零费率保留为 0；缺失保持 null。
+- 绝对阈值首版版本为 `rwa-radar-1.0`：Funding Watch 50% APR / High 100%；跨场所 Perp 价格 dispersion Watch 1% / High 3%；24h price move Watch 5% / High 10%。Volume/OI 只有至少 24 个小时样本后才使用 robust history score。
+- 综合分数取最强 component，并对额外触发项小幅加分；不得把 APR、美元成交量和百分比直接相加。每行披露 primary type、component、formula version、baseline status、reason codes 和 confidence。
+- 小于 24 个小时样本必须显示 `Baseline warming`，24–167 为 Partial，168 个小时样本才是 Full baseline；无历史时仍可显示越过绝对阈值的 Partial 信号，但不得显示 `All Normal`。
+
+### 历史连续性
+
+- 当前首版通过受 `CRON_SECRET` 保护且 `no-store` 的 `/api/signal-snapshot-cron`，按 UTC 小时桶幂等写入 Vercel Runtime Cache；公开的 `/api/signal-snapshot` 是 CDN 缓存读接口，不能直接作为 Cron target。最多保留 168 个服务端快照、每个资产最多返回 48 点；浏览器 `localStorage` 不再是 KPI 或 Radar 历史的数据源。
+- 只有 Gate、Binance、Bitget、trade.xyz 四份 source snapshot 都为 Full 时才把当前桶写进历史。来源不完整时允许返回当前 Partial 监控结果，但不写基线，且没有越过绝对阈值的资产不能显示为 Normal。
+- Runtime Cache 跨部署保留但属于区域 best-effort cache，可能被逐出，不是永久数据库。因此 API 的 persistence 主状态最多为 Partial，并明确返回 continuity、region、storedSnapshots 和 baseline coverage。
+- 如需 30 日以上、跨 region 严格连续、可审计的历史，应迁移到 Neon/Postgres（run 表 + observation 表 + signal/fingerprint 表）；在迁移前不得把本缓存描述为永久数据库。

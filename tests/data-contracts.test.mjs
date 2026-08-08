@@ -6,7 +6,26 @@ import { historyCoverage, normalizeHistoryRows } from '../api/funding-history.js
 import { assessChecks } from '../api/_lib/health.js';
 import { FX_REFERENCE_MAP, yahooSymbolFor } from '../api/_lib/reference-map.js';
 import { setNoStore, setPublicCache } from '../api/_lib/upstream.js';
+import {
+  SIGNAL_ASSET_LIMIT,
+  aggregateSignalListings,
+  attachSignalAnalysis,
+  canonicalSignalSymbol,
+  compactSignalSnapshot,
+} from '../api/_lib/signal-analysis.js';
+import {
+  SECURITY_ETF_UNDERLYINGS,
+  SECURITY_LISTING_REGISTRY,
+  TOKENIZED_ETF_WRAPPERS,
+  categoryFromOfficialSignalType,
+  normalizeSignalIdentity,
+} from '../api/_lib/security-identity.js';
 import gateBulkHandler from '../api/gate-bulk.js';
+import signalSnapshotHandler, {
+  isSignalSnapshotComparable,
+  mergeSignalHistory,
+} from '../api/signal-snapshot.js';
+import signalSnapshotCronHandler from '../api/signal-snapshot-cron.js';
 import tradfiActivityHandler, {
   buildTraditionalCandidates,
   canAcceptNasdaqHistorical,
@@ -110,6 +129,212 @@ test('health assessment distinguishes degraded from unhealthy', () => {
   assert.equal(assessChecks([{ status: 'fail' }, { status: 'fail' }]).status, 'unhealthy');
 });
 
+test('signal identity gate rejects crypto types, conflicts, and preserves real zero funding', () => {
+  assert.equal(canonicalSignalSymbol('QNT', 'crypto'), null);
+  assert.equal(canonicalSignalSymbol('OPENAI', 'preipo'), 'OPENAI');
+  assert.equal(canonicalSignalSymbol('CL', 'equity'), 'CL');
+  assert.equal(canonicalSignalSymbol('CL', 'commodity'), 'WTI');
+  const result = aggregateSignalListings([
+    {
+      symbol:'QNTX', category:'equity', venue:'binance', venueSymbol:'QNTXUSDT',
+      priceUsd:100, volume24hUsd:1_000_000, openInterestUsd:null,
+      fundingRate:0, fundingIntervalHours:8, change24hPct:1,
+    },
+    {
+      symbol:'QNT', category:'crypto', venue:'malicious', venueSymbol:'QNTUSDT',
+      priceUsd:1, volume24hUsd:9_999_999, openInterestUsd:9_999_999,
+      fundingRate:0.1, fundingIntervalHours:8, change24hPct:99,
+    },
+    {
+      symbol:'DUAL', category:'equity', venue:'one', venueSymbol:'DUAL-EQUITY',
+      priceUsd:10, volume24hUsd:1, openInterestUsd:1, fundingRate:0, fundingIntervalHours:8,
+    },
+    {
+      symbol:'DUAL', category:'index', venue:'two', venueSymbol:'DUAL-INDEX',
+      priceUsd:1_000, volume24hUsd:1, openInterestUsd:1, fundingRate:0, fundingIntervalHours:8,
+    },
+  ]);
+  assert.deepEqual(result.assets.map(asset => asset.symbol), ['QNT']);
+  assert.equal(result.rejected.length, 1);
+  assert.equal(result.conflicts.length, 1);
+  assert.equal(result.assets[0].listings[0].fundingAnnualizedPct, 0);
+  assert.equal(result.assets[0].fieldStatus.funding, 'full');
+  assert.equal(result.assets[0].openInterestUsd, null);
+  assert.equal(result.assets[0].fieldStatus.openInterestUsd, 'unavailable');
+});
+
+test('signal lifecycle, wrapper, and official-type identity rules match the client registry', async () => {
+  assert.deepEqual(normalizeSignalIdentity('SPCXB', 'pre-ipo'), { symbol:'SPCX', category:'equity' });
+  assert.deepEqual(normalizeSignalIdentity('CBRSON', 'pre-ipo'), { symbol:'CBRS', category:'equity' });
+  assert.deepEqual(normalizeSignalIdentity('QNTB', 'equity'), { symbol:'QNT', category:'equity' });
+  assert.deepEqual(normalizeSignalIdentity('OPENAI', 'equity'), { symbol:'OPENAI', category:'pre-ipo' });
+  assert.deepEqual(normalizeSignalIdentity('ANTHROPIC', 'equity'), { symbol:'ANTHROPIC', category:'pre-ipo' });
+  assert.deepEqual(normalizeSignalIdentity('AAPLB', 'equity', { allowBinanceBstock:true }), { symbol:'AAPL', category:'equity' });
+  assert.deepEqual(normalizeSignalIdentity('QQQB', 'equity', { allowBinanceBstock:true }), { symbol:'QQQ', category:'etf' });
+  assert.deepEqual(normalizeSignalIdentity('SOXLB', 'equity', { allowBinanceBstock:true }), { symbol:'SOXL', category:'etf' });
+  assert.deepEqual(normalizeSignalIdentity('MUU', 'equity'), { symbol:'MUU', category:'etf' });
+  assert.deepEqual(normalizeSignalIdentity('SPYX', 'equity'), { symbol:'SPY', category:'etf' });
+  assert.deepEqual(normalizeSignalIdentity('FOOB', 'equity', { allowBinanceBstock:true }), { symbol:'FOOB', category:'equity' });
+  assert.equal(categoryFromOfficialSignalType('ETF'), 'etf');
+  assert.equal(categoryFromOfficialSignalType('stock_etf'), 'etf');
+  assert.equal(categoryFromOfficialSignalType('crypto_etf_token'), null);
+  assert.equal(categoryFromOfficialSignalType('ETFCOIN'), null);
+
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const registrySource = sourceBetween(
+    html,
+    'const SECURITY_LISTING_REGISTRY = Object.freeze({',
+    'const SECURITY_LISTING_ALIAS_MAP = Object.freeze(',
+  );
+  const clientCanonicals = [...registrySource.matchAll(/^\s{2}([A-Z0-9]+): Object\.freeze\(\{/gm)]
+    .map(match => match[1])
+    .sort();
+  assert.deepEqual(clientCanonicals, Object.keys(SECURITY_LISTING_REGISTRY).sort());
+  for (const [canonical, record] of Object.entries(SECURITY_LISTING_REGISTRY)) {
+    const entry = registrySource.match(new RegExp(
+      `\\b${canonical}: Object\\.freeze\\(\\{[\\s\\S]*?category:'([^']+)'[\\s\\S]*?aliases:Object\\.freeze\\(\\[([^\\]]*)\\]\\)`,
+    ));
+    assert.ok(entry, `missing client lifecycle entry for ${canonical}`);
+    assert.equal(entry[1], record.category, `category drift for ${canonical}`);
+    const aliases = [...entry[2].matchAll(/'([^']+)'/g)].map(match => match[1]).sort();
+    assert.deepEqual(aliases, [...record.aliases].sort(), `alias drift for ${canonical}`);
+  }
+
+  const etfSource = sourceBetween(
+    html,
+    'const ETF_SYMBOLS = new Set([',
+    '// Venue wrapper tickers whose underlying is an ETF',
+  );
+  const clientEtfs = [...new Set([...etfSource.matchAll(/'([A-Z0-9-]+)'/g)].map(match => match[1]))].sort();
+  assert.deepEqual(clientEtfs, [...SECURITY_ETF_UNDERLYINGS].sort(), 'ETF identity drift between client and server');
+  const wrapperSource = sourceBetween(
+    html,
+    'const TOKENIZED_ETF_WRAPPERS = Object.freeze({',
+    '// One audited lifecycle registry owns',
+  );
+  const clientWrappers = Object.fromEntries(
+    [...wrapperSource.matchAll(/([A-Z0-9]+):'([A-Z0-9-]+)'/g)].map(match => [match[1], match[2]]),
+  );
+  assert.deepEqual(clientWrappers, TOKENIZED_ETF_WRAPPERS, 'tokenized ETF wrapper drift between client and server');
+});
+
+test('signal history uses idempotent hourly buckets and a bounded seven-day ring', () => {
+  const hour = 3_600_000;
+  const now = 2_000_000_000_000;
+  const history = Array.from({ length:200 }, (_, index) => ({
+    t:now - (199 - index) * hour,
+    a:[[String(index), 'equity', index, index, 0, 1, 0, 0, 1]],
+  }));
+  const replacement = { t:now, a:[['LATEST', 'equity', 1, 1, 0, 1, 0, 0, 1]] };
+  const merged = mergeSignalHistory(history, replacement, now);
+  assert.equal(merged.length, 168);
+  assert.equal(new Set(merged.map(snapshot => snapshot.t)).size, merged.length);
+  assert.deepEqual(merged.at(-1), replacement);
+  assert.equal(merged.filter(snapshot => snapshot.t < replacement.t).length, 167);
+});
+
+test('signal response and history share one activity-ranked Top 100 universe', () => {
+  const listings = Array.from({ length:125 }, (_, index) => ({
+    symbol:`ASSET${index}`,
+    category:'equity',
+    venue:'gate',
+    venueSymbol:`ASSET${index}_USDT`,
+    priceUsd:1,
+    volume24hUsd:index,
+    openInterestUsd:index,
+    fundingRate:0,
+    fundingIntervalHours:8,
+  }));
+  const assets = aggregateSignalListings(listings).assets;
+  const compact = compactSignalSnapshot(assets, 2_000_000_000_000);
+  assert.equal(SIGNAL_ASSET_LIMIT, 100);
+  assert.equal(assets.length, SIGNAL_ASSET_LIMIT);
+  assert.equal(compact.a.length, assets.length);
+  assert.deepEqual(compact.a.map(row => row[0]), assets.map(asset => asset.symbol));
+});
+
+test('signal analysis exposes warming history without hiding absolute high-severity thresholds', () => {
+  const aggregated = aggregateSignalListings([{
+    symbol:'AAPL', category:'equity', venue:'gate', venueSymbol:'AAPL_USDT',
+    priceUsd:200, volume24hUsd:5_000_000, openInterestUsd:2_000_000,
+    fundingRate:0.001, fundingIntervalHours:8, change24hPct:1,
+  }]).assets;
+  const analyzed = attachSignalAnalysis(aggregated, [], 2_000_000_000_000)[0];
+  assert.equal(analyzed.signal.baselineStatus, 'warming');
+  assert.equal(analyzed.signal.level, 'high');
+  assert.equal(analyzed.signal.status, 'partial');
+  assert.ok(analyzed.signal.reasonCodes.includes('BASELINE_WARMING'));
+  assert.ok(analyzed.signal.reasonCodes.includes('FUNDING_THRESHOLD'));
+  assert.equal(analyzed.history.availableSamples, 1);
+  assert.equal(compactSignalSnapshot(aggregated, 2_000_000_000_000).a.length, 1);
+});
+
+test('signal analysis keeps Full at 168 total samples and detects a zero-variance break', () => {
+  const hour = 3_600_000;
+  const now = 2_000_000_000_000;
+  const historical = Array.from({ length:167 }, (_, index) => ({
+    t:now - (167 - index) * hour,
+    a:[['AAPL', 'equity', 0, 0, 0, 100, 0, null, 1]],
+  }));
+  const current = aggregateSignalListings([{
+    symbol:'AAPL', category:'equity', venue:'gate', venueSymbol:'AAPL_USDT',
+    priceUsd:112, volume24hUsd:1_000_000, openInterestUsd:500_000,
+    fundingRate:0, fundingIntervalHours:8, change24hPct:12,
+  }]).assets;
+  const analyzed = attachSignalAnalysis(current, historical, now)[0];
+  assert.equal(analyzed.history.availableSamples, 168);
+  assert.equal(analyzed.signal.baselineStatus, 'full');
+  assert.equal(analyzed.signal.components.volume.score, 100);
+  assert.equal(analyzed.signal.components.openInterest.score, 100);
+  assert.ok(analyzed.signal.reasonCodes.includes('PRICE_MOVE_THRESHOLD'));
+  assert.ok(analyzed.signal.reasonCodes.includes('VOLUME_ROBUST_Z'));
+});
+
+test('incomplete source coverage cannot become comparable anomaly history', () => {
+  const fullSources = Object.fromEntries(['gate', 'binance', 'bitget', 'tradexyz'].map(name => [name, { status:'full' }]));
+  assert.equal(isSignalSnapshotComparable(fullSources), true);
+  assert.equal(isSignalSnapshotComparable({ ...fullSources, gate:{ status:'partial' } }), false);
+  assert.equal(isSignalSnapshotComparable({ ...fullSources, gate:{ status:'unavailable' } }), false);
+  const asset = aggregateSignalListings([{
+    symbol:'AAPL', category:'equity', venue:'gate', venueSymbol:'AAPL_USDT',
+    priceUsd:100, volume24hUsd:1, openInterestUsd:1, fundingRate:0, fundingIntervalHours:8,
+  }]).assets;
+  const analyzed = attachSignalAnalysis(asset, [], 2_000_000_000_000, { snapshotComparable:false })[0];
+  assert.equal(analyzed.signal.status, 'partial');
+  assert.equal(analyzed.signal.level, 'warming');
+  assert.ok(analyzed.signal.reasonCodes.includes('SOURCE_SNAPSHOT_INCOMPARABLE'));
+});
+
+test('signal snapshot rejects cache-busting input before source or cache work', async () => {
+  let fetchCount = 0;
+  await withFetchStub(async () => {
+    fetchCount += 1;
+    throw new Error('invalid request reached upstream');
+  }, async () => {
+    const response = responseRecorder();
+    await signalSnapshotHandler({ method:'GET', query:{ refresh:'1' }, headers:{} }, response);
+    assert.equal(response.statusCode, 400);
+    assert.equal(response.payload.error, 'Unsupported query parameter');
+    assert.equal(response.headers['Cache-Control'], 'private, no-store, max-age=0');
+  });
+  assert.equal(fetchCount, 0);
+});
+
+test('signal snapshot cron is authenticated and never CDN cached', async () => {
+  const originalSecret = process.env.CRON_SECRET;
+  process.env.CRON_SECRET = 'contract-test-secret';
+  try {
+    const response = responseRecorder();
+    await signalSnapshotCronHandler({ method:'GET', query:{}, headers:{} }, response);
+    assert.equal(response.statusCode, 401);
+    assert.equal(response.headers['Cache-Control'], 'private, no-store, max-age=0');
+    assert.equal(response.headers['Vercel-CDN-Cache-Control'], 'no-store');
+  } finally {
+    if (originalSecret === undefined) delete process.env.CRON_SECRET;
+    else process.env.CRON_SECRET = originalSecret;
+  }
+});
+
 test('traditional activity is a standalone top-level page', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   assert.match(html, /data-p="traditional" onclick="switchTopPage\('traditional'\)"/);
@@ -131,6 +356,31 @@ test('traditional activity is a standalone top-level page', async () => {
   assert.match(html, />↑\$\{change\.delta\}</);
   assert.match(html, />↓\$\{amount\}</);
   assert.match(html, />NEW</);
+});
+
+test('Signal Radar and Asset Intelligence use server history and one canonical drawer', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  assert.match(html, /data-p="cross"[\s\S]*?RWA Signal Radar/);
+  assert.match(html, /id="page-cross"[\s\S]*?id="radarTableRegion"/);
+  assert.match(html, /fetch\('\/api\/signal-snapshot', \{ method:'GET' \}\)/);
+  assert.match(html, /function radarPageIsActive\(\)[\s\S]*?pageIsVisible\(\)/);
+  assert.match(html, /const SIGNAL_SNAPSHOT_TTL = 5 \* 60 \* 1000/);
+  assert.match(html, /rows\.slice\(0, radarExpanded \? 100 : 50\)/);
+  assert.match(html, /if \(activePage === 'cross'\) \{[\s\S]*?await ensureSignalSnapshot\(false\);[\s\S]*?return;/);
+  assert.match(html, /if \(activePage === 'spot' \|\| activePage === 'traditional'\) \{[\s\S]*?refreshSpotArbData\(\)/);
+  assert.match(html, /Baseline warming/);
+  assert.doesNotMatch(html, /localStorage|rwa_kpi_snapshots/);
+
+  assert.match(html, /id="assetModal" role="dialog" aria-modal="true"/);
+  assert.match(html, /function openAssetIntelligence\(input = \{\}\)/);
+  assert.match(html, /window\.openAssetIntelligence = openAssetIntelligence/);
+  assert.match(html, /spotAssetSecurityIdentity\(row\)/);
+  assert.match(html, /health\?\.status === 'stale'/);
+  assert.match(html, /source:'signal radar'/);
+  assert.match(html, /aria-label="Open \$\{safeSymbol\} asset intelligence"/);
+
+  const vercelConfig = JSON.parse(await readFile(new URL('../vercel.json', import.meta.url), 'utf8'));
+  assert.ok(vercelConfig.crons.some(cron => cron.path === '/api/signal-snapshot-cron' && cron.schedule === '7 * * * *'));
 });
 
 test('Nasdaq directory is the authority for equity and ETF identity', () => {
