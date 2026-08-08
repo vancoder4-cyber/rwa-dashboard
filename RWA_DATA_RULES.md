@@ -154,6 +154,8 @@ Gate 当前另有 `BP + is_pre_market=true`，但其 `contract_type` 为空，�
 
 前端 freshness 不能只相信快照上的字符串。Perpetual 与 Spot 都使用 `lastSuccessAt` 再做硬 TTL 校验：硬 TTL 为各自正常刷新 cadence 的 2 倍；缺少、非数、未来时间或恰好越过边界一律 fail closed 为 Unavailable/Stale。last-good 数值仍可诊断展示，但字段最多标 Partial；页面从隐藏恢复可见时，必须先按当前时钟重绘过期状态，再发起异步刷新。
 
+Spot 的 catalog/ticker 是首屏核心数据，order-book depth 只是可选 enrichment。Perpetual 与 Spot 冷启动必须并行；Spot 各场所完成一个就提交一个，不能等待最慢场所后原子式显示。任一场所核心请求必须有硬 deadline，点击 Spot 时若数据为空或过期必须主动触发刷新。Gate/Kraken/Bitget/Binance 的 depth 获取一律在后台运行、逐请求 timeout，失败只把 `depth2` 保持 Unavailable，不能阻塞 listing、price、volume 或其他场所。
+
 Top 30 的 30 天成交量只把完整结束的 30 根 UTC 日线标为 Full；当天未结束 candle 必须排除。trade.xyz 的小时 K 线只提供 base volume，当前美元值使用 `base volume × close` 推导，因此即使取得 720 根完整小时线也只能标 Estimated，少于 720 根则为 Partial。状态 denominator 是当前已验证 catalog 的全部合约 listing，而不是只统计成功或正成交量响应；缺历史、少 candle 或缺合约均为 Partial/Unavailable，`24h × 30` 只能是 Estimated。每个合约/组件的贡献必须保留到明细，缺失贡献显示 `—`，不能当成 `$0`。XAUT/PAXG 等经审计黄金组件合并为 `commodity:XAU` 时，Top 30 与 Asset Intelligence Drawer 必须使用同一身份族。
 
 生产环境的 Binance 与 trade.xyz 历史接口必须是固定快照：浏览器不得提交 symbol 或时间范围。服务端分别从 Binance active `TRADIFI_PERPETUAL`（另加精确 PAXG/XAUT 例外）以及 trade.xyz `metaAndAssetCtxs + perpCategories` 官方目录中重建身份门控，再按官方当前 quote/day notional 确定 Top 80。目录或完整 ticker 覆盖失败时返回 502/no-store；固定 URL 才能让所有浏览器共享同一个 CDN cache key，避免 Vercel 调用量随任意 symbol 组合扩张。

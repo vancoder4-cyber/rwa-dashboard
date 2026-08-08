@@ -322,7 +322,7 @@ test('browser uses fixed snapshot URLs without caller-selected symbol query para
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   assert.match(html, /fetch\('\/api\/binance-public\?endpoint=klines'\)/);
   assert.match(html, /fetch\('\/api\/hyperliquid-klines'\)/);
-  assert.match(html, /fetch\('\/api\/binance-public\?endpoint=spot-snapshot'/);
+  assert.match(html, /fetchSpotResource\('\/api\/binance-public\?endpoint=spot-snapshot', 20000\)/);
   assert.doesNotMatch(html, /\/api\/binance-public\?endpoint=klines[^'"\n]*symbols=/);
   assert.doesNotMatch(html, /fetchBinanceSpotPublic\('\/exchangeInfo'/);
   assert.doesNotMatch(html, /BINANCE_BSTOCK_SNAPSHOT/);

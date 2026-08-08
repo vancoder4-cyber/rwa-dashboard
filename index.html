@@ -8350,6 +8350,12 @@ function switchTopPage(page) {
   } else if (page === 'cross') {
     renderSignalRadar();
     ensureSignalSnapshot(false).catch(error => console.error('[Signal Radar] page load failed:', error));
+  } else if (page === 'spot') {
+    renderVisibleDataPage();
+    const hasSpotData = Object.values(SPOT_DATA).some(rows => Array.isArray(rows) && rows.length);
+    if (!hasSpotData || Date.now() - lastSpotRefreshAt >= SPOT_REFRESH_INTERVAL) {
+      refreshSpotArbData(true).catch(error => console.error('[Spot] page load failed:', error));
+    }
   } else if (page !== 'cross') {
     renderVisibleDataPage();
   }
@@ -8365,6 +8371,63 @@ let SPOT_PERP = {};   // venue → {COIN: {mark, f}}
 let spotArbLoading = null;
 let spotArbErrors = [];
 let spotArbLastUpdate = null;
+const SPOT_CORE_REQUEST_TIMEOUT = 15000;
+const SPOT_DEPTH_REQUEST_TIMEOUT = 5000;
+const SPOT_VENUE_DEADLINE = 20000;
+const spotDepthEnhancementInFlight = {};
+
+function fetchSpotResource(url, timeoutMs = SPOT_CORE_REQUEST_TIMEOUT, options = {}) {
+  return fetch(url, { ...options, signal:options.signal || AbortSignal.timeout(timeoutMs) });
+}
+
+async function settleSpotVenue(venue, fetcher) {
+  let deadlineId;
+  try {
+    const value = await Promise.race([
+      fetcher(),
+      new Promise((_, reject) => {
+        deadlineId = setTimeout(() => reject(new Error(`${SPOT_VENUE_NAMES[venue] || venue} exceeded ${SPOT_VENUE_DEADLINE / 1000}s core-data deadline`)), SPOT_VENUE_DEADLINE);
+      }),
+    ]);
+    return { status:'fulfilled', value };
+  } catch (reason) {
+    return { status:'rejected', reason };
+  } finally {
+    if (deadlineId) clearTimeout(deadlineId);
+  }
+}
+
+function scheduleSpotDepthEnhancement(venue, tasks, concurrency = 6) {
+  if (!Array.isArray(tasks) || !tasks.length || spotDepthEnhancementInFlight[venue]) return;
+  const run = batchFetch(tasks, concurrency).then(results => {
+    const updates = results.flatMap(result => Array.isArray(result) ? result : result ? [result] : []);
+    let changed = false;
+    updates.forEach(update => {
+      const depth2 = numberOrNull(update?.depth2);
+      const pair = String(update?.pair || update?.asset?.pair || '');
+      if (depth2 === null || depth2 < 0 || !pair) return;
+      const targets = [
+        update.asset,
+        ...(SPOT_DATA[venue] || []).filter(row => row.pair === pair),
+        ...(lastSpotVenueData[venue] || []).filter(row => row.pair === pair),
+      ];
+      const seen = new Set();
+      targets.forEach(row => {
+        if (!row || seen.has(row)) return;
+        seen.add(row);
+        row.depth2 = depth2;
+        row.fieldStatus = { ...(row.fieldStatus || {}), depth2:'partial' };
+        changed = true;
+      });
+    });
+    if (changed && pageIsVisible()) renderVisibleDataPage();
+  }).catch(error => {
+    console.warn(`[Spot] ${SPOT_VENUE_NAMES[venue] || venue} depth enrichment unavailable:`, error);
+  }).finally(() => {
+    if (spotDepthEnhancementInFlight[venue] === run) delete spotDepthEnhancementInFlight[venue];
+  });
+  spotDepthEnhancementInFlight[venue] = run;
+}
 
 // ═══════════════════════════════════════════════
 // REFERENCE PRICING (server-normalized Yahoo + explicit fallbacks)
@@ -8702,14 +8765,14 @@ async function fetchSpotRwaGate() {
   let pairs = [];
   if (_isDev) {
     const [tickersRes, pairsRes] = await Promise.all([
-      fetch(`${GATE_SPOT_BASE}/tickers`).catch(() => null),
-      fetch(`${GATE_SPOT_BASE}/currency_pairs`).catch(() => null),
+      fetchSpotResource(`${GATE_SPOT_BASE}/tickers`).catch(() => null),
+      fetchSpotResource(`${GATE_SPOT_BASE}/currency_pairs`).catch(() => null),
     ]);
     if (!tickersRes?.ok && !pairsRes?.ok) throw new Error('Gate spot catalog and tickers unavailable');
     tickers = tickersRes?.ok ? await tickersRes.json() : [];
     pairs = pairsRes?.ok ? await pairsRes.json() : [];
   } else {
-    const snapshotRes = await fetch('/api/gate-bulk?type=spot-snapshot');
+    const snapshotRes = await fetchSpotResource('/api/gate-bulk?type=spot-snapshot');
     if (!snapshotRes.ok) throw new Error(`Gate spot snapshot HTTP ${snapshotRes.status}`);
     const snapshot = await snapshotRes.json();
     tickers = Array.isArray(snapshot.tickers) ? snapshot.tickers : [];
@@ -8754,33 +8817,32 @@ async function fetchSpotRwaGate() {
   // server fan-out is CDN cached, so multiple viewers share the same snapshot.
   const depthAssets = [...assets].sort((a, b) => compareNullableNumbers(a.vol, b.vol, -1)).slice(0, 80);
   if (!_isDev && depthAssets.length) {
-    try {
+    const tasks = [async () => {
       const symbols = depthAssets.map(asset => asset.pair).sort().join(',');
-      const response = await fetch(`/api/gate-bulk?type=spot-depth&symbols=${encodeURIComponent(symbols)}&limit=50`);
-      if (response.ok) {
-        const bulk = await response.json();
-        depthAssets.forEach(asset => {
-          const book = bulk?.[asset.pair];
-          if (book && (book.bids || book.asks)) {
-            asset.depth2 = liquidityWithinPct({ bids:book.bids || [], asks:book.asks || [] });
-          }
-        });
-      }
-    } catch (error) {
-      console.warn('[Spot] Gate depth bulk unavailable:', error);
-    }
+      const response = await fetchSpotResource(
+        `/api/gate-bulk?type=spot-depth&symbols=${encodeURIComponent(symbols)}&limit=50`,
+        SPOT_DEPTH_REQUEST_TIMEOUT,
+      );
+      if (!response.ok) return [];
+      const bulk = await response.json();
+      return depthAssets.map(asset => {
+        const book = bulk?.[asset.pair];
+        if (!book || (!book.bids && !book.asks)) return null;
+        return { asset, pair:asset.pair, depth2:liquidityWithinPct({ bids:book.bids || [], asks:book.asks || [] }) };
+      }).filter(Boolean);
+    }];
+    scheduleSpotDepthEnhancement('gate', tasks, 1);
   } else {
     const depthTasks = depthAssets.map(asset => async () => {
-      try {
-        const response = await fetch(`${GATE_SPOT_BASE}/order_book?currency_pair=${encodeURIComponent(asset.pair)}&limit=50`);
-        if (!response.ok) return;
-        const book = await response.json();
-        asset.depth2 = liquidityWithinPct({ bids:book.bids || [], asks:book.asks || [] });
-      } catch {}
+      const response = await fetchSpotResource(
+        `${GATE_SPOT_BASE}/order_book?currency_pair=${encodeURIComponent(asset.pair)}&limit=50`,
+        SPOT_DEPTH_REQUEST_TIMEOUT,
+      );
+      if (!response.ok) return null;
+      const book = await response.json();
+      return { asset, pair:asset.pair, depth2:liquidityWithinPct({ bids:book.bids || [], asks:book.asks || [] }) };
     });
-    for (let i = 0; i < depthTasks.length; i += 5) {
-      await Promise.allSettled(depthTasks.slice(i, i + 5).map(fn => fn()));
-    }
+    scheduleSpotDepthEnhancement('gate', depthTasks, 5);
   }
   console.log(`[Spot] Gate.io: ${assets.length} listed · ${assets.filter(a=>a.last>0).length} priced`);
   return assets;
@@ -8789,7 +8851,7 @@ async function fetchSpotRwaGate() {
 // ── Kraken Spot Fetch ──
 async function fetchSpotRwaKraken() {
   // Step 1: Discover all pairs
-  const pairsRes = await fetch(`${KRAKEN_SPOT_BASE}/AssetPairs`);
+  const pairsRes = await fetchSpotResource(`${KRAKEN_SPOT_BASE}/AssetPairs`);
   if (!pairsRes.ok) throw new Error(`HTTP ${pairsRes.status}`);
   const pairsJson = await pairsRes.json();
   if (pairsJson.error && pairsJson.error.length) throw new Error(pairsJson.error[0]);
@@ -8818,7 +8880,7 @@ async function fetchSpotRwaKraken() {
   for (let i = 0; i < rwaPairNames.length; i += 20) {
     const chunk = rwaPairNames.slice(i, i + 20);
     try {
-      const tickerRes = await fetch(`${KRAKEN_SPOT_BASE}/Ticker?pair=${chunk.join(',')}`);
+      const tickerRes = await fetchSpotResource(`${KRAKEN_SPOT_BASE}/Ticker?pair=${chunk.join(',')}`);
       if (!tickerRes.ok) continue;
       const tickerJson = await tickerRes.json();
       if (tickerJson.error && tickerJson.error.length) continue;
@@ -8848,21 +8910,6 @@ async function fetchSpotRwaKraken() {
       }
     } catch (e) { console.warn('[Spot] Kraken ticker batch error:', e); }
   }
-  // Fetch orderbook depth for top assets
-  const depthTasks = assets.map(a => async () => {
-    try {
-      const res = await fetch(`${KRAKEN_SPOT_BASE}/Depth?pair=${encodeURIComponent(a.pair)}&count=50`);
-      if (!res.ok) return;
-      const json = await res.json();
-      if (json.error?.length) return;
-      const bookData = Object.values(json.result || {})[0];
-      if (bookData) a.depth2 = liquidityWithinPct({ bids: (bookData.bids||[]), asks: (bookData.asks||[]) });
-    } catch {}
-  });
-  for (let i = 0; i < depthTasks.length; i += 5) {
-    await Promise.allSettled(depthTasks.slice(i, i + 5).map(fn => fn()));
-  }
-
   // ── Also fetch Kraken xStocks (tokenized equities) ──
   try {
     const xStocksAssets = await _fetchKrakenXStocks();
@@ -8871,6 +8918,24 @@ async function fetchSpotRwaKraken() {
     console.warn('[Spot] Kraken xStocks error:', e.message);
   }
 
+  // Depth is optional enrichment. Catalog/ticker rows are returned first so
+  // one slow public order book cannot hold every Spot venue in Loading state.
+  const depthAssets = [...assets].sort((a, b) => compareNullableNumbers(a.vol, b.vol, -1)).slice(0, 80);
+  const depthTasks = depthAssets.map(asset => async () => {
+    const assetClass = asset.xstock ? '&asset_class=tokenized_asset' : '';
+    const response = await fetchSpotResource(
+      `${KRAKEN_SPOT_BASE}/Depth?pair=${encodeURIComponent(asset.pair)}&count=50${assetClass}`,
+      SPOT_DEPTH_REQUEST_TIMEOUT,
+    );
+    if (!response.ok) return null;
+    const json = await response.json();
+    if (json.error?.length) return null;
+    const bookData = Object.values(json.result || {})[0];
+    if (!bookData) return null;
+    return { asset, pair:asset.pair, depth2:liquidityWithinPct({ bids:bookData.bids || [], asks:bookData.asks || [] }) };
+  });
+  scheduleSpotDepthEnhancement('kraken', depthTasks, 8);
+
   console.log(`[Spot] Kraken: ${assets.length} RWA spot assets discovered (incl xStocks)`);
   return assets;
 }
@@ -8878,7 +8943,7 @@ async function fetchSpotRwaKraken() {
 // ── Kraken xStocks (tokenized equities) ──
 async function _fetchKrakenXStocks() {
   // Step 1: Discover all xStocks trading pairs (aclass_base=tokenized_asset)
-  const pairsRes = await fetch(`${KRAKEN_SPOT_BASE}/AssetPairs?aclass_base=tokenized_asset`);
+  const pairsRes = await fetchSpotResource(`${KRAKEN_SPOT_BASE}/AssetPairs?aclass_base=tokenized_asset`);
   if (!pairsRes.ok) throw new Error(`xStocks HTTP ${pairsRes.status}`);
   const pairsJson = await pairsRes.json();
   if (pairsJson.error && pairsJson.error.length) throw new Error(pairsJson.error[0]);
@@ -8909,7 +8974,7 @@ async function _fetchKrakenXStocks() {
     const chunk = xPairs.slice(i, i + 15);
     try {
       const pairStr = chunk.map(p => p.altname).join(',');
-      const tickerRes = await fetch(`${KRAKEN_SPOT_BASE}/Ticker?pair=${encodeURIComponent(pairStr)}&asset_class=tokenized_asset`);
+      const tickerRes = await fetchSpotResource(`${KRAKEN_SPOT_BASE}/Ticker?pair=${encodeURIComponent(pairStr)}&asset_class=tokenized_asset`);
       if (!tickerRes.ok) continue;
       const tickerJson = await tickerRes.json();
       if (tickerJson.error && tickerJson.error.length) {
@@ -8945,21 +9010,6 @@ async function _fetchKrakenXStocks() {
     } catch (e) { console.warn('[Spot] Kraken xStocks ticker batch error:', e); }
   }
 
-  // Fetch orderbook depth for the most liquid xStocks assets
-  const xDepthTasks = [...assets].sort((a, b) => compareNullableNumbers(a.vol, b.vol, -1)).slice(0, 80).map(a => async () => {
-    try {
-      const res = await fetch(`${KRAKEN_SPOT_BASE}/Depth?pair=${encodeURIComponent(a.pair)}&count=50&asset_class=tokenized_asset`);
-      if (!res.ok) return;
-      const json = await res.json();
-      if (json.error?.length) return;
-      const bookData = Object.values(json.result || {})[0];
-      if (bookData) a.depth2 = liquidityWithinPct({ bids: (bookData.bids||[]), asks: (bookData.asks||[]) });
-    } catch {}
-  });
-  for (let i = 0; i < xDepthTasks.length; i += 5) {
-    await Promise.allSettled(xDepthTasks.slice(i, i + 5).map(fn => fn()));
-  }
-
   // AssetPairs is the official listed catalog. Keep entries that currently
   // have no ticker response so Listed / Active / Priced remain distinct.
   const discoveredTokens = new Set(assets.map(a => a.coin));
@@ -8983,9 +9033,9 @@ async function _fetchKrakenXStocks() {
 // ── Bitget Spot Fetch ──
 async function fetchSpotRwaBitget() {
   const [instrumentsRes, realityTickersRes, legacyTickersRes] = await Promise.all([
-    fetch(`${BITGET_SPOT_BASE}/api/v3/market/instruments?category=SPOT`),
-    fetch(`${BITGET_SPOT_BASE}/api/v3/market/tickers?category=SPOT`),
-    fetch(`${BITGET_SPOT_BASE}/api/v2/spot/market/tickers`),
+    fetchSpotResource(`${BITGET_SPOT_BASE}/api/v3/market/instruments?category=SPOT`),
+    fetchSpotResource(`${BITGET_SPOT_BASE}/api/v3/market/tickers?category=SPOT`),
+    fetchSpotResource(`${BITGET_SPOT_BASE}/api/v2/spot/market/tickers`),
   ]);
   if (!instrumentsRes.ok || !realityTickersRes.ok) throw new Error('Bitget Reality metadata unavailable');
 
@@ -9067,19 +9117,18 @@ async function fetchSpotRwaBitget() {
   // Fetch orderbook depth
   const depthAssets = [...legacyAssets].sort((a, b) => compareNullableNumbers(a.vol, b.vol, -1)).slice(0, 80);
   const depthTasks = depthAssets.map(a => async () => {
-    try {
-      const res = await fetch(`${BITGET_SPOT_BASE}/api/v2/spot/market/orderbook?symbol=${a.pair}&type=step0&limit=50`);
-      if (!res.ok) return;
-      const json = await res.json();
-      if (json.code !== '00000') return;
-      const book = json.data || {};
-      a.depth2 = liquidityWithinPct({ bids: (book.bids||[]), asks: (book.asks||[]) });
-    } catch {}
+    const response = await fetchSpotResource(
+      `${BITGET_SPOT_BASE}/api/v2/spot/market/orderbook?symbol=${a.pair}&type=step0&limit=50`,
+      SPOT_DEPTH_REQUEST_TIMEOUT,
+    );
+    if (!response.ok) return null;
+    const json = await response.json();
+    if (json.code !== '00000') return null;
+    const book = json.data || {};
+    return { asset:a, pair:a.pair, depth2:liquidityWithinPct({ bids:book.bids || [], asks:book.asks || [] }) };
   });
-  for (let i = 0; i < depthTasks.length; i += 5) {
-    await Promise.allSettled(depthTasks.slice(i, i + 5).map(fn => fn()));
-  }
   assets.push(...legacyAssets);
+  scheduleSpotDepthEnhancement('bitget', depthTasks, 5);
   console.log(`[Spot] Bitget: ${assets.length} RWA spot assets discovered`);
   return assets;
 }
@@ -9089,9 +9138,7 @@ async function fetchSpotRwaBinance() {
   // The fixed server snapshot consumes Binance's large spot exchangeInfo body,
   // joins every trailing-B candidate to active TRADIFI_PERPETUAL identity, and
   // returns only admitted bStocks plus the exact PAXG/XAUT exceptions.
-  const snapshotRes = await fetch('/api/binance-public?endpoint=spot-snapshot', {
-    signal:AbortSignal.timeout(20000),
-  });
+  const snapshotRes = await fetchSpotResource('/api/binance-public?endpoint=spot-snapshot', 20000);
   if (!snapshotRes.ok) throw new Error(`Binance spot snapshot HTTP ${snapshotRes.status}`);
   const snapshot = await snapshotRes.json();
   const instruments = Array.isArray(snapshot?.instruments) ? snapshot.instruments : [];
@@ -9159,16 +9206,15 @@ async function fetchSpotRwaBinance() {
   }
   // Fetch orderbook depth
   const depthTasks = assets.map(a => async () => {
-    try {
-      const res = await fetch(`${BINANCE_SPOT_BASE}/depth?symbol=${a.pair}&limit=50`);
-      if (!res.ok) return;
-      const book = await res.json();
-      a.depth2 = liquidityWithinPct({ bids: (book.bids||[]), asks: (book.asks||[]) });
-    } catch {}
+    const response = await fetchSpotResource(
+      `${BINANCE_SPOT_BASE}/depth?symbol=${a.pair}&limit=50`,
+      SPOT_DEPTH_REQUEST_TIMEOUT,
+    );
+    if (!response.ok) return null;
+    const book = await response.json();
+    return { asset:a, pair:a.pair, depth2:liquidityWithinPct({ bids:book.bids || [], asks:book.asks || [] }) };
   });
-  for (let i = 0; i < depthTasks.length; i += 5) {
-    await Promise.allSettled(depthTasks.slice(i, i + 5).map(fn => fn()));
-  }
+  scheduleSpotDepthEnhancement('binance', depthTasks, 8);
   const tickerCoverage = snapshot.tickerCoverage || {};
   console.log(`[Spot] Binance: ${assets.length} RWA spot assets · ${assets.filter(a=>a.bstock).length} bStocks · ticker ${tickerCoverage.complete || 0}/${tickerCoverage.expected || assets.length} ${tickerStatus}`);
   return assets;
@@ -9176,7 +9222,7 @@ async function fetchSpotRwaBinance() {
 
 // ── OKX Unified Tokenized Stocks ──
 async function fetchSpotRwaOkx() {
-  const response = await fetch('/api/okx-market?type=spot-snapshot', { signal:AbortSignal.timeout(20000) });
+  const response = await fetchSpotResource('/api/okx-market?type=spot-snapshot', 20000);
   if (!response.ok) throw new Error(`OKX spot snapshot HTTP ${response.status}`);
   const snapshot = await response.json();
   const instruments = okxSnapshotRows(snapshot, 'instruments');
@@ -9454,23 +9500,12 @@ async function refreshSpotArbData(force = false) {
    if (statusEl) statusEl.innerHTML = '<span style="color:var(--foreground-dim)">Loading spot data…</span>';
    if (refreshBtn) { refreshBtn.disabled = true; refreshBtn.textContent = '⟳ Loading…'; }
    try {
-    // Load the authoritative Reality catalog first. It registers hundreds of
-    // underlyings used by suffix-based discovery on Gate and removes a timing
-    // race where the venue could miss newly listed tokenized stocks.
-    const bitgetResult = (await Promise.allSettled([fetchSpotRwaBitget()]))[0];
-    const remainingFetchers = {
-      gate:fetchSpotRwaGate,
-      kraken:fetchSpotRwaKraken,
-      binance:fetchSpotRwaBinance,
-      okx:fetchSpotRwaOkx,
-    };
-    const remainingEntries = Object.entries(remainingFetchers);
-    const remainingResults = await Promise.allSettled(remainingEntries.map(([, fetcher]) => fetcher()));
-    const resultsByVenue = { bitget:bitgetResult };
-    remainingEntries.forEach(([venue], index) => { resultsByVenue[venue] = remainingResults[index]; });
-    const nextSpotData = {};
-    ENABLED_SPOT_VENUES.forEach(venue => {
-      const r = resultsByVenue[venue] || { status:'rejected', reason:new Error('No configured fetcher') };
+    // Commit each venue as soon as its core catalog/ticker snapshot settles.
+    // Optional depth enrichment runs separately and cannot hold every venue in
+    // an empty Loading state.
+    const applyVenueResult = (venue, result) => {
+      const r = result || { status:'rejected', reason:new Error('No configured fetcher') };
+      let venueRows = [];
       if (r.status === 'fulfilled') {
         const normalized = Array.isArray(r.value)
           ? r.value.map(row => normalizeSpotDataState({ ...row, venue }))
@@ -9478,26 +9513,51 @@ async function refreshSpotArbData(force = false) {
         if (normalized.length) {
           lastSpotVenueData[venue] = normalized;
           spotVenueHealth[venue] = { status: 'live', lastSuccessAt: Date.now(), error: null };
-          nextSpotData[venue] = normalized.map(row => ({ ...row, dataFreshness: 'live' }));
+          venueRows = normalized.map(row => ({ ...row, dataFreshness: 'live' }));
         } else {
           const fallback = lastSpotVenueData[venue] || [];
           const err = 'Venue returned no RWA rows';
           spotVenueHealth[venue] = { status: fallback.length ? 'stale' : 'unavailable', lastSuccessAt: spotVenueHealth[venue]?.lastSuccessAt || null, error: err };
-          nextSpotData[venue] = fallback.map(row => ({ ...row, dataFreshness: 'stale' }));
+          venueRows = fallback.map(row => ({ ...row, dataFreshness: 'stale' }));
           spotArbErrors.push(`${SPOT_VENUE_NAMES[venue] || venue}: ${err}`);
         }
       } else {
         const err = r.reason?.message || 'No RWA assets found';
         const fallback = lastSpotVenueData[venue] || [];
         spotVenueHealth[venue] = { status: fallback.length ? 'stale' : 'unavailable', lastSuccessAt: spotVenueHealth[venue]?.lastSuccessAt || null, error: err };
-        nextSpotData[venue] = fallback.map(row => ({ ...row, dataFreshness: 'stale' }));
+        venueRows = fallback.map(row => ({ ...row, dataFreshness: 'stale' }));
         spotArbErrors.push(`${SPOT_VENUE_NAMES[venue] || venue}: ${err}`);
         console.warn(`[Spot] ${venue} error:`, err);
       }
-    });
-    SPOT_DATA = nextSpotData;
+      SPOT_DATA = { ...SPOT_DATA, [venue]:venueRows };
+      SPOT_PERP = _buildSpotPerpFromAllData();
+      const badge = Array.from(document.querySelectorAll('#spotSubNav .spot-sub-tab')).find(tab =>
+        (tab.getAttribute('onclick') || '').includes(`'${venue}'`)
+      )?.querySelector('.spot-cnt');
+      if (badge) badge.textContent = venueRows.length;
+      updateSpotStatusLine(statusEl);
+      renderVisibleDataPage();
+    };
 
-    SPOT_PERP = _buildSpotPerpFromAllData();
+    // Bitget, Kraken, Binance and OKX are independent and start together.
+    // Gate waits only for Bitget Reality identity registration, not for the
+    // other three venues or any order-book depth request.
+    const independentFetchers = {
+      kraken:fetchSpotRwaKraken,
+      binance:fetchSpotRwaBinance,
+      okx:fetchSpotRwaOkx,
+    };
+    const independentPromises = Object.entries(independentFetchers).map(async ([venue, fetcher]) => {
+      const result = await settleSpotVenue(venue, fetcher);
+      applyVenueResult(venue, result);
+    });
+    const bitgetResult = await settleSpotVenue('bitget', fetchSpotRwaBitget);
+    applyVenueResult('bitget', bitgetResult);
+    const gatePromise = (async () => {
+      const gateResult = await settleSpotVenue('gate', fetchSpotRwaGate);
+      applyVenueResult('gate', gateResult);
+    })();
+    await Promise.all([...independentPromises, gatePromise]);
 
     // Only request external reference prices for spot underlyings that can
     // actually form a spot/perp route. Reality adds hundreds of spot symbols;
@@ -9523,16 +9583,6 @@ async function refreshSpotArbData(force = false) {
 
     renderVisibleDataPage();
 
-    document.querySelectorAll('#spotSubNav .spot-sub-tab').forEach(tab => {
-      const onclick = tab.getAttribute('onclick') || '';
-      const m = onclick.match(/switchSpotSub\('(\w+)'/);
-      if (!m) return;
-      const v = m[1];
-      if (v === 'overview' || v === 'allAssets') return;
-      const cnt = (SPOT_DATA[v] || []).length;
-      const badge = tab.querySelector('.spot-cnt');
-      if (badge) badge.textContent = cnt;
-    });
    } catch (error) {
     console.error('[Spot] refresh error:', error);
     if (statusEl) statusEl.textContent = `Spot refresh error: ${error.message}`;
@@ -10696,9 +10746,23 @@ document.addEventListener('visibilitychange', () => {
 
 (async function init() {
   if (pageIsVisible()) {
+    // The shell and explicit Loading/Unavailable states are usable before any
+    // venue finishes. Never cover every top-level page with a Perpetual-only
+    // network gate.
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) overlay.style.display = 'none';
+    renderVisibleDataPage();
     ensureUsMarketDirectory().catch(error => console.error('[US market directory] init failed:', error));
-    await refresh(true);
-    if (pageIsVisible()) await refreshSpotArbData().catch(e => console.error('[Spot] init error:', e));
+    // Perpetual and Spot are independent primary pages. Start both cold loads
+    // together; Spot must never wait behind the full Perpetual venue fan-out.
+    const [perpResult, spotResult] = await Promise.allSettled([
+      refresh(true),
+      refreshSpotArbData(true),
+    ]);
+    if (perpResult.status === 'rejected') console.error('[Perps] init error:', perpResult.reason);
+    if (spotResult.status === 'rejected') console.error('[Spot] init error:', spotResult.reason);
+    SPOT_PERP = _buildSpotPerpFromAllData();
+    renderVisibleDataPage();
   } else {
     const overlay = document.getElementById('loadingOverlay');
     if (overlay) overlay.style.display = 'none';

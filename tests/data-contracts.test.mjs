@@ -1227,7 +1227,7 @@ test('Gate fixed market snapshots replace the broad public proxy', async () => {
 
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   assert.match(html, /fetch\('\/api\/gate-bulk\?type=perp-snapshot'\)/);
-  assert.match(html, /fetch\('\/api\/gate-bulk\?type=spot-snapshot'\)/);
+  assert.match(html, /fetchSpotResource\('\/api\/gate-bulk\?type=spot-snapshot'\)/);
   const vercelConfig = JSON.parse(await readFile(new URL('../vercel.json', import.meta.url), 'utf8'));
   assert.doesNotMatch(JSON.stringify(vercelConfig), /api\/gate(?:-spot)?\/:path/);
 });
@@ -1375,7 +1375,7 @@ test('browser resource contracts keep Gate fan-out stable and pause polling whil
     'if (!_isDev && depthAssets.length)',
     '} else {',
   );
-  assert.match(productionDepthBranch, /fetch\(`\/api\/gate-bulk\?type=spot-depth/);
+  assert.match(productionDepthBranch, /fetchSpotResource\(\s*`\/api\/gate-bulk\?type=spot-depth/);
   assert.doesNotMatch(productionDepthBranch, /GATE_SPOT_BASE.*order_book/);
 
   const gateTopThirtySource = sourceBetween(
@@ -1424,7 +1424,64 @@ test('browser same-origin venue snapshots preserve shared CDN caching', async ()
   assert.doesNotMatch(html, /fetch\('\/api\/okx-market\?type=(?:perp|spot)-snapshot', \{ cache:'no-store'/);
   assert.match(html, /fetch\(url, \{ signal: AbortSignal\.timeout\(endpoint \? 12000 : 3500\) \}\)/);
   assert.match(html, /fetch\('\/api\/okx-market\?type=perp-snapshot', \{ signal:AbortSignal\.timeout\(55000\) \}\)/);
-  assert.match(html, /fetch\('\/api\/okx-market\?type=spot-snapshot', \{ signal:AbortSignal\.timeout\(20000\) \}\)/);
+  assert.match(html, /fetchSpotResource\('\/api\/okx-market\?type=spot-snapshot', 20000\)/);
+});
+
+test('Spot cold load streams venue catalogs while optional depth enrichment stays off the critical path', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  assert.match(html, /const SPOT_CORE_REQUEST_TIMEOUT = 15000/);
+  assert.match(html, /const SPOT_DEPTH_REQUEST_TIMEOUT = 5000/);
+  assert.match(html, /const SPOT_VENUE_DEADLINE = 20000/);
+
+  const settleSource = sourceBetween(
+    html,
+    'async function settleSpotVenue(venue, fetcher)',
+    'function scheduleSpotDepthEnhancement',
+  );
+  const deadlineContext = { setTimeout, clearTimeout, Promise, Error };
+  runInNewContext(`
+    const SPOT_VENUE_DEADLINE = 5;
+    const SPOT_VENUE_NAMES = { pending:'Pending venue' };
+    ${settleSource}
+    globalThis.settle = settleSpotVenue;
+  `, deadlineContext);
+  const deadlineResult = await deadlineContext.settle('pending', () => new Promise(() => {}));
+  assert.equal(deadlineResult.status, 'rejected');
+  assert.match(deadlineResult.reason.message, /exceeded 0\.005s core-data deadline/);
+
+  const switchSource = sourceBetween(
+    html,
+    'function switchTopPage(page)',
+    '// ═══════════════════════════════════════════════\n// SPOT DATA & LOGIC',
+  );
+  assert.match(switchSource, /page === 'spot'[\s\S]*?refreshSpotArbData\(true\)/);
+
+  const refreshSource = sourceBetween(
+    html,
+    'async function refreshSpotArbData(force = false)',
+    'const SPOT_VENUE_NAMES',
+  );
+  assert.match(refreshSource, /const applyVenueResult = \(venue, result\) =>/);
+  assert.match(refreshSource, /independentFetchers = \{[\s\S]*?kraken:[\s\S]*?binance:[\s\S]*?okx:/);
+  assert.match(refreshSource, /applyVenueResult\(venue, result\)/);
+  assert.match(refreshSource, /settleSpotVenue\('bitget', fetchSpotRwaBitget\)/);
+  assert.match(refreshSource, /settleSpotVenue\('gate', fetchSpotRwaGate\)/);
+  assert.doesNotMatch(refreshSource, /remainingResults = await Promise\.allSettled/);
+
+  for (const [start, end, venue] of [
+    ['async function fetchSpotRwaGate()', '// ── Kraken Spot Fetch ──', 'gate'],
+    ['async function fetchSpotRwaKraken()', '// ── Kraken xStocks', 'kraken'],
+    ['async function fetchSpotRwaBitget()', '// ── Binance Spot Fetch ──', 'bitget'],
+    ['async function fetchSpotRwaBinance()', '// ── OKX Unified Tokenized Stocks ──', 'binance'],
+  ]) {
+    const source = sourceBetween(html, start, end);
+    assert.match(source, new RegExp(`scheduleSpotDepthEnhancement\\('${venue}'`));
+    assert.doesNotMatch(source, /await Promise\.allSettled\(depthTasks/);
+  }
+
+  const initSource = sourceBetween(html, '(async function init()', '</script>');
+  assert.match(initSource, /overlay\.style\.display = 'none'[\s\S]*?Promise\.allSettled/);
+  assert.match(initSource, /Promise\.allSettled\(\[\s*refresh\(true\),\s*refreshSpotArbData\(true\)/);
 });
 
 test('Traditional activity renders without I/O and loads only while its page is active', async () => {
