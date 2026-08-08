@@ -383,6 +383,149 @@ test('Signal Radar and Asset Intelligence use server history and one canonical d
   assert.ok(vercelConfig.crons.some(cron => cron.path === '/api/signal-snapshot-cron' && cron.schedule === '7 * * * *'));
 });
 
+test('bilingual UI is accessible, persisted under one preference key, and switches without navigation or I/O', async () => {
+  const [html, i18n] = await Promise.all([
+    readFile(new URL('../index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../i18n.js', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(html, /<html lang="en">/);
+  assert.match(html, /<script src="\/i18n\.js"><\/script>/);
+
+  const header = sourceBetween(html, '<!-- Header -->', '<div class="alert-panel"');
+  const languageControl = header.match(/<div class="language-tabs"[\s\S]*?<\/div>/)?.[0] || '';
+  assert.match(languageControl, /id="languageTabs" role="group" aria-label="Language"/);
+  assert.match(
+    languageControl,
+    /<button type="button"[^>]*data-language="en"[^>]*aria-pressed="(?:true|false)"[^>]*onclick="setUiLanguage\('en'\)"[^>]*>EN<\/button>/,
+  );
+  assert.match(
+    languageControl,
+    /<button type="button"[^>]*data-language="zh-CN"[^>]*aria-pressed="(?:true|false)"[^>]*onclick="setUiLanguage\('zh-CN'\)"[^>]*>中文<\/button>/,
+  );
+
+  assert.match(i18n, /var STORAGE_KEY = 'rwa_dashboard_locale_v1';/);
+  assert.doesNotMatch(i18n, /rwa_kpi_snapshots/);
+  const storageCalls = [...i18n.matchAll(/localStorage\.(?:getItem|setItem|removeItem)\(\s*([^,)]+)/g)]
+    .map(match => match[1].trim());
+  assert.ok(storageCalls.length >= 2, 'language preference must be read and written');
+  assert.ok(storageCalls.every(argument => argument === 'STORAGE_KEY'), 'i18n may only use its declared preference key');
+
+  assert.match(i18n, /window\.setUiLanguage = setLanguage;/);
+  const languageSetter = sourceBetween(i18n, 'function setLanguage(nextLanguage, options)', 'function initialize()');
+  assert.match(languageSetter, /document\.documentElement\.lang = next/);
+  assert.doesNotMatch(languageSetter, /\bfetch\s*\(/);
+  assert.doesNotMatch(languageSetter, /\b(?:XMLHttpRequest|WebSocket|EventSource)\b|sendBeacon\s*\(/);
+  assert.doesNotMatch(languageSetter, /\bswitchTopPage\s*\(/);
+  assert.doesNotMatch(languageSetter, /\b(?:render|refresh|load|ensure)[A-Z]\w*\s*\(/);
+  assert.doesNotMatch(languageSetter, /\blocation\b/);
+  assert.doesNotMatch(
+    html,
+    /addEventListener\s*\(\s*['"]rwa:languagechange['"]/,
+    'language switching must not invoke renderers that can fetch',
+  );
+  assert.match(i18n, /english\.setAttribute\('aria-pressed', String\(englishActive\)\)/);
+  assert.match(i18n, /chinese\.setAttribute\('aria-pressed', String\(chineseActive\)\)/);
+  assert.match(i18n, /function protectedIdentityText\(raw, parent\)[\s\S]*Uppercase values are assumed to be ticker\/contract identity/);
+  assert.match(i18n, /if \(protectedIdentityText\(current, parent\)\) return;/);
+  assert.match(html, /<span data-i18n-skip>\$\{escapeHtml\(row\.symbol\)\}<\/span>/);
+  assert.match(html, /<span data-i18n-skip>\$\{escapeHtml\(canonical\)\} — \$\{escapeHtml\(model\.name\)\}<\/span>/);
+
+  const sentinels = [
+    ['RWA Signal Radar', 'RWA 信号雷达'],
+    ['Traditional Market Activity Monitor · Top 100', '传统市场活跃度监控 · Top 100'],
+    ['Asset Intelligence · canonical underlying', '资产情报 · 标准底层资产'],
+  ];
+  sentinels.forEach(([english, chinese]) => {
+    assert.ok(html.includes(english), `missing rendered English sentinel: ${english}`);
+    assert.ok(i18n.includes(`'${english}':'${chinese}'`), `missing Chinese translation sentinel: ${english}`);
+  });
+});
+
+test('English Spot source stays canonical while dynamic Traditional, Spot, and Heatmap copy has Chinese coverage', async () => {
+  const [html, i18n] = await Promise.all([
+    readFile(new URL('../index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../i18n.js', import.meta.url), 'utf8'),
+  ]);
+
+  const staticSpotPage = sourceBetween(
+    html,
+    '<div class="page-container" id="page-spot">',
+    '</div><!-- END page-spot -->',
+  );
+  const dynamicSpotRenderers = sourceBetween(
+    html,
+    'function renderSpotVenueTable(venue)',
+    '// ═══════════════════════════════════════════════\n// INIT',
+  );
+  assert.doesNotMatch(staticSpotPage, /\p{Script=Han}/u, 'the English Spot page must not embed Chinese copy');
+  assert.doesNotMatch(dynamicSpotRenderers, /\p{Script=Han}/u, 'Spot renderers must emit canonical English copy');
+
+  const dynamicSections = {
+    Traditional: sourceBetween(html, 'function renderTraditionalActivity()', '// ═══════════════════════════════════════════════════\n// VENUE TABLES'),
+    Spot: dynamicSpotRenderers,
+    Heatmap: sourceBetween(html, 'function renderHeatmap()', '// ═══════════════════════════════════════════════\n// RWA SIGNAL RADAR'),
+  };
+  const sentinels = {
+    Traditional: ['Trad Volume', 'Options Volume', 'Est. Total Notional', 'Need Trad + Crypto prices'],
+    Spot: ['24h Volume', 'No spot data loaded. Click Refresh.', 'No combos match the current filters.'],
+    Heatmap: ['Short receives', 'Long receives', 'Data coverage', 'Venue spread', 'Need 2 venues'],
+  };
+
+  const escapeRegExp = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  for (const [section, phrases] of Object.entries(sentinels)) {
+    for (const phrase of phrases) {
+      assert.ok(dynamicSections[section].includes(phrase), `${section} renderer lost English sentinel: ${phrase}`);
+      assert.match(
+        i18n,
+        new RegExp(`'${escapeRegExp(phrase)}':'[^'\\n]*\\p{Script=Han}[^'\\n]*'`, 'u'),
+        `${section} dynamic sentinel needs a Chinese translation: ${phrase}`,
+      );
+    }
+  }
+
+  const regressionPhrases = [
+    'Funding settles every 1h',
+    'Funding settles per contract',
+    'Funding interval varies by contract',
+    '⚠ Avoid',
+    '✦ Ideal',
+    '● Good',
+    '△ Wide',
+    'Intelligence',
+    'Loading spot data…',
+    'OI build',
+    'volume robust z',
+    'source snapshot incomparable',
+  ];
+  regressionPhrases.forEach(phrase => {
+    assert.ok(i18n.includes(`'${phrase}':`), `missing Chinese regression coverage: ${phrase}`);
+  });
+  assert.match(i18n, /\^\(\\d\[\\d,\]\*\) High\$/);
+  assert.match(i18n, /\^Spot refresh error:/);
+  assert.match(i18n, /expected observations in/);
+});
+
+test('320px layout keeps navigation scrollable and alert/language controls usable', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  assert.match(html, /<meta name="viewport" content="width=device-width, initial-scale=1\.0">/);
+
+  const styles = sourceBetween(html, '<style>', '</style>');
+  assert.match(styles, /\.top-nav\s*\{[^}]*overflow-x:auto;/);
+  assert.match(styles, /\.top-tab\s*\{[^}]*flex:0 0 auto;/);
+
+  const mobileBreakpoint = styles.indexOf('@media (max-width: 640px) {');
+  assert.notEqual(mobileBreakpoint, -1, 'missing <=640px rules that also apply at 320px');
+  const mobile = styles.slice(mobileBreakpoint);
+  assert.match(mobile, /\.logo-divider, \.logo-label, \.global-search, \.status-pill\s*\{\s*display:none;/);
+  assert.match(mobile, /\.alert-badge #alertBadgeText\s*\{\s*display:none;/);
+  assert.match(mobile, /\.alert-panel\s*\{[^}]*left:12px;[^}]*right:12px;[^}]*width:auto;/);
+  assert.match(mobile, /\.language-tab\s*\{[^}]*min-width:34px;/);
+  assert.match(mobile, /\.nav-tabs, \.sub-tabs, \.spot-sub-nav\s*\{[^}]*overflow-x:auto;/);
+  assert.match(mobile, /\.nav-tab, \.sub-tab, \.spot-sub-tab\s*\{[^}]*flex:0 0 auto;/);
+  assert.doesNotMatch(mobile, /\.(?:language-tabs|alert-badge)\s*\{[^}]*display\s*:\s*none/);
+});
+
 test('Nasdaq directory is the authority for equity and ETF identity', () => {
   const rows = parseNasdaqDirectory([
     'Symbol|Security Name|Market Category|Test Issue|Financial Status|Round Lot Size|ETF|NextShares',

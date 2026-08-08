@@ -151,6 +151,25 @@ body {
 
 .header-right { display: flex; align-items: center; gap: 12px; }
 
+/* ── Language switch ── */
+.language-tabs {
+  display:inline-flex; align-items:center; gap:2px; padding:2px;
+  border:1px solid var(--border); border-radius:9px;
+  background:rgba(120,120,128,0.06); flex:0 0 auto;
+}
+.language-tab {
+  min-width:38px; padding:4px 8px; border:0; border-radius:6px;
+  background:transparent; color:var(--foreground-dim); cursor:pointer;
+  font:600 11px/1.2 -apple-system,'Inter',sans-serif;
+  transition:background .16s,color .16s,box-shadow .16s;
+}
+.language-tab:hover { color:var(--foreground-sec); }
+.language-tab.active {
+  color:var(--accent); background:rgba(255,255,255,.86);
+  box-shadow:0 1px 4px rgba(0,0,0,.07);
+}
+.language-tab:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+
 /* ── Global Search ── */
 .global-search {
   position: relative; display: flex; align-items: center;
@@ -418,6 +437,7 @@ body {
 .spot-vc-name { font-size:13px; font-weight:700; }
 .spot-vc-pairs { font-family:'JetBrains Mono',monospace; font-size:18px; font-weight:700; color:var(--foreground); letter-spacing:-0.01em; margin-left:auto; }
 .spot-vc-pairs::after { content:' pairs'; font-family:Inter,sans-serif; font-size:10px; font-weight:500; color:var(--foreground-dim); margin-left:4px; letter-spacing:0.05em; text-transform:uppercase; }
+html[lang="zh-CN"] .spot-vc-pairs::after { content:' 个交易对'; text-transform:none; letter-spacing:0; }
 .arb-view-more { background:rgba(255,255,255,0.55); border:1px solid rgba(0,0,0,0.06); color:var(--foreground-sec); padding:8px 20px; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer; transition:all .15s; font-family:Inter,sans-serif; backdrop-filter:blur(12px) saturate(1.4); -webkit-backdrop-filter:blur(12px) saturate(1.4); }
 .arb-view-more:hover { border-color:rgba(0,122,255,0.4); color:var(--accent); background:rgba(0,122,255,0.08); }
 .op-col { color:var(--foreground-dim) !important; font-size:13px !important; font-weight:400 !important; padding:0 4px !important; width:14px; text-align:center !important; cursor:default !important; }
@@ -1303,7 +1323,17 @@ input[type="checkbox"] {
 @media (max-width: 640px) {
   .kpi-strip { grid-template-columns: 1fr; }
   .nav-tab { padding: 8px 12px; font-size: 12px; }
-  .header { padding: 0 16px; }
+  .header { padding: 0 10px; }
+  .header .logo-mark { font-size:16px; }
+  .logo-divider, .logo-label, .global-search, .status-pill { display:none; }
+  .header-right { gap:6px; }
+  .alert-badge { padding:5px 8px; }
+  .alert-badge #alertBadgeText { display:none; }
+  .alert-panel { left:12px; right:12px; width:auto; max-height:calc(100vh - 70px); }
+  .language-tab { min-width:34px; padding:4px 6px; }
+  .nav-tabs, .sub-tabs, .spot-sub-nav { overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+  .nav-tabs::-webkit-scrollbar, .sub-tabs::-webkit-scrollbar, .spot-sub-nav::-webkit-scrollbar { display:none; }
+  .nav-tab, .sub-tab, .spot-sub-tab { flex:0 0 auto; }
   .summary-page, .table-wrap, .heatmap-wrap { padding-left: 16px; padding-right: 16px; }
   .filter-bar { padding: 8px 16px; }
   .heatmap-summary { grid-template-columns: repeat(2, 1fr); }
@@ -1346,13 +1376,17 @@ input[type="checkbox"] {
       <input type="text" id="globalSearchInput" placeholder="Search assets (⌘K)" oninput="handleGlobalSearch(this.value)" />
       <button class="search-clear" id="globalSearchClear" onclick="clearGlobalSearch()">×</button>
     </div>
-    <div class="alert-badge no-alerts" id="alertBadge" onclick="toggleAlertPanel()">
+    <div class="alert-badge no-alerts" id="alertBadge" role="button" tabindex="0" aria-label="Alerts & Anomalies" onclick="toggleAlertPanel()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleAlertPanel();}">
       <span>⚑</span>
       <span id="alertBadgeText">No alerts</span>
     </div>
     <div class="status-pill">
       <div class="live-dot"></div>
       <span id="statusText">Connecting...</span>
+    </div>
+    <div class="language-tabs" id="languageTabs" role="group" aria-label="Language" data-i18n-skip>
+      <button type="button" class="language-tab" id="languageEnglish" lang="en" data-language="en" aria-pressed="false" aria-label="Switch to English" onclick="setUiLanguage('en')">EN</button>
+      <button type="button" class="language-tab" id="languageChinese" lang="zh-CN" data-language="zh-CN" aria-pressed="false" aria-label="切换为中文" onclick="setUiLanguage('zh-CN')">中文</button>
     </div>
   </div>
 </div>
@@ -1816,12 +1850,12 @@ input[type="checkbox"] {
       <div id="arbViewMoreWrap" style="display:none;text-align:center;margin-top:12px"></div>
       <div style="font-size:10.5px;color:var(--foreground-dim);margin-top:10px;line-height:1.6">
         <strong style="color:var(--foreground-sec)">Notes:</strong>
-        Net APR (Funding) = |Funding Ann.| − (SpotFee×2 + PerpFee×2 + Spread) × 365/Hold &nbsp;·&nbsp;
-        Basis = (Perp Mark − Spot) / Spot，仅作为 entry-edge 信号，不年化加到 APR（永续合约的收敛已经在 funding 中表达，避免双重计数）&nbsp;·&nbsp;
-        Hold = No Fees 时 Net APR 显示毛年化 &nbsp;·&nbsp;
-        * Funding Ann./APR 仅把当前一期 funding rate 瞬时年化，不是未来收益预测；极端值需结合深度、basis 与后续 funding 校验 &nbsp;·&nbsp;
-        匹配 key 用 underlying（AAPLX/AAPLon 都对 AAPL perp）&nbsp;·&nbsp;
-        跨所组合未扣减提币/资金占用成本。
+        <span>Net APR (Funding) = |Funding Ann.| − (SpotFee×2 + PerpFee×2 + Spread) × 365/Hold</span> ·
+        <span>Basis = (Perp Mark − Spot) / Spot; it is an entry-edge signal and is not annualized into APR because perpetual convergence is already expressed by funding.</span> ·
+        <span>When Hold = No Fees, Net APR shows gross annualized funding.</span> ·
+        <span>Funding Ann./APR annualizes only the current funding observation; it is not a forecast. Validate extremes against depth, basis, and future funding.</span> ·
+        <span>Matching uses the underlying key (AAPLX/AAPLon both map to AAPL perp).</span> ·
+        <span>Cross-venue routes exclude withdrawal and capital costs.</span>
       </div>
     </div>
   </div>
@@ -1883,7 +1917,19 @@ input[type="checkbox"] {
       </div>
       <div class="table-wrap">
         <table><thead><tr>
-          <th style="text-align:left" data-sort="name" onclick="setSpotVenueSort('name')">Asset <span class="arrow"></span></th><th data-sort="price" onclick="setSpotVenueSort('price')">Last Price <span class="arrow"></span></th><th data-sort="ref" onclick="setSpotVenueSort('ref')">Ref Price <span class="arrow"></span></th><th data-sort="dev" onclick="setSpotVenueSort('dev')"><span class="th-info">Dev % <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip"><span class="tip-title">价格偏离 — 与 Yahoo Finance 基准价的偏差</span>比较交易所现货价与 Yahoo Finance 实时报价的偏离程度。正值表示交易所价格高于基准，负值表示低于。偏离越大，可能存在套利或定价异常。<span class="tip-formula">(Spot Last − Ref Price) / Ref Price</span><span class="tip-note">✦ ≤0.1% 正常&ensp;·&ensp;● 0.1–0.5% 关注&ensp;·&ensp;⚠ >0.5% 警惕</span></span></span></th><th data-sort="mark" onclick="setSpotVenueSort('mark')">Perp Mark <span class="arrow"></span></th><th data-sort="basis" onclick="setSpotVenueSort('basis')"><span class="th-info">Basis <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip"><span class="tip-title">基差 — 永续与现货的价差</span>衡量建仓成本：基差越小，做 cash-and-carry 的入场成本越低。负基差意味着 funding 可能转负，不适合做空永续。<span class="tip-formula">(Perp Mark − Spot Last) / Spot Last</span><span class="tip-note">✦ Ideal ±0.1%&ensp;·&ensp;● Good 0.1–0.3%&ensp;·&ensp;△ Wide &gt;0.3%&ensp;·&ensp;⚠ Avoid &lt;−0.1%</span></span></span></th><th data-sort="chg" onclick="setSpotVenueSort('chg')">24h Chg <span class="arrow"></span></th><th data-sort="vol" onclick="setSpotVenueSort('vol')">24h Vol <span class="arrow">▼</span></th><th>24h H / L</th><th data-sort="spread" onclick="setSpotVenueSort('spread')">Bid-Ask <span class="arrow"></span></th><th data-sort="depth" onclick="setSpotVenueSort('depth')"><span class="th-info">±2% Depth <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip"><span class="tip-title">流动性深度 — ±2% 范围内的订单簿厚度</span>衡量在当前中间价 ±2% 范围内有多少美元的买卖单可以被成交。深度越大，大额套利执行的滑点越小。<span class="tip-formula">Σ (price × size) for all bids ≥ mid×0.98 + Σ (price × size) for all asks ≤ mid×1.02</span><span class="tip-note">● >$100K 深度好&ensp;·&ensp;△ $10K–$100K 一般&ensp;·&ensp;⚠ <$10K 浅</span></span></span></th><th data-sort="funding" onclick="setSpotVenueSort('funding')"><span class="th-info">Funding Ann. <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip"><span class="tip-title">年化资金费率 — 做空永续可获得的收益</span>永续合约定期结算资金费，正费率时多头付给空头。将最近一期费率按每日结算次数 × 365 天折算为年化收益率。结算频率因交易所而异（如 8h = 3次/天，1h = 24次/天）。<span class="tip-formula">Funding Rate × settlesPerDay × 365</span><span class="tip-note">数据来源：右上角所选永续交易所的最新一期费率。正值 = 空头收息，负值 = 空头付息。</span></span></span></th><th data-sort="arb" onclick="setSpotVenueSort('arb')"><span class="th-info">Arb APR <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip"><span class="tip-title">套利年化 — 扣除成本后的净收益</span>买入现货 + 做空永续的 cash-and-carry 策略净年化收益。用 funding 年化收入减去交易摩擦成本（开平仓手续费 + 滑点），再按持仓周期折算成全年。<span class="tip-formula">Cost = (SpotFee×2 + PerpFee×2 + Spread) × 365/Hold<br>APR = |Funding Ann.| − Cost</span><span class="tip-note">通过右上角 Hold 调整持仓周期。No Fees = 不扣成本，显示毛年化 funding。绿 ≥15%&ensp;·&ensp;黄 ≥5%&ensp;·&ensp;红 &lt;5%</span></span></span></th>
+          <th style="text-align:left" data-sort="name" onclick="setSpotVenueSort('name')">Asset <span class="arrow"></span></th>
+          <th data-sort="price" onclick="setSpotVenueSort('price')">Last Price <span class="arrow"></span></th>
+          <th data-sort="ref" onclick="setSpotVenueSort('ref')">Ref Price <span class="arrow"></span></th>
+          <th data-sort="dev" onclick="setSpotVenueSort('dev')"><span class="th-info">Dev % <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip"><span class="tip-title">Price deviation — versus Yahoo Finance reference</span>Compares the venue spot price with the Yahoo Finance reference. Positive means above reference; negative means below.<span class="tip-formula">(Spot Last − Ref Price) / Ref Price</span><span class="tip-note">✦ ≤0.1% Normal&ensp;·&ensp;● 0.1–0.5% Watch&ensp;·&ensp;⚠ &gt;0.5% Caution</span></span></span></th>
+          <th data-sort="mark" onclick="setSpotVenueSort('mark')">Perp Mark <span class="arrow"></span></th>
+          <th data-sort="basis" onclick="setSpotVenueSort('basis')"><span class="th-info">Basis <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip"><span class="tip-title">Basis — perpetual versus spot</span>Measures entry cost: a smaller basis lowers cash-and-carry entry friction. Negative basis can accompany negative funding.<span class="tip-formula">(Perp Mark − Spot Last) / Spot Last</span><span class="tip-note">✦ Ideal ±0.1%&ensp;·&ensp;● Good 0.1–0.3%&ensp;·&ensp;△ Wide &gt;0.3%&ensp;·&ensp;⚠ Avoid &lt;−0.1%</span></span></span></th>
+          <th data-sort="chg" onclick="setSpotVenueSort('chg')">24h Chg <span class="arrow"></span></th>
+          <th data-sort="vol" onclick="setSpotVenueSort('vol')">24h Vol <span class="arrow">▼</span></th>
+          <th>24h H / L</th>
+          <th data-sort="spread" onclick="setSpotVenueSort('spread')">Bid-Ask <span class="arrow"></span></th>
+          <th data-sort="depth" onclick="setSpotVenueSort('depth')"><span class="th-info">±2% Depth <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip"><span class="tip-title">Liquidity depth — order-book liquidity within ±2%</span>Measures executable bid and ask notional within ±2% of mid-price.<span class="tip-formula">Σ (price × size) for all bids ≥ mid×0.98 + Σ (price × size) for all asks ≤ mid×1.02</span><span class="tip-note">● &gt;$100K Deep&ensp;·&ensp;△ $10K–$100K Moderate&ensp;·&ensp;⚠ &lt;$10K Shallow</span></span></span></th>
+          <th data-sort="funding" onclick="setSpotVenueSort('funding')"><span class="th-info">Funding Ann. <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip"><span class="tip-title">Annualized funding — cash flow for a short perpetual</span>Perpetual funding settles periodically. At positive rates, longs pay shorts. The latest rate is annualized by settlement cadence.<span class="tip-formula">Funding Rate × settlesPerDay × 365</span><span class="tip-note">Source: latest rate from the selected perpetual venue. Positive = shorts receive; negative = shorts pay.</span></span></span></th>
+          <th data-sort="arb" onclick="setSpotVenueSort('arb')"><span class="th-info">Arb APR <span class="arrow"></span><span class="th-info-icon">i</span><span class="th-info-tip"><span class="tip-title">Arbitrage APR — estimated return after costs</span>Estimated annualized net return for long spot plus short perpetual after entry, exit and spread costs.<span class="tip-formula">Cost = (SpotFee×2 + PerpFee×2 + Spread) × 365/Hold<br>APR = |Funding Ann.| − Cost</span><span class="tip-note">Use Hold above to set the holding period. No Fees keeps gross annualized funding. Green ≥15%&ensp;·&ensp;Yellow ≥5%&ensp;·&ensp;Red &lt;5%</span></span></span></th>
         </tr></thead><tbody id="spotVenueBody"></tbody></table>
       </div>
     </div>
@@ -1966,6 +2012,7 @@ input[type="checkbox"] {
   </div>
 </div>
 
+<script src="/i18n.js"></script>
 <script>
 // ── Tooltip positioning (fixed, avoids overflow clipping) ──
 (function(){
@@ -4433,7 +4480,7 @@ function assetIntelligenceEvidence(identity) {
 function assetIntelligenceUpdatedAt(value) {
   if (!value) return 'Unavailable';
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? 'Unavailable' : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? 'Unavailable' : date.toLocaleString(window.uiLocale());
 }
 
 function assetIntelligenceEffectiveHealth(health, ttlMs) {
@@ -4741,7 +4788,7 @@ function renderModalContent() {
     <div class="asset-drawer-kicker">Asset Intelligence · canonical underlying</div>
     <div class="modal-title" id="assetDrawerTitle">
       <div class="asset-icon" style="background:${catColor}22;color:${catColor};border:1px solid ${catColor}44;width:36px;height:36px;font-size:13px">${escapeHtml(canonical.slice(0,2))}</div>
-      <span>${escapeHtml(canonical)} — ${escapeHtml(model.name)}</span>
+      <span data-i18n-skip>${escapeHtml(canonical)} — ${escapeHtml(model.name)}</span>
     </div>
     <div class="asset-drawer-subtitle">${categoryTag}${renderMarketTags(model.tags)} · ${model.perps.length} Perp listing${model.perps.length===1?'':'s'} · ${model.spots.length} Spot listing${model.spots.length===1?'':'s'} · ${venueCount} market route${venueCount===1?'':'s'}${model.source ? ` · opened from ${escapeHtml(model.source)}` : ''}</div>
 
@@ -4986,7 +5033,7 @@ async function refresh(isFirst, force = false) {
     const venueCount = new Set(allData.map(d => d.venue)).size;
     const liveCount = ENABLED_PERP_VENUES.filter(venue => venueHealth[venue]?.status === 'live').length;
     const staleCount = ENABLED_PERP_VENUES.filter(venue => venueHealth[venue]?.status === 'stale').length;
-    const now = new Date().toLocaleTimeString();
+    const now = new Date().toLocaleTimeString(window.uiLocale());
     lastPerpRefreshAt = Date.now();
     document.getElementById('statusText').textContent =
       `${venueCount} Venues · ${allData.length} Assets · ${liveCount} live${staleCount ? ` · ${staleCount} stale` : ''} · ${now}`;
@@ -5426,8 +5473,8 @@ function renderVenueCards() {
         <div class="vc-asset-count">${fmtVolume(totalVol)}</div>
       </div>
       <div class="vc-metrics">
-        <div class="vc-metric"><div class="vm-label">24h Top Gainer</div>${topGainer ? `<div class="vm-asset">${topGainer.coin} <span class="vm-tag" style="background:var(--positive-dim);color:var(--positive)">${topGainer.change >= 0 ? '+' : ''}${topGainer.change.toFixed(2)}%</span></div><div class="vm-value">${topGainer.fullName}</div>` : `<div class="vm-asset"><span style="color:var(--foreground-dim)">N/A</span></div><div class="vm-value">Change data not available</div>`}</div>
-        <div class="vc-metric"><div class="vm-label">Highest Funding</div><div class="vm-asset">${topFunding.coin} <span class="vm-tag" style="background:${tfBg};color:${tfColor}">${fmtAnnual(topFunding.funding, vKey, topFunding)} APR</span></div><div class="vm-value">${topFunding.fullName}</div></div>
+        <div class="vc-metric"><div class="vm-label">24h Top Gainer</div>${topGainer ? `<div class="vm-asset">${topGainer.coin} <span class="vm-tag" style="background:var(--positive-dim);color:var(--positive)">${topGainer.change >= 0 ? '+' : ''}${topGainer.change.toFixed(2)}%</span></div><div class="vm-value" data-i18n-skip>${topGainer.fullName}</div>` : `<div class="vm-asset"><span style="color:var(--foreground-dim)">N/A</span></div><div class="vm-value">Change data not available</div>`}</div>
+        <div class="vc-metric"><div class="vm-label">Highest Funding</div><div class="vm-asset">${topFunding.coin} <span class="vm-tag" style="background:${tfBg};color:${tfColor}">${fmtAnnual(topFunding.funding, vKey, topFunding)} APR</span></div><div class="vm-value" data-i18n-skip>${topFunding.fullName}</div></div>
         <div class="vc-metric"><div class="vm-label">Largest OI</div><div class="vm-asset">${topOI.coin}</div><div class="vm-value">${fmtVolume(topOI.oi)} notional</div></div>
       </div>
       <div class="vc-section"><div class="vc-section-title">24h Volume Growth — Top 3 <span class="vc-section-hint">(today vs yesterday)</span></div>${volGrowthHTML}</div>
@@ -5534,7 +5581,7 @@ function renderDivergence() {
         return `<span class="fr-venue-chip"><span class="venue-dot ${v.venue}"></span>${vn} <span class="fr-chip-rate" style="color:${isPositive ? 'var(--negative)' : 'var(--positive)'}">${isPositive ? '+' : ''}${rate}%</span></span>`;
       }).join('');
       const hidden = idx >= DIV_INITIAL_SHOW ? ' style="display:none"' : '';
-      return `<div class="fr-row" data-panel="${panelId}"${hidden}><div class="fr-coin" style="color:${cc}">${a.coin}<span>${a.fullName}</span></div><div class="fr-apr" style="color:${aprColor}">${isPositive ? '+' : '-'}${aprPct}%</div><div class="fr-venues">${chips}</div></div>`;
+      return `<div class="fr-row" data-panel="${panelId}"${hidden}><div class="fr-coin" style="color:${cc}">${a.coin}<span data-i18n-skip>${a.fullName}</span></div><div class="fr-apr" style="color:${aprColor}">${isPositive ? '+' : '-'}${aprPct}%</div><div class="fr-venues">${chips}</div></div>`;
     }).join('');
     const toggle = list.length > DIV_INITIAL_SHOW
       ? `<div class="fr-toggle" id="toggle-${panelId}" style="text-align:center;padding:10px;cursor:pointer;color:var(--accent);font-size:13px;font-weight:600" onclick="toggleDivRows('${panelId}')">Show all ${list.length} assets ▾</div>`
@@ -5951,8 +5998,8 @@ function renderTop30Volume() {
     rows += `<tr class="asset-intel-trigger" ${assetIntelligenceTriggerAttrs(r.coin, cat, 'perpetual Top 30')}>
       <td style="text-align:center;color:var(--foreground-dim);font-size:11px;width:30px">${i + 1}</td>
       <td style="text-align:left">
-        <div style="font-weight:600;font-size:13px">${r.coin}${isMerged ? '<span style="color:var(--accent);font-size:9px;margin-left:4px;vertical-align:middle" title="Combined: ' + comps.join(' + ') + '">MERGED</span>' : ''}</div>
-        <div style="font-size:10px;color:var(--foreground-dim)">${name} · <span style="color:${catColor}">${cat}</span></div>
+        <div style="font-weight:600;font-size:13px">${r.coin}${isMerged ? '<span class="i18n-ui-token" style="color:var(--accent);font-size:9px;margin-left:4px;vertical-align:middle" title="Combined: ' + comps.join(' + ') + '">MERGED</span>' : ''}</div>
+        <div style="font-size:10px;color:var(--foreground-dim)"><span class="asset-identity-name" data-i18n-skip>${name}</span> · <span class="asset-category-label" style="color:${catColor}">${cat}</span></div>
         ${compLine}
       </td>
       <td class="mono" style="font-size:13px;font-weight:700">${fmtVolume(r.totalVol30d)}</td>
@@ -5974,7 +6021,7 @@ function renderTop30Volume() {
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
       <div>
         <div class="section-title">Top 30 RWA Perps by 30-Day Volume</div>
-        <div class="section-subtitle">Rolling window · auto-refresh every 5 min · ${statusCounts.full} Full · ${statusCounts.partial} Partial · ${statusCounts.estimated} Estimated · Total: ${fmtVolume(totalVol30d)} · Updated ${new Date(_top30Cache.ts).toLocaleTimeString()} (${top30AgeLabel(_top30Cache.ts)})${_top30Loading ? ' · Refreshing…' : ''}</div>
+        <div class="section-subtitle">Rolling window · auto-refresh every 5 min · ${statusCounts.full} Full · ${statusCounts.partial} Partial · ${statusCounts.estimated} Estimated · Total: ${fmtVolume(totalVol30d)} · Updated ${new Date(_top30Cache.ts).toLocaleTimeString(window.uiLocale())} (${top30AgeLabel(_top30Cache.ts)})${_top30Loading ? ' · Refreshing…' : ''}</div>
       </div>
       <button class="sr-btn" onclick="refreshTop30Volume()" style="font-size:11px" ${_top30Loading ? 'disabled' : ''}>${_top30Loading ? '⟳ Refreshing' : '⟳ Refresh'}</button>
     </div>
@@ -6323,7 +6370,7 @@ function traditionalRankChangeHtml(row, comparisonSession) {
   if (change.status === 'new') {
     const previous = Number(change.previousRank) > TRADFI_MAX_VISIBLE ? ` (previously #${change.previousRank})` : '';
     const label = `Not in the tracked Top 100 on ${session}${previous}; this does not mean newly listed`;
-    return `<span class="tradfi-rank-change new" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">NEW</span>`;
+    return `<span class="tradfi-rank-change new i18n-ui-token" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">NEW</span>`;
   }
   if (change.status === 'flat') {
     const label = `Unchanged versus ${session}`;
@@ -6449,7 +6496,7 @@ function renderTraditionalActivity() {
     const perpVolumeState = traditionalOverlayVolumeState(linkMeta, 'perp');
     const spotVolumeState = traditionalOverlayVolumeState(linkMeta, 'spot');
     const identityLine = ['confirmed','directory-confirmed'].includes(market.identityStatus) && market.officialName
-      ? `<div style="font-size:9px;color:var(--foreground-dim)">Nasdaq: ${escapeHtml(market.officialName)}</div>`
+      ? `<div style="font-size:9px;color:var(--foreground-dim)">Nasdaq: <span data-i18n-skip>${escapeHtml(market.officialName)}</span></div>`
       : '';
     const spread = traditionalMaxPriceSpread(row, linkMeta, row.quote);
     const quoteContext = [row.quote?.marketStatus, row.quote?.asOf].filter(Boolean).join(' · ');
@@ -6462,8 +6509,8 @@ function renderTraditionalActivity() {
 
     return `<tr class="asset-intel-trigger" ${assetIntelligenceTriggerAttrs(row.symbol, row.category, 'traditional market')}>
       <td style="text-align:left">
-        <div style="font-weight:700;font-size:13px"><span class="tradfi-rank-wrap"><span class="tradfi-rank">#${row.rank || '—'}</span>${traditionalRankChangeHtml(row, payload.methodology?.comparisonSession)}</span>${escapeHtml(row.symbol)} ${categoryTag}${renderMarketTags(row.tags || [])}</div>
-        <div style="font-size:10px;color:var(--foreground-dim);max-width:260px;overflow:hidden;text-overflow:ellipsis">${escapeHtml(row.name || row.symbol)}</div>
+        <div style="font-weight:700;font-size:13px"><span class="tradfi-rank-wrap"><span class="tradfi-rank">#${row.rank || '—'}</span>${traditionalRankChangeHtml(row, payload.methodology?.comparisonSession)}</span><span data-i18n-skip>${escapeHtml(row.symbol)}</span> ${categoryTag}${renderMarketTags(row.tags || [])}</div>
+        <div data-i18n-skip style="font-size:10px;color:var(--foreground-dim);max-width:260px;overflow:hidden;text-overflow:ellipsis">${escapeHtml(row.name || row.symbol)}</div>
         ${identityLine}
         <div style="margin-top:3px"><span class="tradfi-route ${perpVenues ? '' : 'missing'}" title="Linked perpetual venues">${perpVenues ? `Perp ${perpVenues}` : 'No Perp'}</span><span class="tradfi-route ${spotVenues ? '' : 'missing'}" title="Linked spot venues">${spotVenues ? `Spot ${spotVenues}` : 'No Spot'}</span></div>
       </td>
@@ -6509,14 +6556,14 @@ function renderTraditionalActivity() {
     <div class="tradfi-source-strip">
       <span class="tradfi-signal high">High ${signalCounts.high}</span>
       <span class="tradfi-signal watch">Watch ${signalCounts.watch}</span>
-      <span>Universe: ${Number(payload.methodology?.directoryUniverse || 0).toLocaleString()} U.S.-listed securities in Nasdaq Trader directory · ${Number(payload.methodology?.candidateCount || 0)} official activity candidates → ${universe.length} ranked</span>
+      <span>Universe: ${Number(payload.methodology?.directoryUniverse || 0).toLocaleString(window.uiLocale())} U.S.-listed securities in Nasdaq Trader directory · ${Number(payload.methodology?.candidateCount || 0)} official activity candidates → ${universe.length} ranked</span>
       <span>Ranking session: ${escapeHtml(payload.methodology?.rankingSession || 'Unavailable')} · candidate list ${escapeHtml(payload.methodology?.moverAsOf || 'latest')}</span>
       <span title="${escapeHtml(payload.methodology?.rankComparison?.definition || '')}">Daily rank vs ${escapeHtml(payload.methodology?.comparisonSession || 'Unavailable')} · ${escapeHtml(payload.methodology?.rankComparison?.status || 'unavailable')} · tracked candidate-set Top 100</span>
       <span title="${escapeHtml(payload.methodology?.candidateCaveat || '')}">Scope: official candidate-set ranking${payload.methodology?.alignment ? ` · ${Number(payload.methodology.alignment.alignedCandidateCount || 0)}/${Number(payload.methodology.alignment.eligibleCandidateCount || 0)} eligible aligned${Number(payload.methodology.alignment.ineligibleCandidateCount || 0) ? ` · ${Number(payload.methodology.alignment.ineligibleCandidateCount)} session-ineligible excluded` : ''}` : ''}</span>
       <span>Market: <a href="${escapeHtml(marketSource)}" target="_blank" rel="noopener">Nasdaq official</a> · completed-session shares + close</span>
       <span>Options: <a href="${escapeHtml(optionsSource)}" target="_blank" rel="noopener">OCC official</a> · T+1 as of ${optionsAsOf}</span>
       <span>Estimated values: shares × price; options × 100 × underlying price</span>
-      <span>Activity ${new Date(tradfiActivityCache.ts).toLocaleTimeString()}${tradfiActivityLoading ? ' · Refreshing…' : ''}${tradfiPriceLoading ? ' · Quotes refreshing…' : ''}</span>
+      <span>Activity ${new Date(tradfiActivityCache.ts).toLocaleTimeString(window.uiLocale())}${tradfiActivityLoading ? ' · Refreshing…' : ''}${tradfiPriceLoading ? ' · Quotes refreshing…' : ''}</span>
       ${tradfiActivityError ? `<span style="color:var(--negative)">Last refresh failed: ${escapeHtml(tradfiActivityError)}</span>` : ''}
       ${tradfiPriceError ? `<span style="color:var(--negative)">Quote refresh failed: ${escapeHtml(tradfiPriceError)}</span>` : ''}
     </div>
@@ -6810,7 +6857,7 @@ function renderAssetView() {
     }
     const dots = vList.map(v=>`<span class="venue-dot ${v}" title="${VENUES[v].name}"></span>`).join('');
     const anyActive = Object.values(a.venues).some(v => v.isActive);
-    const inactiveTag = anyActive ? '' : ' <span style="font-size:9px;padding:1px 5px;border-radius:4px;background:rgba(92,97,112,0.15);color:var(--foreground-dim);font-weight:600">INACTIVE</span>';
+    const inactiveTag = anyActive ? '' : ' <span class="i18n-ui-token" style="font-size:9px;padding:1px 5px;border-radius:4px;background:rgba(92,97,112,0.15);color:var(--foreground-dim);font-weight:600">INACTIVE</span>';
     const rowOp = anyActive ? '' : 'opacity:0.45;';
 
     const tr = document.createElement('tr');
@@ -7112,7 +7159,7 @@ function radarTimestamp(value) {
   if (value === null || value === undefined || value === '') return 'Unavailable';
   const numeric = Number(value);
   const date = new Date(Number.isFinite(numeric) && numeric > 0 ? numeric : value);
-  return Number.isNaN(date.getTime()) ? 'Unavailable' : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? 'Unavailable' : date.toLocaleString(window.uiLocale());
 }
 
 function radarPct(value, digits = 2) {
@@ -7347,7 +7394,7 @@ function renderRadarTable(payload, indexedRows) {
     const fieldStatus = row?.fieldStatus || {};
     return `<tr class="radar-row" tabindex="0" role="button" aria-label="Open ${escapeHtml(symbol)} asset intelligence" data-radar-symbol="${escapeHtml(symbol)}" data-radar-category="${escapeHtml(category)}">
       <td class="radar-rank">#${escapeHtml(rank)}</td>
-      <td><div class="radar-asset-symbol">${escapeHtml(symbol || 'Unavailable')}</div><div class="radar-asset-meta"><span class="radar-category">${escapeHtml(category || 'Unavailable')}</span>${row?.name ? `<span>${escapeHtml(row.name)}</span>` : ''}</div></td>
+      <td><div class="radar-asset-symbol">${escapeHtml(symbol || 'Unavailable')}</div><div class="radar-asset-meta"><span class="radar-category">${escapeHtml(category || 'Unavailable')}</span>${row?.name ? `<span class="radar-asset-name" data-i18n-skip>${escapeHtml(row.name)}</span>` : ''}</div></td>
       <td><span class="radar-severity ${severity}">${escapeHtml(severityLabel)}</span></td>
       <td><div class="radar-signal-name">${escapeHtml(radarSignalTypeLabel(row))}</div><div class="radar-signal-detail">${escapeHtml(primaryDetail)}</div></td>
       <td><div class="radar-score"><span>${score === null ? '—' : score.toFixed(1)}</span><span class="radar-score-track"><span class="radar-score-fill" style="width:${Math.max(0,Math.min(100,score ?? 0))}%"></span></span></div><div class="radar-baseline">Confidence ${confidence === null ? '—' : `${confidence.toFixed(0)}%`} · ${DATA_STATUS_LABELS[radarSafeStatus(row?.signal?.status)]}</div></td>
@@ -8501,7 +8548,7 @@ function updateSpotStatusLine(statusEl = document.getElementById('spotArbStatus'
   });
   const liveVenues = ENABLED_SPOT_VENUES.filter(venue => spotVenueHealth[venue]?.status === 'live').length;
   const staleVenues = ENABLED_SPOT_VENUES.filter(venue => spotVenueHealth[venue]?.status === 'stale').length;
-  const timeStr = (spotArbLastUpdate || new Date()).toLocaleTimeString();
+  const timeStr = (spotArbLastUpdate || new Date()).toLocaleTimeString(window.uiLocale());
   let html = `<span style="color:var(--foreground-dim);font-size:10.5px">${totalSpot} spot listed · ${pricedSpot} priced · ${totalPerp} perps · ${liveVenues} live${staleVenues ? ` · ${staleVenues} stale` : ''} · ${totalRef} ref (${refStatusCounts.full} Full · ${refStatusCounts.estimated} Estimated · ${refStatusCounts.unavailable} Unavailable)${srcSummary ? ` · ${srcSummary}` : ''} · ${timeStr}</span>`;
   if (spotArbErrors.length > 0) {
     html += ` <span style="color:var(--negative);font-size:10px;cursor:help" title="${escapeHtml(spotArbErrors.join('\n'))}">⚠ ${spotArbErrors.length} venue(s) failed</span>`;
@@ -8863,7 +8910,7 @@ function renderSpotVenueTable(venue) {
   const activeCount = assets.filter(a => a.isActive).length;
   const pricedCount = assets.filter(a => a.isPriced).length;
   const health = spotVenueHealth[venue] || { status: 'unavailable' };
-  const freshnessTitle = health.error || (health.lastSuccessAt ? `Last success ${new Date(health.lastSuccessAt).toLocaleTimeString()}` : 'No successful refresh');
+  const freshnessTitle = health.error || (health.lastSuccessAt ? `Last success ${new Date(health.lastSuccessAt).toLocaleTimeString(window.uiLocale())}` : 'No successful refresh');
   const freshnessLabel = health.status === 'live' ? 'Live' : health.status === 'stale' ? 'Stale cache' : 'Unavailable';
   document.getElementById('spotVenueTitle').innerHTML = '<svg class="ic ic-18" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>' + (SPOT_VENUE_NAMES[venue]||venue) + ' Spot <span class="market-state-summary" title="Listed = official venue catalog · Active = venue trading status/activity · Priced = usable positive last price">Listed <strong>'+listedCount+'</strong> · Active <strong>'+activeCount+'</strong> · Priced <strong>'+pricedCount+'</strong></span><span class="data-freshness '+health.status+'" title="'+escapeHtml(freshnessTitle)+'">'+freshnessLabel+'</span>';
 
@@ -8908,7 +8955,7 @@ function renderSpotVenueTable(venue) {
     const dev = ref && a.isPriced ? priceDeviation(a.last, ref) : null;
     const refSrc = getRefSource(a.coin);
     const refMeta = getRefMeta(a.coin) || { status: 'unavailable', source: refSrc || 'Unavailable' };
-    const refDetails = [refMeta.source, refMeta.session, refMeta.asOf ? `as of ${new Date(refMeta.asOf).toLocaleString()}` : '', refMeta.nativeCurrency && refMeta.nativeCurrency !== 'USD' ? `${refMeta.nativeCurrency}→USD via ${refMeta.fxSymbol || 'FX'}` : ''].filter(Boolean).join(' · ');
+    const refDetails = [refMeta.source, refMeta.session, refMeta.asOf ? `as of ${new Date(refMeta.asOf).toLocaleString(window.uiLocale())}` : '', refMeta.nativeCurrency && refMeta.nativeCurrency !== 'USD' ? `${refMeta.nativeCurrency}→USD via ${refMeta.fxSymbol || 'FX'}` : ''].filter(Boolean).join(' · ');
     const srcTag = refSrc ? '<span style="font-size:9px;color:var(--foreground-dim);display:block;margin-top:1px">'+escapeHtml(refSrc)+'</span>' : '';
     const refH = fieldValueWithStatus(ref ? spotFP(ref) + srcTag : '<span class="dim">—</span>', refMeta.status, refDetails);
     const devH = dev !== null
@@ -9265,7 +9312,7 @@ function renderSpotArbRank() {
     const dev = ref ? (r.spot - ref) / ref : null;
     const arbRefSrc = r.refSrc ? '<span style="font-size:9px;color:var(--foreground-dim);display:block;margin-top:1px">'+escapeHtml(r.refSrc)+'</span>' : '';
     const refMeta = r.refMeta || { status: 'unavailable', source: r.refSrc || 'Unavailable' };
-    const refTitle = [refMeta.source, refMeta.session, refMeta.asOf ? `as of ${new Date(refMeta.asOf).toLocaleString()}` : ''].filter(Boolean).join(' · ');
+    const refTitle = [refMeta.source, refMeta.session, refMeta.asOf ? `as of ${new Date(refMeta.asOf).toLocaleString(window.uiLocale())}` : ''].filter(Boolean).join(' · ');
     const refH = fieldValueWithStatus(ref ? spotFP(ref) + arbRefSrc : '<span class="dim">—</span>', refMeta.status, refTitle);
     const devH = dev !== null ? '<span class="'+(Math.abs(dev)>0.005?'neg':'dim')+'">'+(dev>=0?'+':'')+(dev*100).toFixed(2)+'%</span>' : '<span class="dim">—</span>';
     const intelligenceIdentity = assetIntelligenceSpotIdentity(r.spotAsset, r.sVenue);
@@ -9446,7 +9493,7 @@ function renderSpotAllAssets() {
     const issuers = [...new Set(coinKeys.map(c=>(ASSET_META[c]||{}).issuer||'—'))];
     const issuerBadges = issuers.map(iss=>{
       const is=ISSUER_STYLES[iss]||{bg:'rgba(136,144,160,0.1)',color:'var(--foreground-muted)',border:'rgba(136,144,160,0.2)'};
-      return '<span class="issuer-badge" style="background:'+is.bg+';color:'+is.color+';border-color:'+is.border+'">'+issuerShort(iss)+'</span>';
+      return '<span class="issuer-badge" data-i18n-skip style="background:'+is.bg+';color:'+is.color+';border-color:'+is.border+'">'+issuerShort(iss)+'</span>';
     }).join('');
 
     const venueSet = [...new Set(allCoinEntries.map(e=>e.venue))];
@@ -9467,8 +9514,8 @@ function renderSpotAllAssets() {
     // Level 1: Underlying
     h += '<tr class="spot-row-parent" onclick="spotToggleL1(\''+uid+'\')">';
     h += '<td>▸</td>';
-    h += '<td style="font-weight:700;font-size:14px">'+underlying+renderMarketTags(allCoinEntries[0] || underlying)+' '+intelligenceButton+'</td>';
-    h += '<td style="font-family:Inter,sans-serif;font-size:12px;color:var(--foreground-sec)">'+tickerStr+'</td>';
+    h += '<td style="font-weight:700;font-size:14px"><span data-i18n-skip>'+underlying+'</span>'+renderMarketTags(allCoinEntries[0] || underlying)+' '+intelligenceButton+'</td>';
+    h += '<td style="font-family:Inter,sans-serif;font-size:12px;color:var(--foreground-sec)"><span data-i18n-skip>'+tickerStr+'</span></td>';
     h += '<td><div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">'+issuerBadges+'</div></td>';
     h += '<td><span class="cat-chip" style="background:'+catColor+'15;color:'+catColor+'"><span class="cat-dot-s" style="background:'+catColor+'"></span>'+CAT_LABELS[group.category]+'</span></td>';
     h += '<td style="font-family:Inter,sans-serif"><span style="display:flex;align-items:center;gap:3px">'+spotDots+' <span style="font-size:11px;color:var(--foreground-dim)">'+venueSet.length+'</span></span></td>';
@@ -9509,7 +9556,7 @@ function renderSpotAllAssets() {
       h += '<td>'+(hasMultiVenue?'▸':'')+'</td>';
       h += '<td style="font-weight:600;font-size:13px;padding-left:20px">'+coin+renderMarketTags(coinEntries[0] || coin)+'</td>';
       h += '<td></td>';
-      h += '<td><span class="issuer-badge" style="background:'+is.bg+';color:'+is.color+';border-color:'+is.border+'">'+issuerShort(meta.issuer)+'</span></td>';
+      h += '<td><span class="issuer-badge" data-i18n-skip style="background:'+is.bg+';color:'+is.color+';border-color:'+is.border+'">'+issuerShort(meta.issuer)+'</span></td>';
       h += '<td></td>';
       h += '<td style="font-family:Inter,sans-serif">'+exchCell+'</td>';
       h += '<td></td>';

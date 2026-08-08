@@ -294,3 +294,11 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 - 只有 Gate、Binance、Bitget、trade.xyz 四份 source snapshot 都为 Full 时才把当前桶写进历史。来源不完整时允许返回当前 Partial 监控结果，但不写基线，且没有越过绝对阈值的资产不能显示为 Normal。
 - Runtime Cache 跨部署保留但属于区域 best-effort cache，可能被逐出，不是永久数据库。因此 API 的 persistence 主状态最多为 Partial，并明确返回 continuity、region、storedSnapshots 和 baseline coverage。
 - 如需 30 日以上、跨 region 严格连续、可审计的历史，应迁移到 Neon/Postgres（run 表 + observation 表 + signal/fingerprint 表）；在迁移前不得把本缓存描述为永久数据库。
+
+## 18. 中英文展示层
+
+- 英文是界面文案的 canonical source；中文只属于 presentation layer。语言切换不得修改 ticker、venue、company name、canonical identity、category key、API payload、排序值或缓存键。
+- 右上角 `EN / 中文` 只保存 `rwa_dashboard_locale_v1` 这一项本地偏好。不得复用 localStorage 保存行情、排名、Radar 基线或其他市场历史。
+- 切换语言必须是纯 DOM 展示操作：不得调用 `fetch`、页面导航、数据 refresh 或可能继续加载 Funding History 的 renderer；当前顶层页面、子页、筛选、搜索、More 展开状态和已打开的 Asset Intelligence Drawer 必须保持不变。
+- 动态状态由同一套 `Full / Partial / Estimated / Unavailable` canonical 值生成，再在展示层翻译；数据状态语义、缺失值与真实零值不能因语言变化而改变。
+- 新增页面或动态模板时，必须同时补英文 source、中文映射和契约哨兵；生产发布前至少验证一次 `EN → 中文 → EN`、动态 MutationObserver 内容、320px 手机导航和 ticker/venue 不被翻译。
