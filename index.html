@@ -9551,6 +9551,10 @@ function _buildSpotPerpFromAllData() {
 
 function updateSpotStatusLine(statusEl = document.getElementById('spotArbStatus')) {
   if (!statusEl) return;
+  if (spotEmptyStateIsLoading()) {
+    statusEl.innerHTML = '<span style="color:var(--foreground-dim);font-size:10.5px">Loading spot venue catalogs…</span>';
+    return;
+  }
   const spotArrays = Object.values(SPOT_DATA).filter(Array.isArray);
   const totalSpot = spotArrays.reduce((s, a) => s + a.length, 0);
   const pricedSpot = spotArrays.flat().filter(a => Number(a.last) > 0).length;

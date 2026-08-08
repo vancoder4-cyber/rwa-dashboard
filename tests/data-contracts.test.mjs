@@ -1435,6 +1435,7 @@ test('Spot cold load streams venue catalogs while optional depth enrichment stay
   assert.match(html, /let spotRefreshGeneration = 0/);
   assert.doesNotMatch(html, /class="spot-cnt">(?:8|2|5|0)<\/span>/);
   assert.equal((html.match(/class="spot-cnt">—<\/span>/g) || []).length, 5);
+  assert.match(html, /function updateSpotStatusLine[\s\S]*?spotEmptyStateIsLoading\(\)[\s\S]*?Loading spot venue catalogs…/);
 
   const settleSource = sourceBetween(
     html,
