@@ -552,7 +552,7 @@ test('English Spot source stays canonical while dynamic Traditional, Spot, and H
   };
   const sentinels = {
     Traditional: ['Trad Volume', 'Options Volume', 'Est. Total Notional', 'Need Trad + Crypto prices'],
-    Spot: ['24h Volume', 'No spot data loaded. Click Refresh.', 'No combos match the current filters.'],
+    Spot: ['24h Volume', 'Loading spot venue catalogs…', 'Spot venue data unavailable. Refresh to retry.', 'Loading comparable Spot and Perpetual routes…', 'No combos match the current filters.'],
     Heatmap: ['Short receives', 'Long receives', 'Data coverage', 'Venue spread', 'Need 2 venues'],
   };
 
@@ -1364,7 +1364,7 @@ test('browser resource contracts keep Gate fan-out stable and pause polling whil
 
   const gateSpotSource = sourceBetween(
     html,
-    'async function fetchSpotRwaGate()',
+    'async function fetchSpotRwaGate(',
     '// ── Kraken Spot Fetch ──',
   );
   assert.equal((gateSpotSource.match(/type=spot-depth/g) || []).length, 1);
@@ -1432,6 +1432,9 @@ test('Spot cold load streams venue catalogs while optional depth enrichment stay
   assert.match(html, /const SPOT_CORE_REQUEST_TIMEOUT = 15000/);
   assert.match(html, /const SPOT_DEPTH_REQUEST_TIMEOUT = 5000/);
   assert.match(html, /const SPOT_VENUE_DEADLINE = 20000/);
+  assert.match(html, /let spotRefreshGeneration = 0/);
+  assert.doesNotMatch(html, /class="spot-cnt">(?:8|2|5|0)<\/span>/);
+  assert.equal((html.match(/class="spot-cnt">—<\/span>/g) || []).length, 5);
 
   const settleSource = sourceBetween(
     html,
@@ -1462,26 +1465,48 @@ test('Spot cold load streams venue catalogs while optional depth enrichment stay
     'const SPOT_VENUE_NAMES',
   );
   assert.match(refreshSource, /const applyVenueResult = \(venue, result\) =>/);
+  assert.match(refreshSource, /const refreshGeneration = \+\+spotRefreshGeneration/);
+  assert.match(refreshSource, /const bitgetIdentityPromise = fetchBitgetRealityCatalog\(\)/);
   assert.match(refreshSource, /independentFetchers = \{[\s\S]*?kraken:[\s\S]*?binance:[\s\S]*?okx:/);
   assert.match(refreshSource, /applyVenueResult\(venue, result\)/);
-  assert.match(refreshSource, /settleSpotVenue\('bitget', fetchSpotRwaBitget\)/);
-  assert.match(refreshSource, /settleSpotVenue\('gate', fetchSpotRwaGate\)/);
+  assert.match(refreshSource, /settleSpotVenue\('bitget', \(\) => fetchSpotRwaBitget\(refreshGeneration, bitgetIdentityPromise\)\)/);
+  assert.match(refreshSource, /await bitgetIdentityPromise[\s\S]*?settleSpotVenue\('gate', \(\) => fetchSpotRwaGate\(refreshGeneration\)\)/);
+  assert.match(refreshSource, /Bitget Reality identity dependency unavailable/);
   assert.doesNotMatch(refreshSource, /remainingResults = await Promise\.allSettled/);
 
   for (const [start, end, venue] of [
-    ['async function fetchSpotRwaGate()', '// ── Kraken Spot Fetch ──', 'gate'],
-    ['async function fetchSpotRwaKraken()', '// ── Kraken xStocks', 'kraken'],
-    ['async function fetchSpotRwaBitget()', '// ── Binance Spot Fetch ──', 'bitget'],
-    ['async function fetchSpotRwaBinance()', '// ── OKX Unified Tokenized Stocks ──', 'binance'],
+    ['async function fetchSpotRwaGate(', '// ── Kraken Spot Fetch ──', 'gate'],
+    ['async function fetchSpotRwaKraken(', '// ── Kraken xStocks', 'kraken'],
+    ['async function fetchSpotRwaBitget(', '// ── Binance Spot Fetch ──', 'bitget'],
+    ['async function fetchSpotRwaBinance(', '// ── OKX Unified Tokenized Stocks ──', 'binance'],
   ]) {
     const source = sourceBetween(html, start, end);
     assert.match(source, new RegExp(`scheduleSpotDepthEnhancement\\('${venue}'`));
+    assert.match(source, /scheduleSpotDepthEnhancement\([\s\S]*?generation\)/);
     assert.doesNotMatch(source, /await Promise\.allSettled\(depthTasks/);
   }
+
+  const depthSource = sourceBetween(html, 'function scheduleSpotDepthEnhancement', '// ═══════════════════════════════════════════════\n// REFERENCE PRICING');
+  assert.match(depthSource, /generation = spotRefreshGeneration/);
+  assert.match(depthSource, /generation !== spotRefreshGeneration/);
+  assert.match(depthSource, /spotDepthEnhancementInFlight\[venue\] = \{ generation, run \}/);
+
+  const bitgetSource = sourceBetween(html, 'async function fetchBitgetRealityCatalog()', '// ── Binance Spot Fetch ──');
+  assert.match(bitgetSource, /registerSpotAssetMeta\(coin, underlying, 'Reality'/);
+  assert.match(bitgetSource, /const marketFeedsPromise = Promise\.allSettled\(\[\s*realityTickersPromise,\s*legacyTickersPromise/);
+  assert.match(bitgetSource, /const realityCatalog = await realityCatalogPromise;\s*const \[realityTickersResult, legacyTickersResult\] = await marketFeedsPromise/);
+  assert.match(bitgetSource, /keeping official listings with Unavailable market fields/);
+
+  const referenceSource = sourceBetween(html, 'async function fetchReferencePrices(symbols)', 'function getRefPrice(coin)');
+  assert.match(referenceSource, /refPricePendingSymbols\.add/);
+  assert.match(referenceSource, /while \(refPricePendingSymbols\.size\)/);
+  assert.match(referenceSource, /function scheduleSpotReferenceEnrichment\(\)/);
+  assert.match(refreshSource, /scheduleSpotReferenceEnrichment\(\)/);
 
   const initSource = sourceBetween(html, '(async function init()', '</script>');
   assert.match(initSource, /overlay\.style\.display = 'none'[\s\S]*?Promise\.allSettled/);
   assert.match(initSource, /Promise\.allSettled\(\[\s*refresh\(true\),\s*refreshSpotArbData\(true\)/);
+  assert.match(initSource, /SPOT_PERP = _buildSpotPerpFromAllData\(\);\s*scheduleSpotReferenceEnrichment\(\)/);
 });
 
 test('Traditional activity renders without I/O and loads only while its page is active', async () => {
@@ -1538,5 +1563,6 @@ test('Traditional activity renders without I/O and loads only while its page is 
   );
   assert.doesNotMatch(spotRefreshSource, /renderTraditionalActivity\(\)/);
   assert.match(spotRefreshSource, /renderVisibleDataPage\(\)/);
-  assert.match(spotRefreshSource, /if \(pageIsVisible\(\)\) \{\s*fetchReferencePrices/);
+  assert.match(spotRefreshSource, /scheduleSpotReferenceEnrichment\(\)/);
+  assert.match(spotRefreshSource, /if \(topPageIsActive\('spot'\)\) renderVisibleDataPage\(\)/);
 });

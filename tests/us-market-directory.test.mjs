@@ -574,7 +574,7 @@ test('client security category and Spot identity gates cannot promote explicit c
     verifiedEquity:{ symbol:'QNT', category:'equity' },
     independentlyTypedEtf:{ symbol:'QNTB', category:'etf' },
   });
-  const bitgetSpotStart = html.indexOf('async function fetchSpotRwaBitget');
+  const bitgetSpotStart = html.indexOf('async function fetchBitgetRealityCatalog');
   const bitgetSpotEnd = html.indexOf('// Keep the legacy v2 feed', bitgetSpotStart);
   const bitgetSpotSource = html.slice(bitgetSpotStart, bitgetSpotEnd);
   assert.match(bitgetSpotSource, /if \(category === 'other'\) continue/);
