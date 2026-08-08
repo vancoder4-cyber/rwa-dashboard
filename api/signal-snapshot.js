@@ -190,7 +190,7 @@ function gateListings(payload) {
     const admittedCategory = officialCategory === 'equity' && isExplicitTrue(contract.is_pre_market)
       ? 'pre-ipo'
       : officialCategory;
-    const identity = normalizeSignalIdentity(venueBase, admittedCategory);
+    const identity = normalizeSignalIdentity(venueBase, admittedCategory, { venue:'gate' });
     if (!identity || !/^[A-Z0-9]{1,30}_USDT$/.test(venueSymbol)) continue;
     const ticker = tickerMap.get(venueSymbol) || {};
     const price = firstNumber(ticker.mark_price, contract.mark_price, ticker.last, contract.last_price);
@@ -367,7 +367,7 @@ async function collectTradeXyz(baseUrl) {
     // xyz DEX universe. Admit only the exact audited fallback map used by the
     // client; an arbitrary blank-category ticker still fails closed.
     const category = tradeXyzSignalCategory(symbol, officialType);
-    const identity = normalizeSignalIdentity(symbol, category);
+    const identity = normalizeSignalIdentity(symbol, category, { venue:'tradexyz' });
     if (!identity || !symbol || !venueSymbol) continue;
     const price = finiteOrNull(context.markPx);
     const previousPrice = finiteOrNull(context.prevDayPx);

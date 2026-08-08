@@ -10,7 +10,7 @@
 3. **Fail closed。** 无法确认资产类型时不展示；不能用“不是 crypto”代替“已确认是 RWA”。
 4. **先确认类别，再做 alias。** `CL/BZ/NG/PL/HG/GC/QNT` 等歧义代码不能全局替换。
 5. **保留两层 symbol。** `venueSymbol` 用于请求交易所 API；canonical symbol 用于跨场所聚合和展示。
-6. **资产类别和市场来源分开。** Equity/ETF/Commodity 是类别；ADR/HK/KR/TW/JP/CN 是独立 market tags。
+6. **资产类别和市场来源分开。** Equity/ETF/Commodity 是类别；US/ADR/HK/KR/TW/JP/CN 是独立 market tags。
 
 ## 2. 身份证据优先级
 
@@ -84,7 +84,9 @@ trade.xyz 当前专用 `xyz` DEX universe 有 5 个 `perpCategories` 空缺：`U
    - Bitget/OKX 的宽泛 Stock(s) 类别只对当前审计过的 `SP500`、`NDX100`、`KR200` 精确改标为 Index；禁止按名称或 ticker 子串泛化。
 2. `CL` 也可能是 Colgate-Palmolive，`PL` 也可能是 Planet Labs，因此不能使用全局 alias。
 3. Wrapper 可以保留 venue ticker 展示，但跨场所匹配必须使用 underlying。
-4. 同一 canonical asset 在多个 venue 出现时，类别必须一致；出现冲突应阻止发布并人工核对。
+4. 跨场所与跨板块的主键必须是 `category:canonicalUnderlying`，不能只使用 ticker。`CL` Equity 与 `CL` Commodity、真实 `SKHX` ETF 与 trade.xyz 的 `SKHX → SKHYNIX` Equity 必须保持为不同资产。
+5. 同一 `category:canonicalUnderlying` 在多个 venue 出现时，类别必须一致；出现冲突应阻止发布并人工核对。
+6. Venue alias 只能在已审计的场所作用域内生效：Gate 的 `QQQX/SPYX/TQQQX/SLVON` 才分别解析为 `QQQ/SPY/TQQQ/SLV`；其他场所的真实 `QQQX/SPYX` 证券不得被改写。trade.xyz 的 `SKHX` 才解析为 `SKHYNIX`；真实美股 ETF `SKHX` 保持自身身份。公司 lifecycle/equity alias 只作用于已确认的 Equity/Pre-IPO，不能把同名 ETF（例如未来的 `QNTB/SPCXB/CBRSB` ETF）改写成公司股票。
 
 ## 6. 类别与上市状态
 
@@ -104,7 +106,7 @@ trade.xyz 当前专用 `xyz` DEX universe 有 5 个 `perpCategories` 空缺：`U
 - `MINIMAX/ZHIPU/CXMT`：已上市 Equity。
 - `OPENAI/ANTHROPIC/ANDURIL/KALSHI/KIMI/NEURALINK/POLYMARKET`：Pre-IPO；后五项由 Gate 官方 `stocks + is_pre_market=true` catalog 交叉审计纳入。
 - `UNITREE`：已获 IPO 注册、尚未找到开始交易公告，因此仍为 Pre-IPO。
-- `EWH/DFEN/QQQX/SPYX/TQQQX/SLVON`：ETF。
+- `EWH/DFEN`：全局 ETF 类别修正；Gate 的 `QQQX/SPYX/TQQQX/SLVON` 是仅在 Gate 官方 RWA catalog 门控后生效的 ETF wrapper，不能作为全局 ticker 类别修正。
 - `H100`：计算资源类 Commodity，不是股票指数。
 - 已公开上市的公司不能因为场所残留 `is_pre_market` 就继续显示为 Pre-IPO。
 
@@ -116,16 +118,24 @@ trade.xyz 当前专用 `xyz` DEX universe 有 5 个 `perpCategories` 空缺：`U
 
 Registry 只纠正“已经由场所确认是 security”的产品；显式 `crypto/coin/token/meme` 类型永远先返回 Other/拒绝，不能因为 ticker 命中 `QNT` 等已上市公司 alias 而被 registry 反向放行。
 
+通用 `identityVerified` 布尔值不能覆盖显式 Crypto 类型。确有交易所元数据错误时，必须以 `venue + exact symbol` 建立窄例外，并在入场时把标准化类别与原始 `venueMarketType` 分开保存；当前只有 Bitget `KUAISHOU` 使用这一规则。Spot 的 Reality/UTS/xStocks catalog 身份也不能让显式 Crypto `QNT/BTC` 被 lifecycle registry 反向升级。
+
 Gate 当前另有 `BP + is_pre_market=true`，但其 `contract_type` 为空，未通过 RWA 身份门控，所以不能仅凭 premarket flag 纳入 registry 或页面。
 
 ## 7. Market tags
 
 - Market tag 与资产类别无关，并允许多标签。
+- `US`（页面显示为 `US-listed / 美股`）只表示 canonical underlying 当前存在于 Nasdaq Trader 官方 `nasdaqlisted.txt` 或 `otherlisted.txt`，且 `Test Issue=N`、类别为 Equity/ETF、非 warrant/right/unit/preferred/debt。它表示美国交易所上市，不表示公司国籍。
 - `ADR` 表示美国上市的 depositary receipt/share。
 - `HK/KR/TW/JP/CN` 表示 underlying、主要市场或明确的市场 exposure。
 - 双重上市可以同时展示两个标签，例如 GigaDevice 为 `HK + CN`。
-- ADR 也可以保留来源地，例如 `TSM = ADR + TW`、`BABA = ADR + CN`、`SKHY = ADR + KR`。
-- ETF 的地区标签表示 exposure，不代表 ETF 自身在该地区上市，例如 `EWT = TW`、`EWY = KR`。
+- 标签允许叠加，例如 `TSM = US + ADR + TW`、`BABA = US + ADR + CN`、`SKHY = US + ADR + KR`；`ASML` 是 Nasdaq New York registered share，显示 `US` 而不因外国公司身份自动标 ADR。
+- ETF 的地区标签表示 exposure，不代表 ETF 自身在该地区上市，例如 `EWT = US + TW`、`EWY = US + KR`。
+- 必须先通过 venue RWA security 准入、wrapper underlying 解析和 Equity/ETF 类别门控，再查 US 目录。不得按 ticker 外观、USDT 产品名、公司国籍、Yahoo 报价或“没有其他地区标签”反推 `US`。
+- 官方目录本身可以合法包含与 Crypto 同名的证券，例如 NYSE Arca 的 `BTC` ETF；不能设置任何“该 ticker 必须永远不在目录”的全局黑名单。Crypto `BTC`、Pre-IPO 等身份必须在更早的 venue/category 门控被拒绝，只有已确认的 Equity/ETF 产品才能进入 US 目录匹配。
+- ADR 识别只对 Equity 生效；名称包含 ADR 的 ETF（例如 ADR 主题 ETF）本身不能被标成 ADR。首次获取官方目录失败时 fail closed；已有已验证快照后可在 7 天上限内使用 last-known-good 并明确标 stale，超过上限重新禁用 US 筛选，而不是无限期沿用或猜测补齐。
+- Perpetual By Asset 与 Spot All Assets 使用所有 listing 的 market-tag 并集；venue 顺序不能决定聚合标签。Category、Market、Search、Active-only 筛选互相独立并以 AND 组合。
+- 官方目录的源时间采用 `America/New_York` 严格解析；服务端、health 和浏览器都校验两份原始 source epoch、最早/最新源时间与 7 天硬过期投影。CDN 的 fresh + stale 时间不得跨过该硬过期点。
 
 ## 8. 数据完整度状态
 
@@ -137,6 +147,16 @@ Gate 当前另有 `BP + is_pre_market=true`，但其 `contract_type` 为空，�
 - **Unavailable**：接口不支持、未返回或本轮未成功抓取。
 
 身份确认与字段完整度是两件事。资产可以是已确认 RWA，但 OI/Depth 等字段仍为 Partial 或 Unavailable。
+
+`null` 不能在求和、最大值、排序或 Spot↔Perp bridge 中被 JavaScript 隐式转成 `0`。若所有组成字段均缺失，聚合值仍为 `null` 并显示 `— / Unavailable`；只有至少一个真实数值时才可聚合。
+
+跨 listing 聚合必须同时返回 `value / observed / expected / status`。只要当前 catalog 中有任一应有 listing 缺值，聚合状态最多为 Partial；Spot KPI 与场所汇总在全缺失时必须显示 Unavailable，不能显示 `$0` 或 `0.0 bps`。过期的 Spot/Perp last-good 快照可以留在诊断表中，但不得进入 Basis / Net APR、Funding Ranking、Heatmap、Alerts 或代表性 funding spread 等可执行/异动路径。
+
+前端 freshness 不能只相信快照上的字符串。Perpetual 与 Spot 都使用 `lastSuccessAt` 再做硬 TTL 校验：硬 TTL 为各自正常刷新 cadence 的 2 倍；缺少、非数、未来时间或恰好越过边界一律 fail closed 为 Unavailable/Stale。last-good 数值仍可诊断展示，但字段最多标 Partial；页面从隐藏恢复可见时，必须先按当前时钟重绘过期状态，再发起异步刷新。
+
+Top 30 的 30 天成交量只把完整结束的 30 根 UTC 日线标为 Full；当天未结束 candle 必须排除。trade.xyz 的小时 K 线只提供 base volume，当前美元值使用 `base volume × close` 推导，因此即使取得 720 根完整小时线也只能标 Estimated，少于 720 根则为 Partial。状态 denominator 是当前已验证 catalog 的全部合约 listing，而不是只统计成功或正成交量响应；缺历史、少 candle 或缺合约均为 Partial/Unavailable，`24h × 30` 只能是 Estimated。每个合约/组件的贡献必须保留到明细，缺失贡献显示 `—`，不能当成 `$0`。XAUT/PAXG 等经审计黄金组件合并为 `commodity:XAU` 时，Top 30 与 Asset Intelligence Drawer 必须使用同一身份族。
+
+生产环境的 Binance 与 trade.xyz 历史接口必须是固定快照：浏览器不得提交 symbol 或时间范围。服务端分别从 Binance active `TRADIFI_PERPETUAL`（另加精确 PAXG/XAUT 例外）以及 trade.xyz `metaAndAssetCtxs + perpCategories` 官方目录中重建身份门控，再按官方当前 quote/day notional 确定 Top 80。目录或完整 ticker 覆盖失败时返回 502/no-store；固定 URL 才能让所有浏览器共享同一个 CDN cache key，避免 Vercel 调用量随任意 symbol 组合扩张。
 
 OKX 页面中的默认 Spot/Perp 手续费不是账户鉴权后的费率，只能标 **Estimated**；如果没有可信默认值或对应产品不支持该字段，则标 **Unavailable**，不得标 Full。OKX 衍生品 `volCcy24h × last/mark` 是美元成交额估算，也必须标 Estimated；官方 `oiUsd` 可在当前 catalog join 完整时标 Full。
 
@@ -153,7 +173,9 @@ OKX 页面中的默认 Spot/Perp 手续费不是账户鉴权后的费率，只�
 7. 对现货价格与股票参考价做异常比率扫描；异常只触发复核，不自动决定身份。
 8. Preview 中核对 venue counts、目标资产标签、Top 30 和 Cross-Venue Coverage。
 9. OKX 断言 `instCategory=1` 的 CAT/LIT/QNT 不进入，UTS 只在 category 3 后剥一层 `X`，普通 FUTURES 不进入，且同一 underlying 的 SWAP/X-Perp listing 都保留。
-10. 推送 Git 后再 promote 到生产，最后复查生产 DOM、Vercel `Ready`、`/api/health` 和 5xx 日志。
+10. 检查 `/api/us-market-directory` 数量不低于 8,000，AAPL/QQQ/BABA/TSM 存在且 BABA 属于 ADR；不以任何 ticker 缺席作为目录健康条件。逐页验证 Crypto BTC、Pre-IPO OPENAI 等不会越过类别门控，Perpetual 与 Spot 的 `US-listed / 美股` 筛选只保留带 US 标签的证券资产。
+11. 浏览器每小时后台刷新一次完整美股目录；首次失败时筛选 fail-closed，已有通过校验的目录后刷新失败则在最长 7 天内继续使用 last-known-good，并按 5–30 分钟退避重试。筛选与类别、搜索、Active-only 条件始终使用 AND 组合。
+12. 推送 Git 后再 promote 到生产，最后复查生产 DOM、Vercel `Ready`、`/api/health` 和 5xx 日志。
 
 ## 10. 已知精确例外
 
@@ -214,10 +236,10 @@ Bitget 当前同时返回 `isRwa=YES` 和 `symbolType=crypto`，但该产品对�
 - 首版覆盖美国上市的 Equity、ETF 与 ADR；纯 HK/KR/TW/JP/CN 本地上市、Pre-IPO、现货商品、商品期货和指数不拿同名美股代替，官方源不支持时显示 Unavailable。
 - 股票/ETF 成交股数和收盘价来自 Nasdaq Market Activity 官方历史接口，并强制与 OCC 最近完成交易日对齐；Nasdaq 展示的 Average Volume 只用于基线。没有同一 session 的历史行时，该标的不得把跨日金额相加排名。
 - OCC 主报告不可用、ranking session 无效、或任一 eligible 官方候选因请求/结构错误缺少 Nasdaq 同日历史时必须 fail closed；不得把当前 Nasdaq 数据降级成同日完整排名，也不得缓存 `200 + 空榜`。Nasdaq 返回业务成功且明确没有该 session 行的标的（例如排名日后才上市或当日无交易）标为 session-ineligible 并从排名分母排除；不得把任意接口失败伪装成 ineligible。响应需披露 aligned / ineligible / dropped candidates；宁可由 CDN 保留上一份正确榜单，也不能让缺失的头部标的扭曲排序。
-- 期权成交合约数来自 OCC 官方 batch-processing report。当前值使用最近完成交易日（通常 T+1）；基线使用此前四周同一星期几的四个日度报告取平均。OCC 的 weekly download 当前只返回日期区间、没有逐标数据行，因此不能假装成 20 日均量。
+- 期权成交合约数来自 OCC 官方 batch-processing report。当前值使用最近完成交易日（通常 T+1）；基线使用此前四周同一星期几的四个日度报告取平均。OCC 的 weekly download 当前只返回日期区间、没有逐标数据行，因此不能假装成 20 日均量。已成功解析且完整的 OCC totals report 中缺席某 root 表示当日观测为真实 0；只有报告 map 缺失/无效才是 null。这个 0 不等于该标的存在期权系列，`Optionable` 仍需当前或历史报告中出现过该 root。
 - 股票美元值是 `Nasdaq same-session shares × same-session close`，只能标 Estimated，不是 consolidated/VWAP turnover。
 - 期权美元值是 `OCC standard contracts × 100 × Nasdaq displayed underlying price`，代表 underlying notional，不是 option premium。`2AAPL`、`4SPY` 等 adjusted roots 的交割乘数未知，必须从标准 ×100 公式中排除并单独披露。
-- `Est. Total Notional = Estimated Share Value + Estimated Options Underlying Notional`。Perp/Spot 24h USD volume 只做并列覆盖展示，不得加进这个传统总值。
+- `Est. Total Notional = Estimated Share Value + Estimated Options Underlying Notional`。两腿都可用时总值仍标 Estimated；任一腿缺失时总值保持 null/Partial，不得把 null 补 0 后继续排名。Perp/Spot 24h USD volume 只做并列覆盖展示，不得加进这个传统总值。
 - Cboe delayed quote table 明确禁止自动抓取，因此生产代码不得调用其网页/JSON 端点。需要真正实时期权时，应采购 OPRA 授权数据或合规的数据供应商。
 - `Trad RelVol = Nasdaq aligned completed-session Share Volume / 此前最多 20 个完成交易日的 Nasdaq 官方历史 Share Volume 均值`。历史请求与两日排名共用同一条官方接口；20 个样本齐全为 Full，样本不足为 Partial。
 - `Options RelVol = OCC latest completed-day contracts / prior four same-weekday observations average`。

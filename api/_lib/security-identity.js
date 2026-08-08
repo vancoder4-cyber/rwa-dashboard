@@ -92,7 +92,7 @@ export const SECURITY_ETF_UNDERLYINGS = Object.freeze([
   'FXI','GDX','GLD','GLTR','HYG','IAU','IBB','IBIT','ICLN','IEF','IEMG','IEFA','IGV','IJH',
   'INDA','ITOT','ITA','IVV','IWF','IWM','IWN','JAAA','JEPQ','KWEB','LABD','LABU','LIT','MAGS',
   'NVDL','OIH','PALL','PDBC','PPLT','PSQ','QQQ','QQQI','QQQM','REMX','SCHD','SGOV','SHY','SLV',
-  'SHLD','SMH','SNXX','SOXL','SOXS','SOXX','SPMO','SPY','SPXU','SQQQ','TAN','TIP','TLT','TMF','TNA','TQQQ',
+  'SHLD','SMH','SNXX','SOXL','SOXS','SOXX','SPMO','SPY','SPXU','SPYX','SQQQ','TAN','TIP','TLT','TMF','TNA','TQQQ',
   'TZA','UNG','UPRO','URA','URNM','USFR','USO','UVXY','VGT','VNQ','VOO','VTI','VTV','VXUS','XLK',
   'XBI','XLE','XLU','XLV','YANG','YINN','EWT','DRAM','KORU','KSTR','LYTE','NCLD','EWH','DFEN','MUU',
 ]);
@@ -131,13 +131,17 @@ function normalizedCategory(value) {
   return String(value || '').trim().toLowerCase().replace(/^pre[-_]?ipo$/, 'pre-ipo');
 }
 
-export function normalizeSignalIdentity(symbol, category, { allowBinanceBstock = false } = {}) {
+export function normalizeSignalIdentity(symbol, category, { allowBinanceBstock = false, venue = '' } = {}) {
   let raw = String(symbol || '').trim().toUpperCase();
   let resolvedCategory = normalizedCategory(category);
   if (!/^[A-Z0-9.-]{1,30}$/.test(raw) || !CATEGORY_SET.has(resolvedCategory)) return null;
 
   if (allowBinanceBstock && BINANCE_BSTOCK_UNDERLYING[raw]) {
     raw = BINANCE_BSTOCK_UNDERLYING[raw];
+  }
+
+  if (String(venue).toLowerCase() === 'tradexyz' && raw === 'SKHX' && resolvedCategory === 'equity') {
+    raw = 'SKHYNIX';
   }
 
   if (resolvedCategory === 'commodity') {
@@ -152,7 +156,10 @@ export function normalizeSignalIdentity(symbol, category, { allowBinanceBstock =
     if (BROAD_STOCK_INDEX_SET.has(raw)) {
       return { symbol:INDEX_ALIASES[raw] || raw, category:'index' };
     }
-    if (TOKENIZED_ETF_WRAPPERS[raw]) {
+    // These exact wrapper tickers are verified in Gate's RWA catalog. QQQX
+    // and SPYX are also genuine U.S.-listed securities, so never rewrite them
+    // without the venue-scoped identity evidence.
+    if (String(venue).toLowerCase() === 'gate' && TOKENIZED_ETF_WRAPPERS[raw]) {
       raw = TOKENIZED_ETF_WRAPPERS[raw];
       resolvedCategory = 'etf';
     }
@@ -162,9 +169,11 @@ export function normalizeSignalIdentity(symbol, category, { allowBinanceBstock =
     if (lifecycleCanonical && ['equity', 'pre-ipo'].includes(resolvedCategory)) {
       resolvedCategory = SECURITY_LISTING_REGISTRY[lifecycleCanonical].category;
       raw = lifecycleCanonical;
-    } else {
+    } else if (['equity', 'pre-ipo'].includes(resolvedCategory)) {
       raw = EQUITY_ALIASES[raw] || raw;
       if (SECURITY_ETF_SET.has(raw)) resolvedCategory = 'etf';
+    } else if (SECURITY_ETF_SET.has(raw)) {
+      resolvedCategory = 'etf';
     }
   }
   return { symbol: raw, category: resolvedCategory };

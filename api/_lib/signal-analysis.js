@@ -89,13 +89,15 @@ export function aggregateSignalListings(listings, limit = SIGNAL_ASSET_LIMIT) {
       rejected.push({ venue: venue || null, venueSymbol: venueSymbol || null, reason: 'invalid-normalized-listing' });
       continue;
     }
-    if (!groups.has(symbol)) groups.set(symbol, []);
-    groups.get(symbol).push({ ...listing, symbol, category, venue, venueSymbol });
+    const identityKey = `${category}:${symbol}`;
+    if (!groups.has(identityKey)) groups.set(identityKey, []);
+    groups.get(identityKey).push({ ...listing, symbol, category, venue, venueSymbol });
   }
 
   const conflicts = [];
   const assets = [];
-  for (const [symbol, rows] of groups) {
+  for (const [, rows] of groups) {
+    const symbol = rows[0].symbol;
     const categories = [...new Set(rows.map(row => row.category))];
     if (categories.length !== 1) {
       conflicts.push({ symbol, categories, venues: [...new Set(rows.map(row => row.venue))].sort() });

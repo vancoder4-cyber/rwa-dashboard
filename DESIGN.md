@@ -178,6 +178,7 @@ Base unit: 4px
 - Default: transparent bg, `--border-subtle` border, `--text-tertiary`
 - Hover: `--bg-well` background, `--text-secondary`
 - Active: `--accent-muted` bg, `--accent` text, `--accent` border at 30%
+- Category and Market are separate filter dimensions. `All Markets / US-listed` is available in Perpetual venue tables, Perpetual By Asset, Spot arbitrage, Spot All Assets and Spot venue tables; both dimensions combine with AND and persist while switching Spot sub-views.
 
 ### Badges / Tags
 - Category: Respective color at 12% opacity bg, full color text
@@ -187,10 +188,16 @@ Base unit: 4px
 
 ### Listing identity & provenance
 - The primary row identity is the canonical underlying, while venue symbol and product type remain visible as listing metadata.
+- Cross-venue and cross-section joins use `category:canonicalUnderlying`; a same-ticker Equity, ETF, Commodity, or Crypto row never merges by spelling alone. Venue-scoped aliases are applied only after that venue's official RWA catalog has verified the product.
 - One venue dot represents one venue, not one contract. If OKX supplies both SWAP and X-Perp for the same underlying, the aggregate row counts OKX once but the expanded row and Asset Intelligence Drawer show both independent listings with `SWAP` / `X-PERP` labels.
 - Coverage and numeric fields use only the canonical `Full / Partial / Estimated / Unavailable` states. Missing values render as an em dash plus status, never numeric zero.
 - OKX derivative USD volume derived from base quantity × price and generic account-tier fee defaults carry an `Estimated` badge. Unsupported fees are `Unavailable`; neither may visually resemble an official Full value.
-- The Top 30 loading/provenance line names every participating venue. A 30-day value is Full only with 30 confirmed daily bars; partial history or `24h×30` fallback must remain visually distinguishable.
+- The Top 30 loading/provenance line names every participating venue. A 30-day value is Full only with 30 confirmed daily quote-volume bars. trade.xyz derives quote notional as hourly base volume × close and therefore remains Estimated even with all 720 completed hours; partial history and `24h×30` fallbacks remain visually distinguishable.
+- `US-listed / 美股` means the resolved Equity/ETF underlying is confirmed in the official Nasdaq Trader U.S. listing directories. ADR and home-market/exposure tags remain additive. Aggregated rows display the union of tags from every listing, never the first venue's tags.
+- Missing numeric fields remain null through aggregation, sorting and Spot↔Perp joins. A visually rendered zero is always a reported/calculated zero, never a placeholder for missing data.
+- Aggregate cells expose coverage status against the current listing universe; a subtotal with one or more missing listing inputs is Partial. Stale last-good rows remain diagnosable but are excluded from live opportunity rankings.
+- Freshness is recomputed from each venue's `lastSuccessAt`, not trusted as a static label. Perpetual and Spot hard-expire at twice their normal refresh cadence; missing, invalid, future, or boundary timestamps fail closed. Funding rankings, heatmaps, alerts, basis and net-APR routes use only fresh rows.
+- Top 30 Full volume means every expected current contract has the complete confirmed history window and a directly comparable quote-volume field. Missing component contributions stay unavailable rather than rendering as zero. The merged gold row and Asset Intelligence Drawer share the same audited `commodity:XAU` family identity.
 
 ### Modal
 - Overlay: `rgba(0,0,0,0.7)` + `backdrop-filter: blur(8px)`

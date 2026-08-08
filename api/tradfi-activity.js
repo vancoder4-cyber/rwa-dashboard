@@ -15,11 +15,14 @@ import {
   setNoStore,
   setPublicCache,
 } from './_lib/upstream.js';
+import {
+  fetchUsListedDirectory,
+} from './_lib/us-market-directory.js';
+
+export { parseNasdaqDirectory } from './_lib/us-market-directory.js';
 
 const NASDAQ_MOVERS = 'https://api.nasdaq.com/api/marketmovers?assetclass=stocks';
 const NASDAQ_SUMMARY = 'https://api.nasdaq.com/api/quote';
-const NASDAQ_LISTED = 'https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt';
-const OTHER_LISTED = 'https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt';
 const OCC_VOLUME = 'https://marketdata.theocc.com/onn-volume-download';
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 100;
@@ -34,8 +37,6 @@ const SOURCE_HEADERS = {
   Referer: 'https://www.nasdaq.com/',
 };
 
-const NON_COMMON_SECURITY_PATTERN = /\b(WARRANTS?|RIGHTS?|UNITS?|PREFERRED|PREFERENCE|DEBENTURES?|BONDS?|NOTES?|CERTIFICATES?)\b/i;
-const ADR_NAME_PATTERN = /\b(AMERICAN DEPOSITARY|AMERICAN DEPOSITORY|ADR)\b/i;
 
 function asNumber(value) {
   if (value === null || value === undefined) return null;
@@ -242,39 +243,8 @@ async function fetchJson(url, timeoutMs = 18000, retries = 1) {
   return fetchJsonWithPolicy(url, { headers:SOURCE_HEADERS }, { timeoutMs, retries });
 }
 
-export function parseNasdaqDirectory(text, listingVenue) {
-  const lines = String(text || '').trim().split(/\r?\n/);
-  const headers = (lines.shift() || '').split('|');
-  const rows = [];
-  for (const line of lines) {
-    if (!line || line.startsWith('File Creation Time')) continue;
-    const columns = line.split('|');
-    const record = Object.fromEntries(headers.map((header, index) => [header, columns[index] || '']));
-    const symbol = String(record.Symbol || record['NASDAQ Symbol'] || record['ACT Symbol'] || '').trim().toUpperCase();
-    const name = String(record['Security Name'] || '').trim();
-    if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol) || record['Test Issue'] !== 'N' || !name) continue;
-    if (NON_COMMON_SECURITY_PATTERN.test(name)) continue;
-    rows.push({
-      symbol,
-      name,
-      category:record.ETF === 'Y' ? 'etf' : 'equity',
-      exchange:listingVenue === 'nasdaq' ? 'NASDAQ' : (record.Exchange || null),
-      tags:ADR_NAME_PATTERN.test(name) ? ['ADR'] : [],
-    });
-  }
-  return rows;
-}
-
 async function fetchTraditionalDirectory() {
-  const [nasdaqText, otherText] = await Promise.all([
-    fetchText(NASDAQ_LISTED, 20000),
-    fetchText(OTHER_LISTED, 20000),
-  ]);
-  const rows = [
-    ...parseNasdaqDirectory(nasdaqText, 'nasdaq'),
-    ...parseNasdaqDirectory(otherText, 'other'),
-  ];
-  return new Map(rows.map(row => [row.symbol, row]));
+  return (await fetchUsListedDirectory()).bySymbol;
 }
 
 async function fetchDollarVolumeLeaders() {
@@ -351,38 +321,116 @@ export function optionActivityForSymbol(symbol, occBundle, lastPrice) {
   if (!occBundle) {
     return {
       volume:null, adjustedVolumeExcluded:null, averageVolume:null, relativeVolume:null,
-      estimatedNotional:null, baselineSamples:0, status:'unavailable',
+      estimatedNotional:null, baselineSamples:0, hasOfficialSeries:false,
+      currentReportAvailable:false, adjustedCoverageComplete:false, status:'unavailable',
     };
   }
-  const current = occBundle.latestTotals[symbol] || 0;
-  const adjustedVolumeExcluded = occBundle.latestAdjustedTotals[symbol] || 0;
-  const baselineTotal = occBundle.comparisonReports.reduce(
-    (sum, report) => sum + (report.standardTotals[symbol] || 0),
-    0,
-  );
-  const baselineAdjustedVolumeExcluded = occBundle.comparisonReports.reduce(
-    (sum, report) => sum + (report.adjustedTotals?.[symbol] || 0),
-    0,
-  );
-  const adjustedBaselineReports = occBundle.comparisonReports
-    .filter(report => (report.adjustedTotals?.[symbol] || 0) > 0)
-    .map(report => report.reportDate);
-  const baselineSamples = occBundle.comparisonReports.length;
-  const average = baselineSamples > 0 ? baselineTotal / baselineSamples : null;
-  const hasOfficialSeries = current > 0 || baselineTotal > 0;
-  const completeBaseline = hasOfficialSeries && baselineSamples === 4;
+
+  const normalizedSymbol = String(symbol || '').trim().toUpperCase();
+  const reportObservation = (totals) => {
+    if (!totals || typeof totals !== 'object' || Array.isArray(totals)) {
+      return { available:false, present:false, value:null };
+    }
+    const present = Object.prototype.hasOwnProperty.call(totals, normalizedSymbol);
+    // An absent root in a successfully parsed, complete OCC totals report is
+    // an observed zero, not missing data. Only a missing/invalid report map is
+    // unavailable.
+    if (!present) return { available:true, present:false, value:0 };
+    const rawValue = totals[normalizedSymbol];
+    if (rawValue === null || rawValue === undefined || rawValue === '') {
+      return { available:false, present:true, value:null };
+    }
+    const value = Number(rawValue);
+    return Number.isFinite(value) && value >= 0
+      ? { available:true, present:true, value }
+      : { available:false, present:true, value:null };
+  };
+
+  const currentObservation = reportObservation(occBundle.latestTotals);
+  const currentAdjustedObservation = reportObservation(occBundle.latestAdjustedTotals);
+  const comparisonReports = Array.isArray(occBundle.comparisonReports)
+    ? occBundle.comparisonReports
+    : [];
+  const baselineObservations = comparisonReports.map(report => ({
+    reportDate:report?.reportDate || null,
+    standard:reportObservation(report?.standardTotals),
+    adjusted:reportObservation(report?.adjustedTotals),
+  }));
+  const availableBaseline = baselineObservations.filter(row => row.standard.available);
+  const baselineSamples = availableBaseline.length;
+  const baselineTotal = baselineSamples
+    ? availableBaseline.reduce((sum, row) => sum + row.standard.value, 0)
+    : null;
+  const average = baselineTotal === null ? null : baselineTotal / baselineSamples;
+  const adjustedBaselineComplete = baselineSamples > 0 &&
+    availableBaseline.every(row => row.adjusted.available);
+  const baselineAdjustedVolumeExcluded = adjustedBaselineComplete
+    ? availableBaseline.reduce((sum, row) => sum + row.adjusted.value, 0)
+    : null;
+  const adjustedBaselineReports = availableBaseline
+    .filter(row => row.adjusted.available && row.adjusted.value > 0)
+    .map(row => row.reportDate)
+    .filter(Boolean);
+  const current = currentObservation.value;
+  const adjustedVolumeExcluded = currentAdjustedObservation.value;
+  const hasOfficialSeries = currentObservation.present || currentAdjustedObservation.present ||
+    baselineObservations.some(row => row.standard.present || row.adjusted.present);
+  const completeBaseline = comparisonReports.length === 4 && baselineSamples === 4;
+  const adjustedCoverageComplete = currentAdjustedObservation.available &&
+    completeBaseline && adjustedBaselineComplete;
+  const currentReportAvailable = currentObservation.available;
+  const status = !currentReportAvailable
+    ? (baselineSamples > 0 ? 'partial' : 'unavailable')
+    : completeBaseline && adjustedCoverageComplete &&
+        adjustedVolumeExcluded === 0 && baselineAdjustedVolumeExcluded === 0
+      ? 'full'
+      : 'partial';
   return {
-    volume:hasOfficialSeries ? current : null,
+    volume:currentReportAvailable ? current : null,
     adjustedVolumeExcluded,
     baselineAdjustedVolumeExcluded,
     adjustedBaselineReports,
     averageVolume:average,
-    relativeVolume:average > 0 ? current / average : null,
-    estimatedNotional:hasOfficialSeries ? estimatedOptionsNotional(current, lastPrice) : null,
+    relativeVolume:currentReportAvailable && average > 0 ? current / average : null,
+    estimatedNotional:currentReportAvailable ? estimatedOptionsNotional(current, lastPrice) : null,
     baselineSamples,
-    status:completeBaseline && adjustedVolumeExcluded === 0 && baselineAdjustedVolumeExcluded === 0
-      ? 'full'
-      : hasOfficialSeries ? 'partial' : 'unavailable',
+    hasOfficialSeries,
+    currentReportAvailable,
+    adjustedCoverageComplete,
+    status,
+  };
+}
+
+export function traditionalTotalValueState({
+  marketValue,
+  optionsValue,
+  marketStatus = 'unavailable',
+  optionsStatus = 'unavailable',
+} = {}) {
+  const normalizeValue = (value) => {
+    if (value === null || value === undefined || value === '') return null;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric >= 0 ? numeric : null;
+  };
+  const market = normalizeValue(marketValue);
+  const options = normalizeValue(optionsValue);
+  const observed = Number(market !== null) + Number(options !== null);
+  const expected = 2;
+  if (observed < expected) {
+    return {
+      value:null,
+      observed,
+      expected,
+      status:observed > 0 ? 'partial' : 'unavailable',
+    };
+  }
+  return {
+    value:market + options,
+    observed,
+    expected,
+    // The USD total is formula-derived even when both official inputs are
+    // complete. Any incomplete source coverage takes precedence as Partial.
+    status:marketStatus === 'full' && optionsStatus === 'full' ? 'estimated' : 'partial',
   };
 }
 
@@ -496,7 +544,9 @@ async function fetchNasdaqSessions(candidate, rankingSession, comparisonSession)
   const previousSessionAligned = previousHistorical?.sessionDate === comparisonSession;
   const volume = sessionAligned ? historical.volume : null;
   const lastPrice = sessionAligned ? historical.close : null;
-  const tags = [...candidate.tags];
+  // Every row in this traditional-first universe is confirmed by the same
+  // official U.S. directory used by Perpetual and Spot market tags.
+  const tags = ['US', ...candidate.tags.filter(tag => tag !== 'US')];
   return {
     symbol:candidate.symbol,
     category:candidate.category,
@@ -575,9 +625,18 @@ export function hasCompleteTraditionalAlignment(alignment) {
 }
 
 function compareTraditionalRows(a, b, valueKey, marketValueKey) {
-  return Number(b?.[valueKey] || 0) - Number(a?.[valueKey] || 0) ||
-    Number(b?.[marketValueKey] || 0) - Number(a?.[marketValueKey] || 0) ||
-    String(a?.symbol || '').localeCompare(String(b?.symbol || ''));
+  const sortable = (value) => {
+    if (value === null || value === undefined || value === '') return -Infinity;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : -Infinity;
+  };
+  const leftTotal = sortable(a?.[valueKey]);
+  const rightTotal = sortable(b?.[valueKey]);
+  if (leftTotal !== rightTotal) return rightTotal > leftTotal ? 1 : -1;
+  const leftMarket = sortable(a?.[marketValueKey]);
+  const rightMarket = sortable(b?.[marketValueKey]);
+  if (leftMarket !== rightMarket) return rightMarket > leftMarket ? 1 : -1;
+  return String(a?.symbol || '').localeCompare(String(b?.symbol || ''));
 }
 
 export function rankTraditionalRows(rows, limit = MAX_LIMIT, comparisonAvailable = true, entryLimit = MAX_LIMIT) {
@@ -673,11 +732,47 @@ export default async function handler(req, res) {
     const unrankedRows = detailed.map(detail => {
       const candidate = candidateBySymbol[detail.symbol];
       const options = optionActivityForSymbol(detail.symbol, occBundle, detail.market.lastPrice);
-      const previousOptionsVolume = Number(occBundle?.previousTotals?.[detail.symbol] || 0);
-      const previousOptionsNotional = detail.previousMarket?.lastPrice > 0
+      const previousTotalsAvailable = occBundle?.previousTotals &&
+        typeof occBundle.previousTotals === 'object' && !Array.isArray(occBundle.previousTotals);
+      const previousAdjustedAvailable = occBundle?.previousAdjustedTotals &&
+        typeof occBundle.previousAdjustedTotals === 'object' && !Array.isArray(occBundle.previousAdjustedTotals);
+      const previousRawVolume = previousTotalsAvailable &&
+        Object.prototype.hasOwnProperty.call(occBundle.previousTotals, detail.symbol)
+        ? occBundle.previousTotals[detail.symbol]
+        : 0;
+      const previousOptionsVolume = previousTotalsAvailable &&
+        previousRawVolume !== null && previousRawVolume !== undefined && previousRawVolume !== '' &&
+        Number.isFinite(Number(previousRawVolume)) && Number(previousRawVolume) >= 0
+        ? Number(previousRawVolume)
+        : null;
+      const previousAdjustedRaw = previousAdjustedAvailable &&
+        Object.prototype.hasOwnProperty.call(occBundle.previousAdjustedTotals, detail.symbol)
+        ? occBundle.previousAdjustedTotals[detail.symbol]
+        : 0;
+      const previousAdjustedVolumeExcluded = previousAdjustedAvailable &&
+        previousAdjustedRaw !== null && previousAdjustedRaw !== undefined && previousAdjustedRaw !== '' &&
+        Number.isFinite(Number(previousAdjustedRaw)) && Number(previousAdjustedRaw) >= 0
+        ? Number(previousAdjustedRaw)
+        : null;
+      const previousOptionsStatus = previousOptionsVolume === null
+        ? 'unavailable'
+        : previousAdjustedVolumeExcluded === 0 ? 'full' : 'partial';
+      const previousOptionsNotional = previousOptionsVolume !== null && detail.previousMarket?.lastPrice > 0
         ? estimatedOptionsNotional(previousOptionsVolume, detail.previousMarket.lastPrice)
         : null;
-      const previousMarketEstimatedValue = detail.previousMarket?.estimatedValue || 0;
+      const previousMarketEstimatedValue = detail.previousMarket?.estimatedValue ?? null;
+      const previousTotal = traditionalTotalValueState({
+        marketValue:previousMarketEstimatedValue,
+        optionsValue:previousOptionsNotional,
+        marketStatus:detail.previousMarket?.status,
+        optionsStatus:previousOptionsStatus,
+      });
+      const currentTotal = traditionalTotalValueState({
+        marketValue:detail.market?.estimatedValue,
+        optionsValue:options.estimatedNotional,
+        marketStatus:detail.market?.status,
+        optionsStatus:options.status,
+      });
       return {
         symbol:detail.symbol,
         name:detail.market.officialName || candidate.name,
@@ -689,10 +784,16 @@ export default async function handler(req, res) {
         previousMarket:detail.previousMarket,
         previousOptionsVolume,
         previousOptionsNotional,
+        previousOptionsStatus,
+        previousAdjustedVolumeExcluded,
         previousMarketEstimatedValue,
-        marketEstimatedValue:detail.market.estimatedValue || 0,
-        previousTraditionalTotalValue:previousMarketEstimatedValue + (previousOptionsNotional || 0),
-        traditionalTotalValue:(detail.market.estimatedValue || 0) + (options.estimatedNotional || 0),
+        marketEstimatedValue:detail.market.estimatedValue ?? null,
+        previousTraditionalTotalValue:previousTotal.value,
+        previousTraditionalTotalValueStatus:previousTotal.status,
+        traditionalTotalValue:currentTotal.value,
+        traditionalTotalValueStatus:currentTotal.status,
+        traditionalTotalValueObserved:currentTotal.observed,
+        traditionalTotalValueExpected:currentTotal.expected,
       };
     });
     const rows = rankTraditionalRows(unrankedRows, limit, comparisonAvailable);

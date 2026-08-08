@@ -6,6 +6,7 @@ import {
   isOkxRwaPerpInstrument,
   isOkxRwaSpotInstrument,
 } from './_lib/okx.js';
+import { validateUsMarketDirectoryPayload } from './_lib/us-market-directory.js';
 import { fetchJsonWithPolicy, fetchWithPolicy, mapWithConcurrency } from './_lib/upstream.js';
 
 export const config = { regions: ['sin1'], maxDuration: 60 };
@@ -31,7 +32,7 @@ function deploymentBaseUrl(req) {
 async function probePage(baseUrl) {
   const startedAt = Date.now();
   try {
-    const response = await fetchWithPolicy(`${baseUrl}/`, { method: 'HEAD' }, { timeoutMs: 5000, retries: 1 });
+    const response = await fetchWithPolicy(`${baseUrl}/`, { method: 'HEAD' }, { timeoutMs: 5000, retries: 0 });
     const valid = response.ok && String(response.headers.get('content-type') || '').includes('text/html');
     return checkResult('production-page', valid ? 'pass' : 'fail', {
       latencyMs: Date.now() - startedAt,
@@ -49,7 +50,7 @@ async function probeReferences(baseUrl) {
     const payload = await fetchJsonWithPolicy(
       `${baseUrl}/api/reference-prices?symbols=${REFERENCE_SYMBOLS.join(',')}`,
       {},
-      { timeoutMs: 20000, retries: 1 },
+      { timeoutMs: 20000, retries: 0 },
     );
     const rows = Object.values(payload?.rows || {});
     const unavailable = rows.filter(row => row.status === 'unavailable').length;
@@ -70,13 +71,39 @@ async function probeReferences(baseUrl) {
   }
 }
 
+export function validateUsMarketDirectory(payload) {
+  return validateUsMarketDirectoryPayload(payload);
+}
+
+export async function probeUsMarketDirectory(baseUrl) {
+  const startedAt = Date.now();
+  try {
+    const payload = await fetchJsonWithPolicy(
+      `${baseUrl}/api/us-market-directory`,
+      {},
+      { timeoutMs:25_000, retries:0 },
+    );
+    const validation = validateUsMarketDirectory(payload);
+    return checkResult('us-market-directory', validation.valid ? 'pass' : 'fail', {
+      latencyMs:Date.now() - startedAt,
+      asOf:payload?.asOf || null,
+      ...validation,
+    }, { critical:true });
+  } catch (error) {
+    return checkResult('us-market-directory', 'fail', {
+      latencyMs:Date.now() - startedAt,
+      reason:error.message,
+    }, { critical:true });
+  }
+}
+
 async function probeFunding(baseUrl, venue, symbol) {
   const startedAt = Date.now();
   try {
     const payload = await fetchJsonWithPolicy(
       `${baseUrl}/api/funding-history?venue=${venue}&hours=24&symbols=${encodeURIComponent(symbol)}`,
       {},
-      { timeoutMs: 20000, retries: 1 },
+      { timeoutMs: 20000, retries: 0 },
     );
     const row = payload?.results?.[symbol];
     const cutoff = Date.now() - 24 * 3600_000 - 20 * 60_000;
@@ -276,17 +303,19 @@ export default async function handler(req, res) {
   }
 
   const baseUrl = deploymentBaseUrl(req);
-  // Keep self-probes bounded to two sibling Functions at a time. The two OKX
-  // snapshots are one sequential job, preventing catalog cold starts from
-  // multiplying while the other coverage checks run.
+  // Each sibling route owns its upstream retry policy, so the health layer
+  // never retries a full route again. Four-way bounded concurrency keeps the
+  // worst-case self-probe wall time within this Function's 60-second budget;
+  // the two OKX snapshots remain one sequential job.
   const checks = [await probePage(baseUrl)];
   const probeJobs = [
     () => probeReferences(baseUrl),
+    () => probeUsMarketDirectory(baseUrl),
     () => probeOkxMarkets(baseUrl),
     ...Object.entries(FUNDING_PROBES).map(([venue, symbol]) =>
       () => probeFunding(baseUrl, venue, symbol)),
   ];
-  const groupedChecks = await mapWithConcurrency(probeJobs, 2, job => job());
+  const groupedChecks = await mapWithConcurrency(probeJobs, 4, job => job());
   checks.push(...groupedChecks.flat());
   const assessment = assessChecks(checks);
   const payload = {

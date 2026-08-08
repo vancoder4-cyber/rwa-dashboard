@@ -290,9 +290,9 @@ test('OKX client integration keeps contract-level coverage and distinct-venue sp
   assert.match(html, /representativeFundingRatesByVenue\(venues\)/);
   assert.match(html, /if \(annRates\.length < 2\) return;/);
   assert.match(html, /distinctVenueFundingSpread\(a\.listings\)/);
-  assert.match(html, /contributions: new Set\(\)/);
+  assert.match(html, /contributions\s*:\s*new Set\(\)/);
   assert.match(html, /existing\?\.contributions\?\.has\(contributionKey\)/);
-  assert.match(html, /addVol\(asset\.coin, 'okx', volume30d, method, asset\.category, asset\.symbol\)/);
+  assert.match(html, /addVol\(asset, 'okx', volume30d, method, asset\.symbol\)/);
   assert.match(html, /ASSET_INTELLIGENCE_CATEGORIES = new Set\(\[[^\]]*'bond'/);
   assert.match(html, /r\.spotAsset\?\.pair \|\| r\.spotAsset\?\.venueSymbol/);
 });

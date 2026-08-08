@@ -46,6 +46,7 @@ import tradfiActivityHandler, {
   parseOccReport,
   rankTraditionalRows,
   summarizeTraditionalAlignment,
+  traditionalTotalValueState,
 } from '../api/tradfi-activity.js';
 import tradfiPricesHandler from '../api/tradfi-prices.js';
 
@@ -131,7 +132,7 @@ test('health assessment distinguishes degraded from unhealthy', () => {
   assert.equal(assessChecks([{ status: 'fail' }, { status: 'fail' }]).status, 'unhealthy');
 });
 
-test('signal identity gate rejects crypto types, conflicts, and preserves real zero funding', () => {
+test('signal identity gate rejects crypto types, separates category collisions, and preserves real zero funding', () => {
   assert.equal(canonicalSignalSymbol('QNT', 'crypto'), null);
   assert.equal(canonicalSignalSymbol('OPENAI', 'preipo'), 'OPENAI');
   assert.equal(canonicalSignalSymbol('CL', 'equity'), 'CL');
@@ -156,9 +157,9 @@ test('signal identity gate rejects crypto types, conflicts, and preserves real z
       priceUsd:1_000, volume24hUsd:1, openInterestUsd:1, fundingRate:0, fundingIntervalHours:8,
     },
   ]);
-  assert.deepEqual(result.assets.map(asset => asset.symbol), ['QNT']);
+  assert.deepEqual(result.assets.map(asset => `${asset.category}:${asset.symbol}`), ['equity:QNT', 'equity:DUAL', 'index:DUAL']);
   assert.equal(result.rejected.length, 1);
-  assert.equal(result.conflicts.length, 1);
+  assert.equal(result.conflicts.length, 0);
   assert.equal(result.assets[0].listings[0].fundingAnnualizedPct, 0);
   assert.equal(result.assets[0].fieldStatus.funding, 'full');
   assert.equal(result.assets[0].openInterestUsd, null);
@@ -175,7 +176,15 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
   assert.deepEqual(normalizeSignalIdentity('QQQB', 'equity', { allowBinanceBstock:true }), { symbol:'QQQ', category:'etf' });
   assert.deepEqual(normalizeSignalIdentity('SOXLB', 'equity', { allowBinanceBstock:true }), { symbol:'SOXL', category:'etf' });
   assert.deepEqual(normalizeSignalIdentity('MUU', 'equity'), { symbol:'MUU', category:'etf' });
-  assert.deepEqual(normalizeSignalIdentity('SPYX', 'equity'), { symbol:'SPY', category:'etf' });
+  assert.deepEqual(normalizeSignalIdentity('SPYX', 'equity'), { symbol:'SPYX', category:'etf' });
+  assert.deepEqual(normalizeSignalIdentity('QQQX', 'equity'), { symbol:'QQQX', category:'equity' });
+  assert.deepEqual(normalizeSignalIdentity('SPYX', 'equity', { venue:'gate' }), { symbol:'SPY', category:'etf' });
+  assert.deepEqual(normalizeSignalIdentity('QQQX', 'equity', { venue:'gate' }), { symbol:'QQQ', category:'etf' });
+  assert.deepEqual(normalizeSignalIdentity('SKHX', 'etf'), { symbol:'SKHX', category:'etf' });
+  assert.deepEqual(normalizeSignalIdentity('QNTB', 'etf'), { symbol:'QNTB', category:'etf' });
+  assert.deepEqual(normalizeSignalIdentity('SPCXB', 'etf'), { symbol:'SPCXB', category:'etf' });
+  assert.deepEqual(normalizeSignalIdentity('CBRSB', 'etf'), { symbol:'CBRSB', category:'etf' });
+  assert.deepEqual(normalizeSignalIdentity('SKHX', 'equity', { venue:'tradexyz' }), { symbol:'SKHYNIX', category:'equity' });
   assert.deepEqual(normalizeSignalIdentity('SP500', 'equity'), { symbol:'SPX', category:'index' });
   assert.deepEqual(normalizeSignalIdentity('NDX100', 'equity'), { symbol:'NDX', category:'index' });
   assert.deepEqual(normalizeSignalIdentity('FOOB', 'equity', { allowBinanceBstock:true }), { symbol:'FOOB', category:'equity' });
@@ -363,6 +372,9 @@ test('traditional activity is a standalone top-level page', async () => {
   assert.match(html, />↑\$\{change\.delta\}</);
   assert.match(html, />↓\$\{amount\}</);
   assert.match(html, />NEW</);
+  assert.match(html, /row\.options\?\.hasOfficialSeries === true/);
+  assert.match(html, /traditionalTotalValueStatus/);
+  assert.match(html, /traditionalTotalValueObserved/);
 });
 
 test('Signal Radar and Asset Intelligence use server history and one canonical drawer', async () => {
@@ -497,6 +509,12 @@ test('bilingual runtime translates singular coverage and locale fragments withou
   assert.equal(window.translateUi('Aug 6, 2026; excludes fees, latency and points outside the 0.5×–1.5× comparability guard.', 'zh-CN'), '2026年8月6日；未计入费用、延迟及超出 0.5×–1.5× 可比区间的价格点。');
   assert.equal(window.translateUi('Activity 2:15:09 PM', 'zh-CN'), '数据活动时间 14:15:09');
   assert.equal(window.translateUi('candidate list Aug 6, 2026', 'zh-CN'), '候选列表：2026年8月6日');
+  assert.equal(window.translateUi('2/3 listing value(s) available; 1 stale/unavailable snapshot(s)', 'zh-CN'), '2/3 个上市标的数据可用；1 个快照陈旧或不可用');
+  assert.equal(window.translateUi('1 venue source(s) stale/unavailable', 'zh-CN'), '1 个交易场所数据源陈旧或不可用');
+  assert.equal(window.translateUi('2/2 total-value legs available; share value + standard-options underlying notional', 'zh-CN'), '2/2 个总价值组成项可用；股票价值 + 标准期权底层名义价值');
+  assert.equal(window.translateUi('Stale Trad quote · excluded', 'zh-CN'), '传统市场报价已陈旧 · 已排除');
+  assert.equal(window.translateUi('1079/1079 listings available', 'zh-CN'), '1079/1079 个上市标的数据可用');
+  assert.equal(window.translateUi('share value + option notional ·', 'zh-CN'), '股票价值 + 期权名义价值 ·');
 
   window.setUiLanguage('zh-CN');
   assert.equal(treeWalks, 1);
@@ -697,6 +715,78 @@ test('traditional estimated amounts use same-session share and standard-option n
   assert.equal(options.baselineAdjustedVolumeExcluded, 2);
   assert.deepEqual(options.adjustedBaselineReports, ['20260716']);
   assert.equal(options.status, 'partial');
+
+  const completeZeroBundle = {
+    latestTotals:{ AAPL:10 },
+    latestAdjustedTotals:{},
+    comparisonReports:[7, 14, 21, 28].map(days => ({
+      reportDate:`202607${String(days).padStart(2, '0')}`,
+      standardTotals:{ AAPL:days },
+      adjustedTotals:{},
+    })),
+  };
+  const absentRoot = optionActivityForSymbol('MSFT', completeZeroBundle, 100);
+  assert.equal(absentRoot.volume, 0, 'absence from a complete OCC totals report is an observed zero');
+  assert.equal(absentRoot.averageVolume, 0);
+  assert.equal(absentRoot.estimatedNotional, 0);
+  assert.equal(absentRoot.status, 'full');
+  assert.equal(absentRoot.hasOfficialSeries, false, 'zero observation does not invent an option listing');
+  assert.equal(absentRoot.currentReportAvailable, true);
+  assert.equal(absentRoot.adjustedCoverageComplete, true);
+
+  const explicitZero = optionActivityForSymbol('MSFT', {
+    ...completeZeroBundle,
+    latestTotals:{ ...completeZeroBundle.latestTotals, MSFT:0 },
+  }, 100);
+  assert.equal(explicitZero.volume, 0);
+  assert.equal(explicitZero.hasOfficialSeries, true);
+
+  const shortBaseline = optionActivityForSymbol('MSFT', {
+    ...completeZeroBundle,
+    comparisonReports:completeZeroBundle.comparisonReports.slice(0, 3),
+  }, 100);
+  assert.equal(shortBaseline.volume, 0);
+  assert.equal(shortBaseline.estimatedNotional, 0);
+  assert.equal(shortBaseline.status, 'partial');
+
+  const missingAdjustedReport = optionActivityForSymbol('MSFT', {
+    ...completeZeroBundle,
+    latestAdjustedTotals:null,
+  }, 100);
+  assert.equal(missingAdjustedReport.volume, 0);
+  assert.equal(missingAdjustedReport.adjustedVolumeExcluded, null);
+  assert.equal(missingAdjustedReport.status, 'partial');
+
+  const missingCurrentReport = optionActivityForSymbol('MSFT', {
+    ...completeZeroBundle,
+    latestTotals:null,
+  }, 100);
+  assert.equal(missingCurrentReport.volume, null);
+  assert.equal(missingCurrentReport.estimatedNotional, null);
+  assert.equal(missingCurrentReport.status, 'partial');
+
+  assert.deepEqual(traditionalTotalValueState({
+    marketValue:1_000,
+    optionsValue:0,
+    marketStatus:'full',
+    optionsStatus:'full',
+  }), { value:1_000, observed:2, expected:2, status:'estimated' });
+  assert.deepEqual(traditionalTotalValueState({
+    marketValue:1_000,
+    optionsValue:0,
+    marketStatus:'full',
+    optionsStatus:'partial',
+  }), { value:1_000, observed:2, expected:2, status:'partial' });
+  assert.deepEqual(traditionalTotalValueState({
+    marketValue:1_000,
+    optionsValue:null,
+    marketStatus:'full',
+    optionsStatus:'unavailable',
+  }), { value:null, observed:1, expected:2, status:'partial' });
+  assert.deepEqual(traditionalTotalValueState({
+    marketValue:null,
+    optionsValue:null,
+  }), { value:null, observed:0, expected:2, status:'unavailable' });
 });
 
 test('Nasdaq share volume and close parse on the OCC ranking session', () => {
@@ -971,6 +1061,65 @@ test('traditional spot overlay resolves venue-verified wrappers before joining',
   assert.match(html, /U\.S\.-listed securities in Nasdaq Trader directory/);
 });
 
+test('Traditional max spread and Drawer share one strict quote freshness gate', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const freshnessSource = sourceBetween(
+    html,
+    'function isUsRegularMarketWindow(now = new Date())',
+    'async function loadTraditionalActivity(force = false)',
+  );
+  const spreadSource = sourceBetween(
+    html,
+    'function traditionalMaxPriceSpread(row, coverage, quote, quoteCacheTimestamp, now = Date.now())',
+    'function renderTraditionalActivity()',
+  );
+  assert.ok(freshnessSource);
+  assert.ok(spreadSource);
+
+  const context = { Date, Intl };
+  runInNewContext(`
+    const TRADFI_PRICE_OPEN_TTL = 60 * 1000;
+    const TRADFI_PRICE_CLOSED_TTL = 15 * 60 * 1000;
+    ${freshnessSource}
+    ${spreadSource}
+    const openNow = Date.UTC(2026, 7, 7, 14, 0, 0);
+    const closedNow = Date.UTC(2026, 7, 8, 14, 0, 0);
+    const row = { category:'equity' };
+    const coverage = { pricePoints:[{
+      price:105, label:'Gate Perp', side:'perp', venue:'gate', currency:'USD', unit:'share',
+    }] };
+    const quote = { status:'full', price:100, currency:'USD', unit:'share', assetClass:'STOCKS' };
+    globalThis.quoteFreshnessResults = {
+      openTtl:currentTradfiPriceTtl(new Date(openNow)),
+      closedTtl:currentTradfiPriceTtl(new Date(closedNow)),
+      missing:isTraditionalQuoteFresh(null, closedNow),
+      future:isTraditionalQuoteFresh(closedNow + 1, closedNow),
+      boundary:isTraditionalQuoteFresh(closedNow - TRADFI_PRICE_CLOSED_TTL, closedNow),
+      fresh:isTraditionalQuoteFresh(closedNow - TRADFI_PRICE_CLOSED_TTL + 1, closedNow),
+      freshSpread:traditionalMaxPriceSpread(row, coverage, quote, closedNow - 1, closedNow)?.pct ?? null,
+      staleSpread:traditionalMaxPriceSpread(row, coverage, quote, closedNow - TRADFI_PRICE_CLOSED_TTL, closedNow),
+      missingTimestampSpread:traditionalMaxPriceSpread(row, coverage, quote, null, closedNow),
+      futureTimestampSpread:traditionalMaxPriceSpread(row, coverage, quote, closedNow + 1, closedNow),
+    };
+  `, context);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.quoteFreshnessResults)), {
+    openTtl:60_000,
+    closedTtl:900_000,
+    missing:false,
+    future:false,
+    boundary:false,
+    fresh:true,
+    freshSpread:5,
+    staleSpread:null,
+    missingTimestampSpread:null,
+    futureTimestampSpread:null,
+  });
+  assert.match(html, /const quoteFresh = Boolean\(quoteCandidate && isTraditionalQuoteFresh\(tradfiPriceCache\?\.ts\)\)/);
+  assert.match(html, /const cacheFresh = tradfiPriceCache && isTraditionalQuoteFresh\(tradfiPriceCache\.ts\)/);
+  assert.match(html, /Stale Nasdaq quote .* excluded from max spread/);
+  assert.match(html, /Stale Trad quote · excluded/);
+});
+
 test('shared cache helpers separate browser revalidation from Vercel CDN caching', () => {
   const cached = responseRecorder();
   setPublicCache(cached, 900, 3600);
@@ -1234,8 +1383,11 @@ test('browser resource contracts keep Gate fan-out stable and pause polling whil
     '// ── Gate.io: bulk klines via serverless function',
     '// ── trade.xyz: aggregate 1h HIP-3 candles server-side and return totals only ──',
   );
-  assert.match(gateTopThirtySource, /\.map\(a => a\.symbol \|\| \(a\.coin \+ '_USDT'\)\)\.sort\(\)/);
-  assert.match(gateTopThirtySource, /const gateToSec = Math\.floor\(nowSec \/ 300\) \* 300/);
+  assert.match(gateTopThirtySource, /\[\.\.\.new Set\(gateAssets\.map\(a => a\.symbol \|\| \(a\.coin \+ '_USDT'\)\)\)\]\.sort\(\)/);
+  assert.match(gateTopThirtySource, /const gateToSec = Math\.floor\(nowSec \/ \(24 \* 60 \* 60\)\) \* 24 \* 60 \* 60/);
+  assert.match(gateTopThirtySource, /quoteVolume !== null && quoteVolume >= 0/);
+  assert.match(gateTopThirtySource, /candleMap\.set\(timestamp, c\)/);
+  assert.match(gateTopThirtySource, /\[\.\.\.candleMap\.values\(\)\].*slice\(-30\)/);
 
   const visibilitySource = sourceBetween(
     html,
@@ -1264,6 +1416,15 @@ test('browser resource contracts keep Gate fan-out stable and pause polling whil
   );
   assert.match(visibleRenderer, /if \(!pageIsVisible\(\)\) return/);
   assert.match(visibleRenderer, /if \(topPageIsActive\('perps'\)\)/);
+});
+
+test('browser same-origin venue snapshots preserve shared CDN caching', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  assert.doesNotMatch(html, /fetch\(url, \{ cache: 'no-store', signal: AbortSignal\.timeout\(endpoint \? 12000 : 3500\) \}\)/);
+  assert.doesNotMatch(html, /fetch\('\/api\/okx-market\?type=(?:perp|spot)-snapshot', \{ cache:'no-store'/);
+  assert.match(html, /fetch\(url, \{ signal: AbortSignal\.timeout\(endpoint \? 12000 : 3500\) \}\)/);
+  assert.match(html, /fetch\('\/api\/okx-market\?type=perp-snapshot', \{ signal:AbortSignal\.timeout\(55000\) \}\)/);
+  assert.match(html, /fetch\('\/api\/okx-market\?type=spot-snapshot', \{ signal:AbortSignal\.timeout\(20000\) \}\)/);
 });
 
 test('Traditional activity renders without I/O and loads only while its page is active', async () => {
