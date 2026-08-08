@@ -15,12 +15,12 @@
 
 3. **GitHub Actions**
    - `.github/workflows/data-health.yml` runs every day at 01:20 UTC and on demand.
-   - It runs contract tests, inline-script parsing, live data contracts and the production health endpoint.
+   - It runs contract tests, inline-script parsing, live reference/funding/Nasdaq/OCC data contracts and the production health endpoint.
    - A failing run must be reviewed before promoting another production deployment.
 
 4. **Codex scheduled reviews**
    - Daily at 09:10 Asia/Shanghai: production status, live data contracts, deployment state and recent errors.
-   - Monday at 10:00 Asia/Shanghai: full venue catalogs, identity collisions, listing lifecycle, classification/tags, reference pricing and historical coverage.
+   - Monday at 10:00 Asia/Shanghai: full venue catalogs, identity collisions, listing lifecycle, classification/tags, Traditional candidate/ranking rules, adjusted-options handling, reference pricing and historical coverage.
    - Scheduled reviews are read-only. They report P0/P1/P2 findings and must not modify, push or deploy without user confirmation.
 
 ## Severity policy

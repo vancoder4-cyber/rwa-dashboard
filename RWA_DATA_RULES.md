@@ -178,20 +178,28 @@ Bitget 当前同时返回 `isRwa=YES` 和 `symbolType=crypto`，但该产品对�
 
 ## 13. 传统市场成交量与期权异动
 
-`Traditional Market Activity Monitor` 只对已经通过本文身份规则的 canonical underlying 做传统市场匹配，不能反向用 Nasdaq/OCC 的同名 ticker 证明某个场所资产是 RWA。
+`Traditional Market Activity Monitor` 必须以传统市场为主表。传统 universe、候选池和排名全部完成后，才把已通过本文身份规则的 Perp/Spot 作为 left join 覆盖层；Crypto 是否上币、交易量大小或异常信号都不能改变传统排名。
 
+- 首版身份 universe 使用 Nasdaq Trader 官方 `nasdaqlisted.txt` 与 `otherlisted.txt`。排除 Test Issue、warrant、right、unit、preferred、债券/票据等非普通 Equity/ETF；ADR/ADS 由官方证券名称打 tag。不得设置任意股价下限改变官方榜单。
+- 候选池是 `当前 Nasdaq Most Active by Dollar Volume 快照 ∪ OCC 排名日标准期权合约量 leaders`。候选标的必须存在于官方目录，之后再读取 Nasdaq `companyName` 与 `assetClass` 做二次身份确认；页面必须同时披露候选榜 as-of 与实际排名 session。公开源无法回溯指定日期的完整 Nasdaq leader snapshot 时，只能称“官方候选集内排名”，不得宣称完整全市场 Top 30。
+- 默认排名是 `Estimated Share Value + Estimated Standard-Options Underlying Notional`。该排名不使用 Perp/Spot 成交量，也不按 Crypto coverage 或异动 signal 重排。
 - 首版覆盖美国上市的 Equity、ETF 与 ADR；纯 HK/KR/TW/JP/CN 本地上市、Pre-IPO、现货商品、商品期货和指数不拿同名美股代替，官方源不支持时显示 Unavailable。
-- 传统数据也必须做身份门控：除 ticker 外同时读取 Nasdaq `companyName` 和 `assetClass`。当前 Nasdaq 证券类别与 RWA canonical category 不一致时，Nasdaq 与 OCC 两侧都拒绝，避免把同名 ETF/股票期权量挂到错误资产。
-- 股票/ETF 当前成交股数和 Nasdaq 展示的 Average Volume 来自 Nasdaq Market Activity 官方同源接口。它属于公开展示的 delayed/intraday 或最近完成交易日数据，不等于持牌 SIP 实时全市场 feed。
+- 股票/ETF 成交股数和收盘价来自 Nasdaq Market Activity 官方历史接口，并强制与 OCC 最近完成交易日对齐；Nasdaq 展示的 Average Volume 只用于基线。没有同一 session 的历史行时，该标的不得把跨日金额相加排名。
+- OCC 主报告不可用、ranking session 无效、或任一 eligible 官方候选因请求/结构错误缺少 Nasdaq 同日历史时必须 fail closed；不得把当前 Nasdaq 数据降级成同日完整排名，也不得缓存 `200 + 空榜`。Nasdaq 返回业务成功且明确没有该 session 行的标的（例如排名日后才上市或当日无交易）标为 session-ineligible 并从排名分母排除；不得把任意接口失败伪装成 ineligible。响应需披露 aligned / ineligible / dropped candidates；宁可由 CDN 保留上一份正确榜单，也不能让缺失的头部标的扭曲排序。
 - 期权成交合约数来自 OCC 官方 batch-processing report。当前值使用最近完成交易日（通常 T+1）；基线使用此前四周同一星期几的四个日度报告取平均。OCC 的 weekly download 当前只返回日期区间、没有逐标数据行，因此不能假装成 20 日均量。
+- 股票美元值是 `Nasdaq same-session shares × same-session close`，只能标 Estimated，不是 consolidated/VWAP turnover。
+- 期权美元值是 `OCC standard contracts × 100 × Nasdaq displayed underlying price`，代表 underlying notional，不是 option premium。`2AAPL`、`4SPY` 等 adjusted roots 的交割乘数未知，必须从标准 ×100 公式中排除并单独披露。
+- `Est. Total Notional = Estimated Share Value + Estimated Options Underlying Notional`。Perp/Spot 24h USD volume 只做并列覆盖展示，不得加进这个传统总值。
 - Cboe delayed quote table 明确禁止自动抓取，因此生产代码不得调用其网页/JSON 端点。需要真正实时期权时，应采购 OPRA 授权数据或合规的数据供应商。
-- `Trad RelVol = Nasdaq Share Volume / Nasdaq Average Volume`。它不按当日交易时段进度归一，盘中早段只能理解为累计量相对整日均量。
+- `Trad RelVol = Nasdaq aligned completed-session Share Volume / Nasdaq displayed Average Volume`。
 - `Options RelVol = OCC latest completed-day contracts / prior four same-weekday observations average`。
 - High：`Trad RelVol >= 2.0` 或 `Options RelVol >= 2.5`；Watch：`Trad RelVol >= 1.5` 或 `Options RelVol >= 1.75`。阈值只是监控提示，不构成交易建议。
-- 每行的 Perp/Spot 24h 美元量来自当前页面已经通过准入的场所数据，按 canonical underlying 联结；传统 shares、options contracts 与 crypto USD volume 不得相加成一个“总成交量”。
+- Perp/Spot 只按精确 canonical underlying + Equity/ETF category 联结。Spot wrapper 还必须有官方 catalog 提供的 `underlyingSymbol`、静态可信 issuer wrapper，或与当前 venue 匹配的注册记录；禁止仅凭 token ticker 像股票 ticker 就联结。
+- Perp/Spot 场所短时失败时，last-good snapshot 仍保留 listing coverage 与已知 24h volume，并把该字段标 Partial / `Stale cache`；stale 价格不得进入 Max Spread。volume 缺失必须保留 null 并标 Unavailable/Partial，禁止补成真实 `$0`。
+- `Indicative Max Spread = (最高可比价格 - 最低可比价格) / 最低可比价格`。价格集合只包含 60 秒缓存 Nasdaq USD/share quote、live Perp mark 与 live Spot bid/ask midpoint（无有效盘口时用 last）；至少两个有效点才显示，并精确标出 Spot token ticker。超出 Nasdaq 价格 0.5×–1.5× 的点进入 quarantine，不参与 spread。该字段自身标 Estimated；它不含手续费、滑点或延迟，不得描述成可执行套利。
 - 真正实时版本需要 Nasdaq Basic/NLS（或 SIP 授权）和 OPRA 授权。未配置授权数据前，页面必须明确标注公开源的延迟，不得显示 `Real-time`。
 
-字段状态：Nasdaq 与 OCC 都有完整字段和基线时为 Full；只有一侧、历史不足或部分字段可用时为 Partial；公式投影才是 Estimated；官方源没有匹配时为 Unavailable。
+字段状态：Nasdaq 与 OCC 都有完整原始字段和基线、且当前日和四周基线都没有被排除的 adjusted options 时为 Full；只有一侧、历史不足或任一相关报告存在 adjusted roots 时为 Partial；金额公式本身必须明确标 Estimated；官方源没有匹配时为 Unavailable。
 
 2026-08-08 抽查发现 `MUU` 的 Nasdaq 官方身份是 `Direxion Daily MU Bull 2X ETF`，因此全局类别修正为 ETF；这类纠错必须回写主分类规则，不能只在传统成交量板块临时隐藏。
 

@@ -802,10 +802,17 @@ td:first-child { text-align: left; }
 .tradfi-signal.normal { color:#248A3D; background:rgba(52,199,89,.08); border:1px solid rgba(52,199,89,.16); }
 .tradfi-route { display:inline-flex; align-items:center; gap:3px; margin-left:4px; padding:2px 6px; border-radius:4px; border:1px solid rgba(0,0,0,.07); color:var(--foreground-sec); background:rgba(255,255,255,.55); font:600 9px/1 Inter,sans-serif; cursor:pointer; }
 .tradfi-route:hover { color:var(--accent); border-color:rgba(0,122,255,.22); background:rgba(0,122,255,.06); }
+.tradfi-route.missing { color:var(--foreground-dim); border-style:dashed; background:rgba(120,120,128,.04); cursor:default; }
+.tradfi-route.missing:hover { color:var(--foreground-dim); border-color:rgba(0,0,0,.07); background:rgba(120,120,128,.04); }
 .tradfi-rel { font-family:'JetBrains Mono',monospace; font-weight:700; }
 .tradfi-rel.high { color:var(--negative); }
 .tradfi-rel.watch { color:#9A6700; }
 .tradfi-rel.normal { color:var(--foreground-sec); }
+.tradfi-value-sub { margin-top:2px; color:var(--foreground-dim); font:500 9px/1.3 Inter,sans-serif; }
+.tradfi-value-sub strong { color:var(--foreground-sec); font-family:'JetBrains Mono',monospace; font-weight:600; }
+.tradfi-gap { font-family:'JetBrains Mono',monospace; font-weight:700; color:var(--purple); }
+.tradfi-gap-route { margin-top:3px; max-width:160px; overflow:hidden; text-overflow:ellipsis; color:var(--foreground-dim); font:500 9px/1.25 Inter,sans-serif; }
+.tradfi-rank { display:inline-block; min-width:20px; margin-right:5px; color:var(--foreground-dim); font:600 9px/1 'JetBrains Mono',monospace; }
 .market-badge { display:inline-flex; align-items:center; padding:1px 5px; border-radius:4px; font:600 9px/1.35 Inter,sans-serif; background:rgba(120,120,128,.08); color:var(--foreground-dim); border:1px solid rgba(120,120,128,.12); }
 .market-badge.active, .market-badge.priced { color:#248A3D; background:rgba(52,199,89,.08); border-color:rgba(52,199,89,.15); }
 .market-badge.inactive, .market-badge.unpriced { color:#9A6700; background:rgba(255,184,0,.08); border-color:rgba(255,184,0,.17); }
@@ -2539,7 +2546,14 @@ let tradfiActivityCache = null;
 let tradfiActivityLoading = false;
 let tradfiActivityError = '';
 let tradfiActivityFilter = 'all';
+let tradfiPriceCache = null;
+let tradfiPriceLoading = false;
+let tradfiPriceError = '';
+let tradfiPriceFailures = 0;
+let tradfiPriceRetryAt = 0;
+let tradfiPriceRefreshTimer = null;
 const TRADFI_ACTIVITY_TTL = 15 * 60 * 1000;
+const TRADFI_PRICE_TTL = 60 * 1000;
 
 // Per-venue table state
 let venueTableCatFilter = { tradexyz: 'all', bitget: 'all', gate: 'all', binance: 'all' };
@@ -2624,6 +2638,11 @@ function normalizePerpDataState(asset) {
 
 function normalizeSpotDataState(asset) {
   const a = asset || {};
+  const securityIdentity = spotAssetSecurityIdentity(a);
+  if (securityIdentity) {
+    a.underlyingSymbol = securityIdentity.symbol;
+    a.category = securityIdentity.category;
+  }
   a.isListed = a.isListed !== false;
   a.isPriced = Number(a.last) > 0;
   a.isActive = a.isActive !== undefined ? Boolean(a.isActive) : Boolean(a.isPriced || Number(a.vol) > 0);
@@ -5434,76 +5453,125 @@ function renderTop30Volume() {
 // TRADITIONAL MARKET + OPTIONS ACTIVITY
 // ═══════════════════════════════════════════════════
 
-function traditionalActivityUniverse() {
-  const universe = new Map();
-  const nonUsTags = new Set(['HK','KR','TW','JP','CN']);
+function traditionalCoverageKey(symbol, category) {
+  return `${String(symbol || '').toUpperCase()}|${category}`;
+}
 
-  function upsert(rawSymbol, category, name, volume, venue, side, asset) {
+// Crypto is an overlay only. It never supplies or ranks the traditional
+// universe used by this page.
+function traditionalCryptoCoverage() {
+  const coverage = new Map();
+
+  function upsert(asset, venue, side) {
+    const spotIdentity = side === 'spot' ? spotAssetSecurityIdentity(asset) : null;
+    if (side === 'spot' && !spotIdentity) return;
+    const category = spotIdentity?.category || asset?.category;
     if (!['equity','etf'].includes(category)) return;
-    const canonical = canonicalSymbolForCategory(rawSymbol, category);
+    const resolvedVenue = asset.venue || venue;
+    const health = side === 'perp' ? venueHealth[resolvedVenue] : spotVenueHealth[resolvedVenue];
+    const isLive = health?.status === 'live';
+    const hasLastGoodSnapshot = isLive || health?.status === 'stale';
+    if (!resolvedVenue || !hasLastGoodSnapshot) return;
+    const canonical = side === 'spot'
+      ? spotIdentity.symbol
+      : canonicalSymbolForCategory(asset.coin, category);
     const underlying = _arbUnderlyingKey(canonical);
     if (!underlying || !/^[A-Z][A-Z0-9.-]{0,9}$/.test(underlying)) return;
-
-    // Nasdaq/OCC cover U.S.-listed securities. A home-market tag without ADR
-    // means the underlying belongs to a non-U.S. primary listing and must not
-    // be silently represented by a similarly named U.S. ticker.
-    const tags = marketTagsForAsset(asset || underlying);
-    if (tags.some(tag => nonUsTags.has(tag)) && !tags.includes('ADR')) return;
-
-    if (!universe.has(underlying)) {
-      universe.set(underlying, {
-        symbol: underlying,
-        name: name || KNOWN_NAMES[underlying] || underlying,
+    const key = traditionalCoverageKey(underlying, category);
+    if (!coverage.has(key)) {
+      coverage.set(key, {
+        symbol:underlying,
         category,
-        tags,
-        perpVolume: 0,
-        spotVolume: 0,
-        perpVenues: new Set(),
-        spotVenues: new Set(),
+        perpVolume:null,
+        spotVolume:null,
+        perpVenues:new Set(),
+        spotVenues:new Set(),
+        perpStaleVenues:new Set(),
+        spotStaleVenues:new Set(),
+        perpVolumeAvailableCount:0,
+        spotVolumeAvailableCount:0,
+        perpVolumeMissingCount:0,
+        spotVolumeMissingCount:0,
+        perpVolumeNonFullCount:0,
+        spotVolumeNonFullCount:0,
+        spotTokens:new Set(),
+        pricePoints:[],
       });
     }
-    const row = universe.get(underlying);
-    if (name && (!row.name || row.name === row.symbol)) row.name = name;
-    if (category === 'etf') row.category = 'etf';
-    tags.forEach(tag => { if (!row.tags.includes(tag)) row.tags.push(tag); });
-    if (side === 'perp') {
-      row.perpVolume += Number(volume) || 0;
-      if (venue) row.perpVenues.add(venue);
+    const row = coverage.get(key);
+    const rawVolume = side === 'perp' ? asset.volume : asset.vol;
+    const volume = numberOrNull(rawVolume);
+    const volumeStatus = asset.fieldStatus?.volume || (volume !== null ? 'full' : 'unavailable');
+    const volumeAvailable = volume !== null && volume >= 0 && volumeStatus !== 'unavailable';
+    const prefix = side === 'perp' ? 'perp' : 'spot';
+    if (volumeAvailable) {
+      row[`${prefix}Volume`] = (row[`${prefix}Volume`] ?? 0) + volume;
+      row[`${prefix}VolumeAvailableCount`] += 1;
+      if (volumeStatus !== 'full') row[`${prefix}VolumeNonFullCount`] += 1;
     } else {
-      row.spotVolume += Number(volume) || 0;
-      if (venue) row.spotVenues.add(venue);
+      row[`${prefix}VolumeMissingCount`] += 1;
+    }
+    if (side === 'perp') {
+      row.perpVenues.add(resolvedVenue);
+      if (!isLive) row.perpStaleVenues.add(resolvedVenue);
+      if (isLive && Number(asset.markPx) > 0) {
+        row.pricePoints.push({
+          price:Number(asset.markPx),
+          label:`${VENUES[resolvedVenue]?.name || resolvedVenue} Perp`,
+          side:'perp',
+          venue:resolvedVenue,
+          currency:'USD',
+          unit:'share',
+        });
+      }
+    } else {
+      row.spotVenues.add(resolvedVenue);
+      if (!isLive) row.spotStaleVenues.add(resolvedVenue);
+      if (asset.coin) row.spotTokens.add(String(asset.coin).toUpperCase());
+      const bid = Number(asset.bid), ask = Number(asset.ask), last = Number(asset.last);
+      const hasBook = bid > 0 && ask > 0 && ask >= bid;
+      const midpoint = hasBook ? (bid + ask) / 2 : last;
+      if (isLive && midpoint > 0) {
+        row.pricePoints.push({
+          price:midpoint,
+          label:`${SPOT_VENUE_NAMES[resolvedVenue] || resolvedVenue} Spot · ${String(asset.coin || '').toUpperCase()}`,
+          side:'spot',
+          venue:resolvedVenue,
+          currency:'USD',
+          unit:'share',
+        });
+      }
     }
   }
 
-  allData.forEach(asset => upsert(
-    asset.coin,
-    asset.category,
-    asset.fullName,
-    asset.volume,
-    asset.venue,
-    'perp',
-    asset,
-  ));
-
+  (allData || []).forEach(asset => upsert(asset, asset.venue, 'perp'));
   Object.entries(SPOT_DATA || {}).forEach(([venue, assets]) => {
-    (assets || []).forEach(asset => {
-      const underlying = _arbUnderlyingKey(asset.coin);
-      const category = asset.category || inferCategory(underlying, asset.fullName || asset.name || '');
-      upsert(
-        underlying,
-        category,
-        asset.fullName || asset.name || KNOWN_NAMES[underlying] || underlying,
-        asset.vol,
-        asset.venue || venue,
-        'spot',
-        asset,
-      );
-    });
+    (assets || []).forEach(asset => upsert(asset, venue, 'spot'));
   });
+  return coverage;
+}
 
-  return [...universe.values()]
-    .sort((a, b) => (b.perpVolume + b.spotVolume) - (a.perpVolume + a.spotVolume))
-    .slice(0, 30);
+function traditionalOverlayVolumeState(coverage, side) {
+  const prefix = side === 'perp' ? 'perp' : 'spot';
+  const label = side === 'perp' ? 'Perp' : 'Spot';
+  const venues = coverage?.[`${prefix}Venues`]?.size || 0;
+  const stale = coverage?.[`${prefix}StaleVenues`]?.size || 0;
+  const available = Number(coverage?.[`${prefix}VolumeAvailableCount`] || 0);
+  const missing = Number(coverage?.[`${prefix}VolumeMissingCount`] || 0);
+  const nonFull = Number(coverage?.[`${prefix}VolumeNonFullCount`] || 0);
+  if (!venues) {
+    return { status:'unavailable', hasValue:false, stale, title:`No verified ${label} listing coverage` };
+  }
+  if (!available) {
+    return { status:'unavailable', hasValue:false, stale, title:`${label} listing coverage exists, but 24h volume is unavailable` };
+  }
+  const status = stale > 0 || missing > 0 || nonFull > 0 ? 'partial' : 'full';
+  const details = [
+    `${available} volume field${available === 1 ? '' : 's'} available`,
+    missing ? `${missing} missing` : '',
+    stale ? `${stale} stale venue snapshot${stale === 1 ? '' : 's'}` : '',
+  ].filter(Boolean).join(' · ');
+  return { status, hasValue:true, stale, title:`${label} 24h volume: ${details}` };
 }
 
 function fmtTradfiCount(value) {
@@ -5515,10 +5583,10 @@ function fmtTradfiCount(value) {
   return number.toLocaleString('en-US', { maximumFractionDigits: 0 });
 }
 
-function tradfiRelClass(value, high = 2) {
+function tradfiRelClass(value, watch = 1.5, high = 2) {
   if (!Number.isFinite(value)) return 'normal';
   if (value >= high) return 'high';
-  if (value >= 1.5) return 'watch';
+  if (value >= watch) return 'watch';
   return 'normal';
 }
 
@@ -5548,22 +5616,17 @@ function formatOccDate(raw) {
 
 async function loadTraditionalActivity(force = false) {
   if (tradfiActivityLoading) return;
-  const universe = traditionalActivityUniverse();
-  const symbols = universe.map(row => row.symbol);
-  const etfSymbols = universe.filter(row => row.category === 'etf').map(row => row.symbol);
-  if (!symbols.length) return;
-  const symbolsKey = symbols.join(',');
   const cacheFresh = tradfiActivityCache && Date.now() - tradfiActivityCache.ts < TRADFI_ACTIVITY_TTL;
-  if (!force && cacheFresh && tradfiActivityCache.symbolsKey === symbolsKey) return;
+  if (!force && cacheFresh) return;
 
   tradfiActivityLoading = true;
   tradfiActivityError = '';
   renderTraditionalActivity();
   try {
-    const response = await fetch(`/api/tradfi-activity?symbols=${encodeURIComponent(symbolsKey)}&etfs=${encodeURIComponent(etfSymbols.join(','))}`);
+    const response = await fetch('/api/tradfi-activity?limit=30');
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const payload = await response.json();
-    tradfiActivityCache = { ts:Date.now(), symbolsKey, payload };
+    tradfiActivityCache = { ts:Date.now(), payload };
   } catch (error) {
     tradfiActivityError = error.message || 'Traditional data unavailable';
     console.error('[TradFi] activity load failed:', error);
@@ -5573,7 +5636,46 @@ async function loadTraditionalActivity(force = false) {
   }
 }
 
+async function loadTraditionalPrices(rows, force = false) {
+  if (tradfiPriceLoading || !Array.isArray(rows) || !rows.length) return;
+  if (!force && Date.now() < tradfiPriceRetryAt) return;
+  const symbols = rows.map(row => row.symbol);
+  const etfSymbols = rows.filter(row => row.category === 'etf').map(row => row.symbol);
+  const symbolsKey = symbols.join(',');
+  const cacheFresh = tradfiPriceCache && Date.now() - tradfiPriceCache.ts < TRADFI_PRICE_TTL;
+  if (!force && cacheFresh && tradfiPriceCache.symbolsKey === symbolsKey) return;
+
+  tradfiPriceLoading = true;
+  tradfiPriceError = '';
+  renderTraditionalActivity();
+  try {
+    const response = await fetch(`/api/tradfi-prices?symbols=${encodeURIComponent(symbolsKey)}&etfs=${encodeURIComponent(etfSymbols.join(','))}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    tradfiPriceCache = { ts:Date.now(), symbolsKey, payload:await response.json() };
+    tradfiPriceFailures = 0;
+    tradfiPriceRetryAt = 0;
+  } catch (error) {
+    tradfiPriceError = error.message || 'Traditional quotes unavailable';
+    tradfiPriceFailures += 1;
+    const retryDelay = Math.min(60000, 5000 * (2 ** Math.min(tradfiPriceFailures - 1, 3)));
+    tradfiPriceRetryAt = Date.now() + retryDelay;
+    setTimeout(() => {
+      const active = document.querySelector('.top-tab[data-p="traditional"]')?.classList.contains('active');
+      const retryRows = tradfiActivityCache?.payload?.rows || [];
+      if (active && retryRows.length) loadTraditionalPrices(retryRows, false);
+    }, retryDelay);
+    console.error('[TradFi] quote load failed:', error);
+  } finally {
+    tradfiPriceLoading = false;
+    renderTraditionalActivity();
+  }
+}
+
 function refreshTraditionalActivity() {
+  tradfiActivityError = '';
+  tradfiPriceError = '';
+  const rows = tradfiActivityCache?.payload?.rows || [];
+  if (rows.length) loadTraditionalPrices(rows, true);
   loadTraditionalActivity(true);
 }
 
@@ -5584,14 +5686,45 @@ function setTraditionalActivityFilter(filter, button) {
   renderTraditionalActivity();
 }
 
+function traditionalMaxPriceSpread(row, coverage, quote) {
+  if (!quote || !['full','partial'].includes(quote.status) || !(Number(quote.price) > 0)) return null;
+  if (quote.currency !== 'USD' || quote.unit !== 'share') return null;
+  const quoteCategory = quote.assetClass === 'ETF' ? 'etf' : 'equity';
+  if (quoteCategory !== row.category) return null;
+  const anchor = Number(quote.price);
+  const points = [{
+    price:anchor,
+    label:'Nasdaq Trad',
+    side:'trad',
+    venue:'nasdaq',
+    currency:'USD',
+    unit:'share',
+  }];
+  (coverage?.pricePoints || []).forEach(point => {
+    const price = Number(point.price);
+    const ratio = price / anchor;
+    const comparableUnit = point.currency === 'USD' && point.unit === 'share';
+    if (price > 0 && comparableUnit && ratio > 0.5 && ratio < 1.5) points.push(point);
+  });
+  if (points.length < 2) return null;
+  points.sort((a, b) => a.price - b.price);
+  const low = points[0], high = points[points.length - 1];
+  if (!(high.price > low.price)) return { pct:0, usd:0, low, high, points:points.length };
+  return {
+    pct:(high.price - low.price) / low.price * 100,
+    usd:high.price - low.price,
+    low,
+    high,
+    points:points.length,
+  };
+}
+
 function renderTraditionalActivity() {
   const section = document.getElementById('tradfiActivitySection');
   if (!section) return;
 
-  const universe = traditionalActivityUniverse();
-  const symbolsKey = universe.map(row => row.symbol).join(',');
   const cacheFresh = tradfiActivityCache && Date.now() - tradfiActivityCache.ts < TRADFI_ACTIVITY_TTL;
-  if ((!tradfiActivityCache || !cacheFresh || tradfiActivityCache.symbolsKey !== symbolsKey) && !tradfiActivityLoading) {
+  if ((!tradfiActivityCache || !cacheFresh) && !tradfiActivityLoading && !tradfiActivityError) {
     setTimeout(() => loadTraditionalActivity(false), 0);
   }
 
@@ -5599,32 +5732,54 @@ function renderTraditionalActivity() {
   if (!payload) {
     section.innerHTML = `
       <div class="section-title">Traditional Market Activity Monitor</div>
-      <div class="section-subtitle">Linking verified RWA underlyings to official U.S. share and listed-options volume.</div>
+      <div class="section-subtitle">Ranking the traditional U.S. market first, then overlaying Perpetual and Spot coverage.</div>
       <div style="text-align:center;padding:34px;color:var(--foreground-dim)">
         <div class="spin" style="display:inline-block;width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite"></div>
-        <div style="margin-top:10px;font-size:12px">Loading Nasdaq market activity and OCC completed-session options volume…</div>
+        <div style="margin-top:10px;font-size:12px">Ranking Nasdaq securities and OCC completed-session options volume…</div>
         ${tradfiActivityError ? `<div style="margin-top:8px;color:var(--negative)">${escapeHtml(tradfiActivityError)}</div>` : ''}
       </div>`;
     return;
   }
 
-  const apiRows = Object.fromEntries((payload.rows || []).map(row => [row.symbol, row]));
-  let rows = universe.map(link => ({ ...link, ...(apiRows[link.symbol] || {}), link }));
+  const universe = payload.rows || [];
+  const symbolsKey = universe.map(row => row.symbol).join(',');
+  const quoteFresh = tradfiPriceCache && Date.now() - tradfiPriceCache.ts < TRADFI_PRICE_TTL;
+  if ((!tradfiPriceCache || !quoteFresh || tradfiPriceCache.symbolsKey !== symbolsKey) &&
+      !tradfiPriceLoading && Date.now() >= tradfiPriceRetryAt) {
+    setTimeout(() => loadTraditionalPrices(universe, false), 0);
+  }
+  const quoteRows = Object.fromEntries((tradfiPriceCache?.payload?.rows || []).map(row => [row.symbol, row]));
+  const coverageMap = traditionalCryptoCoverage();
+  let rows = universe.map(row => {
+    const link = coverageMap.get(traditionalCoverageKey(row.symbol, row.category)) || {
+      perpVolume:null, spotVolume:null,
+      perpVenues:new Set(), spotVenues:new Set(),
+      perpStaleVenues:new Set(), spotStaleVenues:new Set(),
+      perpVolumeAvailableCount:0, spotVolumeAvailableCount:0,
+      perpVolumeMissingCount:0, spotVolumeMissingCount:0,
+      perpVolumeNonFullCount:0, spotVolumeNonFullCount:0,
+      spotTokens:new Set(), pricePoints:[],
+    };
+    return { ...row, link, quote:quoteRows[row.symbol] || null };
+  });
   rows.forEach(row => { row.signal = traditionalActivitySignal(row); });
-  rows.sort((a, b) => b.signal.score - a.signal.score || (b.perpVolume + b.spotVolume) - (a.perpVolume + a.spotVolume));
 
   if (globalSearchTerm) {
-    rows = rows.filter(row => row.symbol.toLowerCase().includes(globalSearchTerm) || row.name.toLowerCase().includes(globalSearchTerm));
+    rows = rows.filter(row => row.symbol.toLowerCase().includes(globalSearchTerm) || String(row.name || '').toLowerCase().includes(globalSearchTerm));
   }
   if (tradfiActivityFilter === 'unusual') rows = rows.filter(row => row.signal.level !== 'normal');
   if (tradfiActivityFilter === 'optionable') rows = rows.filter(row => row.options?.status !== 'unavailable');
+  if (tradfiActivityFilter === 'covered') rows = rows.filter(row => row.link.perpVenues.size > 0 || row.link.spotVenues.size > 0);
 
-  const signalCounts = universe.reduce((counts, link) => {
-    const api = apiRows[link.symbol] || {};
-    const signal = traditionalActivitySignal(api);
+  const signalCounts = universe.reduce((counts, row) => {
+    const signal = traditionalActivitySignal(row);
     counts[signal.level] += 1;
     return counts;
   }, { high:0, watch:0, normal:0 });
+  const coveredCount = universe.filter(row => {
+    const link = coverageMap.get(traditionalCoverageKey(row.symbol, row.category));
+    return link && (link.perpVenues.size > 0 || link.spotVenues.size > 0);
+  }).length;
 
   const htmlRows = rows.map(row => {
     const market = row.market || {};
@@ -5632,50 +5787,57 @@ function renderTraditionalActivity() {
     const marketRel = tradfiMetricNumber(market.relativeVolume);
     const optionsRel = tradfiMetricNumber(options.relativeVolume);
     const marketRelHtml = Number.isFinite(marketRel)
-      ? `<span class="tradfi-rel ${tradfiRelClass(marketRel, 2)}">${marketRel.toFixed(2)}×</span>`
+      ? `<span class="tradfi-rel ${tradfiRelClass(marketRel, 1.5, 2)}">${marketRel.toFixed(2)}×</span>`
       : '<span style="color:var(--foreground-dim)">—</span>';
     const optionsRelHtml = Number.isFinite(optionsRel)
-      ? `<span class="tradfi-rel ${tradfiRelClass(optionsRel, 2.5)}">${optionsRel.toFixed(2)}×</span>`
+      ? `<span class="tradfi-rel ${tradfiRelClass(optionsRel, 1.75, 2.5)}">${optionsRel.toFixed(2)}×</span>`
       : '<span style="color:var(--foreground-dim)">—</span>';
     const marketAvailable = market.status && market.status !== 'unavailable';
     const optionsAvailable = options.status && options.status !== 'unavailable';
     const overallStatus = marketAvailable && optionsAvailable
       ? (market.status === 'full' && options.status === 'full' ? 'full' : 'partial')
       : (marketAvailable || optionsAvailable ? 'partial' : 'unavailable');
-    const statusTitle = market.identityStatus === 'mismatch'
-      ? `Nasdaq identity mismatch: ${market.officialName || row.symbol} is ${market.assetClass || 'a different asset class'}`
-      : market.identityStatus === 'unavailable'
-        ? 'Nasdaq could not confirm the current listed-security identity; ticker-based volume was rejected'
-        : overallStatus === 'full'
-      ? 'Nasdaq share volume and OCC options volume both available'
+    const statusTitle = overallStatus === 'full'
+      ? `Nasdaq share volume and OCC options volume both available for ${payload.methodology?.rankingSession || 'the aligned completed session'}`
       : overallStatus === 'partial'
         ? 'Only one official market layer or an incomplete baseline is available'
         : 'No official Nasdaq/OCC match for this canonical ticker';
     const categoryTag = `<span class="asset-tag tag-${row.category}">${escapeHtml(row.category)}</span>`;
-    const linkMeta = row.link || row;
+    const linkMeta = row.link;
     const perpVenues = linkMeta.perpVenues?.size || 0;
     const spotVenues = linkMeta.spotVenues?.size || 0;
-    const identityLine = market.identityStatus === 'confirmed' && market.officialName
+    const spotTokens = linkMeta.spotTokens?.size || 0;
+    const perpVolumeState = traditionalOverlayVolumeState(linkMeta, 'perp');
+    const spotVolumeState = traditionalOverlayVolumeState(linkMeta, 'spot');
+    const identityLine = ['confirmed','directory-confirmed'].includes(market.identityStatus) && market.officialName
       ? `<div style="font-size:9px;color:var(--foreground-dim)">Nasdaq: ${escapeHtml(market.officialName)}</div>`
-      : market.identityStatus === 'mismatch'
-        ? `<div style="font-size:9px;color:var(--negative)">Rejected ticker collision: ${escapeHtml(market.officialName || market.assetClass || 'identity mismatch')}</div>`
-        : '';
+      : '';
+    const spread = traditionalMaxPriceSpread(row, linkMeta, row.quote);
+    const quoteContext = [row.quote?.marketStatus, row.quote?.asOf].filter(Boolean).join(' · ');
+    const spreadStatusTitle = `Indicative estimate from live category-matched USD/share prices${quoteContext ? ` · Nasdaq ${quoteContext}` : ''}; excludes fees, latency and points outside the 0.5×–1.5× comparability guard.`;
+    const spreadHtml = spread
+      ? `<div class="tradfi-gap">${spread.pct.toFixed(2)}%</div><div class="tradfi-value-sub">$${fmtPrice(spread.usd)} · ${spread.points} prices</div><div class="tradfi-gap-route" title="${escapeHtml(`${spread.low.label} $${fmtPrice(spread.low.price)} → ${spread.high.label} $${fmtPrice(spread.high.price)}`)}">${escapeHtml(spread.low.label)} → ${escapeHtml(spread.high.label)}</div><div class="tradfi-value-sub">${dataStatusBadge('estimated', spreadStatusTitle)}</div>`
+      : `<span style="color:var(--foreground-dim)">—</span><div class="tradfi-value-sub">${tradfiPriceLoading ? 'Loading quotes' : 'Need Trad + Crypto prices'}</div><div class="tradfi-value-sub">${dataStatusBadge('unavailable', 'At least one Nasdaq price and one live comparable Crypto price are required')}</div>`;
+    const perpHtml = `<div class="mono">${perpVolumeState.hasValue ? fmtVolume(linkMeta.perpVolume) : '—'}</div><div class="tradfi-value-sub">${perpVenues ? `${perpVenues} venue${perpVenues > 1 ? 's' : ''}${perpVolumeState.stale ? ` · ${perpVolumeState.stale} stale` : ''}` : 'No Perp'}</div><div class="tradfi-value-sub">${dataStatusBadge(perpVolumeState.status, perpVolumeState.title)}</div>`;
+    const spotHtml = `<div class="mono">${spotVolumeState.hasValue ? fmtVolume(linkMeta.spotVolume) : '—'}</div><div class="tradfi-value-sub">${spotVenues ? `${spotVenues} venue${spotVenues > 1 ? 's' : ''} · ${spotTokens} token${spotTokens > 1 ? 's' : ''}${spotVolumeState.stale ? ` · ${spotVolumeState.stale} stale` : ''}` : 'No Spot'}</div><div class="tradfi-value-sub">${dataStatusBadge(spotVolumeState.status, spotVolumeState.title)}</div>`;
 
     return `<tr>
       <td style="text-align:left">
-        <div style="font-weight:700;font-size:13px">${escapeHtml(row.symbol)} ${categoryTag}${renderMarketTags(row.tags || [])}</div>
+        <div style="font-weight:700;font-size:13px"><span class="tradfi-rank">#${row.rank || '—'}</span>${escapeHtml(row.symbol)} ${categoryTag}${renderMarketTags(row.tags || [])}</div>
         <div style="font-size:10px;color:var(--foreground-dim);max-width:260px;overflow:hidden;text-overflow:ellipsis">${escapeHtml(row.name || row.symbol)}</div>
         ${identityLine}
-        <div style="margin-top:3px"><span class="tradfi-route" title="Linked perpetual venues">Perp ${perpVenues}</span><span class="tradfi-route" title="Linked spot venues">Spot ${spotVenues}</span></div>
+        <div style="margin-top:3px"><span class="tradfi-route ${perpVenues ? '' : 'missing'}" title="Linked perpetual venues">${perpVenues ? `Perp ${perpVenues}` : 'No Perp'}</span><span class="tradfi-route ${spotVenues ? '' : 'missing'}" title="Linked spot venues">${spotVenues ? `Spot ${spotVenues}` : 'No Spot'}</span></div>
       </td>
-      <td><div class="mono">${fmtTradfiCount(market.volume)}</div><div style="font-size:9px;color:var(--foreground-dim)">shares</div></td>
+      <td><div class="mono">${fmtTradfiCount(market.volume)}</div><div class="tradfi-value-sub">shares · <strong>${fmtVolume(market.estimatedValue)}</strong> est.</div></td>
       <td><div class="mono">${fmtTradfiCount(market.averageVolume)}</div><div style="font-size:9px;color:var(--foreground-dim)">Nasdaq avg</div></td>
       <td>${marketRelHtml}</td>
-      <td><div class="mono">${fmtTradfiCount(options.volume)}</div><div style="font-size:9px;color:var(--foreground-dim)">contracts</div></td>
+      <td><div class="mono">${fmtTradfiCount(options.volume)}</div><div class="tradfi-value-sub">contracts · <strong>${fmtVolume(options.estimatedNotional)}</strong> est.${Number(options.adjustedVolumeExcluded) > 0 ? ` · ${fmtTradfiCount(options.adjustedVolumeExcluded)} adjusted excluded` : ''}</div></td>
       <td><div class="mono">${fmtTradfiCount(options.averageVolume)}</div><div style="font-size:9px;color:var(--foreground-dim)">4-week same day</div></td>
       <td>${optionsRelHtml}</td>
-      <td class="mono">${fmtVolume(linkMeta.perpVolume || 0)}</td>
-      <td class="mono">${fmtVolume(linkMeta.spotVolume || 0)}</td>
+      <td><div class="mono" style="font-weight:700">${fmtVolume(row.traditionalTotalValue)}</div><div class="tradfi-value-sub">share value + option notional</div></td>
+      <td>${perpHtml}</td>
+      <td>${spotHtml}</td>
+      <td>${spreadHtml}</td>
       <td><span class="tradfi-signal ${row.signal.level}" title="${escapeHtml(row.signal.detail)}">${row.signal.label}</span><div style="font-size:9px;color:var(--foreground-dim);margin-top:3px">${escapeHtml(row.signal.detail)}</div></td>
       <td>${dataStatusBadge(overallStatus, statusTitle)}</td>
     </tr>`;
@@ -5684,17 +5846,18 @@ function renderTraditionalActivity() {
   const optionsAsOf = formatOccDate(payload.sources?.options?.asOf);
   const marketSource = payload.sources?.market?.url || 'https://www.nasdaq.com/market-activity';
   const optionsSource = payload.sources?.options?.url || 'https://www.theocc.com/market-data/market-data-reports/volume-and-open-interest/volume-query';
-  const empty = `<tr><td colspan="11" style="text-align:center;padding:30px;color:var(--foreground-dim)">No assets match this filter.</td></tr>`;
+  const empty = `<tr><td colspan="13" style="text-align:center;padding:30px;color:var(--foreground-dim)">No assets match this filter.</td></tr>`;
 
   section.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
       <div>
         <div class="section-title">Traditional Market Activity Monitor</div>
-        <div class="section-subtitle">Traditional shares + listed options, joined to live Perpetual and Spot 24h USD volume by canonical underlying. RelVol is not adjusted for intraday session progress.</div>
+        <div class="section-subtitle">Traditional-first ranking within the disclosed official activity candidate set. Perpetual and Spot coverage are joined only after rank is fixed.</div>
       </div>
       <div class="tradfi-controls">
         <button class="tradfi-filter ${tradfiActivityFilter === 'all' ? 'active' : ''}" onclick="setTraditionalActivityFilter('all',this)">All ${universe.length}</button>
         <button class="tradfi-filter ${tradfiActivityFilter === 'unusual' ? 'active' : ''}" onclick="setTraditionalActivityFilter('unusual',this)">Unusual ${signalCounts.high + signalCounts.watch}</button>
+        <button class="tradfi-filter ${tradfiActivityFilter === 'covered' ? 'active' : ''}" onclick="setTraditionalActivityFilter('covered',this)">Crypto Covered ${coveredCount}</button>
         <button class="tradfi-filter ${tradfiActivityFilter === 'optionable' ? 'active' : ''}" onclick="setTraditionalActivityFilter('optionable',this)">Optionable</button>
         <button class="sr-btn" onclick="refreshTraditionalActivity()" ${tradfiActivityLoading ? 'disabled' : ''}>${tradfiActivityLoading ? '⟳ Loading' : '⟳ Refresh'}</button>
       </div>
@@ -5702,23 +5865,30 @@ function renderTraditionalActivity() {
     <div class="tradfi-source-strip">
       <span class="tradfi-signal high">High ${signalCounts.high}</span>
       <span class="tradfi-signal watch">Watch ${signalCounts.watch}</span>
-      <span>Market: <a href="${escapeHtml(marketSource)}" target="_blank" rel="noopener">Nasdaq official</a> · public display, delayed/intraday</span>
+      <span>Universe: ${Number(payload.methodology?.directoryUniverse || 0).toLocaleString()} U.S.-listed securities in Nasdaq Trader directory · ${Number(payload.methodology?.candidateCount || 0)} official activity candidates → ${universe.length} ranked</span>
+      <span>Ranking session: ${escapeHtml(payload.methodology?.rankingSession || 'Unavailable')} · candidate list ${escapeHtml(payload.methodology?.moverAsOf || 'latest')}</span>
+      <span title="${escapeHtml(payload.methodology?.candidateCaveat || '')}">Scope: official candidate-set ranking${payload.methodology?.alignment ? ` · ${Number(payload.methodology.alignment.alignedCandidateCount || 0)}/${Number(payload.methodology.alignment.eligibleCandidateCount || 0)} eligible aligned${Number(payload.methodology.alignment.ineligibleCandidateCount || 0) ? ` · ${Number(payload.methodology.alignment.ineligibleCandidateCount)} session-ineligible excluded` : ''}` : ''}</span>
+      <span>Market: <a href="${escapeHtml(marketSource)}" target="_blank" rel="noopener">Nasdaq official</a> · completed-session shares + close</span>
       <span>Options: <a href="${escapeHtml(optionsSource)}" target="_blank" rel="noopener">OCC official</a> · T+1 as of ${optionsAsOf}</span>
-      <span>Updated ${new Date(tradfiActivityCache.ts).toLocaleTimeString()}${tradfiActivityLoading ? ' · Refreshing…' : ''}</span>
+      <span>Estimated values: shares × price; options × 100 × underlying price</span>
+      <span>Activity ${new Date(tradfiActivityCache.ts).toLocaleTimeString()}${tradfiActivityLoading ? ' · Refreshing…' : ''}${tradfiPriceLoading ? ' · Quotes refreshing…' : ''}</span>
       ${tradfiActivityError ? `<span style="color:var(--negative)">Last refresh failed: ${escapeHtml(tradfiActivityError)}</span>` : ''}
+      ${tradfiPriceError ? `<span style="color:var(--negative)">Quote refresh failed: ${escapeHtml(tradfiPriceError)}</span>` : ''}
     </div>
     <div class="table-wrap" style="padding:0;overflow-x:auto">
-      <table style="min-width:1180px">
+      <table style="min-width:1640px">
         <thead><tr>
           <th style="text-align:left">Underlying</th>
-          <th>Trad Volume</th>
+          <th><span class="th-info">Trad Volume<span class="th-info-icon">i</span><span class="th-info-tip">Nasdaq completed-session share volume aligned to the OCC session. Dollar value is estimated as shares × same-session close, not consolidated tape turnover.</span></span></th>
           <th>Trad Baseline</th>
           <th>Trad RelVol</th>
-          <th>Options Volume</th>
+          <th><span class="th-info">Options Volume<span class="th-info-icon">i</span><span class="th-info-tip">OCC completed-session contracts. Dollar value is estimated underlying notional: contracts × standard 100-share multiplier × Nasdaq price. It is not option premium.</span></span></th>
           <th>Options Baseline</th>
           <th>Options RelVol</th>
+          <th><span class="th-info">Est. Total Notional<span class="th-info-icon">i</span><span class="th-info-tip">Estimated share value + estimated options underlying notional. Used as the default traditional-first ranking metric; this is not option-premium turnover.</span></span></th>
           <th>Perp 24h</th>
           <th>Spot 24h</th>
+          <th><span class="th-info">Indicative Max Spread<span class="th-info-icon">i</span><span class="th-info-tip">Highest minus lowest live USD/share price across Nasdaq, Perp and Spot, divided by the lowest price. Points outside 0.5×–1.5× of Nasdaq are quarantined. Estimated only; not executable arbitrage and excludes fees, slippage and latency.</span></span></th>
           <th>Signal</th>
           <th>Data Status</th>
         </tr></thead>
@@ -6490,14 +6660,13 @@ function _isRwaSpotBase(base, venue = '') {
   if (!base || base.length < 2) return false;
   const up = base.toUpperCase();
 
-  // 1. Static tokens are globally trusted. Dynamically discovered tokens are
-  // trusted only on the venue whose authoritative catalog registered them.
-  // This prevents Reality's rON from causing Gate's RON (Ronin), for example,
-  // to be reclassified as a tokenized ON Semiconductor share.
+  // 1. Metadata is venue-scoped even for hand-curated wrapper tickers. This
+  // prevents a same-name crypto token on another venue from inheriting a
+  // trusted issuer identity.
   if (typeof ASSET_META !== 'undefined' && ASSET_META[up]) {
-    const isStatic = typeof STATIC_SPOT_ASSET_KEYS !== 'undefined' && STATIC_SPOT_ASSET_KEYS.has(up);
     const allowedVenues = ASSET_META[up].venues || [];
-    if (isStatic || (venue && allowedVenues.includes(venue))) return true;
+    if (venue && allowedVenues.includes(venue)) return true;
+    if (venue === 'gate' && GATE_SPOT_VERIFIED_WRAPPERS.has(up)) return true;
   }
 
   // 2. Tokenised suffix detected (COINX, GOOGLon, SPYon…) → allow if underlying is RWA
@@ -6509,11 +6678,9 @@ function _isRwaSpotBase(base, venue = '') {
   if (suffixUnderlying && isTradableRwaSymbol(suffixUnderlying)) {
     // Generic suffix matching is not sufficient proof: an unrelated crypto
     // token can also end in X/ON. Gate has no asset-class field on spot pairs,
-    // so require an exact audited wrapper or an underlying independently
-    // confirmed by an authoritative tokenized-asset catalog.
+    // so require an exact audited wrapper and fail closed on new names.
     if (venue === 'gate') {
-      const canonicalUnderlying = canonicalSymbol(suffixUnderlying);
-      return GATE_SPOT_VERIFIED_WRAPPERS.has(up) || OFFICIAL_TOKENIZED_UNDERLYINGS.has(canonicalUnderlying);
+      return GATE_SPOT_VERIFIED_WRAPPERS.has(up);
     }
     return false;
   }
@@ -7225,7 +7392,9 @@ async function refreshSpotArbData() {
     results.forEach((r, i) => {
       const venue = venueKeys[i];
       if (r.status === 'fulfilled') {
-        const normalized = Array.isArray(r.value) ? r.value.map(normalizeSpotDataState) : [];
+        const normalized = Array.isArray(r.value)
+          ? r.value.map(row => normalizeSpotDataState({ ...row, venue }))
+          : [];
         if (normalized.length) {
           lastSpotVenueData[venue] = normalized;
           spotVenueHealth[venue] = { status: 'live', lastSuccessAt: Date.now(), error: null };
@@ -7347,17 +7516,12 @@ const GATE_SPOT_VERIFIED_WRAPPERS = new Set([
   'CVXON','HOODX','LMTON','SBUXON','ABTON','NFLXX','AVGOX','TQQQX','TLTON','CSCOX',
   'CRWDX','ABBVX','AMZNX','METAX','CMCSAX','SBETON','DFDVX','BTGOON'
 ]);
-const OFFICIAL_TOKENIZED_UNDERLYINGS = new Set([
-  'AAPL','TSLA','NVDA','GOOGL','AMZN','META','MSFT','SPY','MSTR','COIN','XAU'
-]);
-
 function registerSpotAssetMeta(token, underlyingSymbol, issuer, category, venue = '') {
   const tokenKey = String(token || '').toUpperCase();
   const rawUnderlying = String(underlyingSymbol || '').toUpperCase();
   const resolvedCategory = securityCategoryForUnderlying(rawUnderlying, category || 'equity');
   const underlying = canonicalSymbolForCategory(rawUnderlying, resolvedCategory);
   if (!tokenKey || !underlying) return;
-  if (['bitget','kraken','binance'].includes(venue)) OFFICIAL_TOKENIZED_UNDERLYINGS.add(underlying);
   const isAmbiguousSecurity = _assetCategoryFamily(resolvedCategory) === 'security' && AMBIGUOUS_SHORT_SYMBOLS.has(underlying);
   const underlyingName = isAmbiguousSecurity ? '' : KNOWN_NAMES[underlying];
   const priorVenues = Array.isArray(ASSET_META[tokenKey]?.venues) ? ASSET_META[tokenKey].venues : [];
@@ -7379,6 +7543,37 @@ function registerSpotAssetMeta(token, underlyingSymbol, issuer, category, venue 
     venues,
   };
   registerRwaAsset(underlying, '', resolvedCategory);
+}
+
+// Resolve a tokenized spot wrapper only through venue-validated metadata.
+// This intentionally does not turn a plain same-ticker crypto token into a
+// stock merely because its text resembles a Nasdaq symbol.
+function spotAssetSecurityIdentity(asset) {
+  const coin = String(asset?.coin || '').toUpperCase();
+  if (!coin) return null;
+  const meta = typeof ASSET_META !== 'undefined' ? ASSET_META[coin] : null;
+  const underlying = String(
+    asset?.underlyingSymbol || meta?.underlyingSymbol || _arbUnderlyingKey(coin) || ''
+  ).toUpperCase();
+  const category = securityCategoryForUnderlying(
+    underlying,
+    asset?.category || meta?.category || ''
+  );
+  if (!['equity','etf'].includes(category)) return null;
+
+  // A spot ticker needs an explicit, venue-scoped identity record. Gate has no
+  // asset-class field, so its only pre-registration exception is the audited
+  // exact wrapper list.
+  const registeredVenues = Array.isArray(meta?.venues) ? meta.venues : [];
+  const isVenueVerified = Boolean(asset?.underlyingSymbol) ||
+    (asset?.venue && registeredVenues.includes(asset.venue)) ||
+    (asset?.venue === 'gate' && GATE_SPOT_VERIFIED_WRAPPERS.has(coin));
+  if (!isVenueVerified) return null;
+
+  return {
+    symbol: canonicalSymbolForCategory(underlying, category),
+    category,
+  };
 }
 
 const ISSUER_STYLES = {
@@ -8234,6 +8429,11 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal()
 (async function init() {
   await refresh(true);
   refreshTimer = setInterval(() => refresh(false), REFRESH_INTERVAL);
+  tradfiPriceRefreshTimer = setInterval(() => {
+    const active = document.querySelector('.top-tab[data-p="traditional"]')?.classList.contains('active');
+    const rows = tradfiActivityCache?.payload?.rows || [];
+    if (active && rows.length) loadTraditionalPrices(rows, true);
+  }, TRADFI_PRICE_TTL);
   // Load spot RWA data (depends on allData from perps refresh above)
   await refreshSpotArbData().catch(e => console.error('[Spot] init error:', e));
   spotRefreshTimer = setInterval(() => refreshSpotArbData(), SPOT_REFRESH_INTERVAL);
