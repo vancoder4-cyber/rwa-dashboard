@@ -170,6 +170,7 @@ export function aggregateSignalListings(listings, limit = SIGNAL_ASSET_LIMIT) {
       listings: rows.map(row => ({
         venue: row.venue,
         venueSymbol: row.venueSymbol,
+        instrumentType: String(row.instrumentType || 'perpetual').trim().toLowerCase(),
         priceUsd: positiveOrNull(row.priceUsd),
         volume24hUsd: finiteOrNull(row.volume24hUsd),
         volumeMethod: String(row.volumeMethod || '').trim().toLowerCase() || null,

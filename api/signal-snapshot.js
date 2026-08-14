@@ -19,6 +19,17 @@ import {
   normalizeSignalIdentity,
 } from './_lib/security-identity.js';
 import {
+  SPOT_ANOMALY_HISTORY_DAYS,
+  SPOT_ANOMALY_HISTORY_NAMESPACE,
+  SPOT_ANOMALY_SOURCE_NAMES,
+  buildSpotVolumePriceAnomalies,
+  collectSpotMarketSnapshot,
+  compactSpotDailySnapshot,
+  isSpotAnomalyHistoryComparable,
+  mergeSpotDailyHistory,
+  normalizeSpotDailyHistory,
+} from './_lib/spot-volume-price-anomaly.js';
+import {
   fetchJsonWithPolicy,
   setNoStore,
   setPublicCache,
@@ -36,6 +47,8 @@ const HISTORY_MAX_BYTES = 1_750_000;
 const DAILY_VOLUME_HISTORY_NAMESPACE = 'rwa-signal-volume-daily-v1';
 const DAILY_VOLUME_HISTORY_KEY = 'daily-volume-history-v1';
 const DAILY_VOLUME_HISTORY_TTL_SECONDS = 60 * 24 * 60 * 60;
+const SPOT_ANOMALY_HISTORY_KEY = 'spot-volume-price-daily-v1';
+const SPOT_ANOMALY_HISTORY_TTL_SECONDS = 10 * 24 * 60 * 60;
 const SOURCE_TIMEOUT_MS = 20_000;
 const BITGET_BASE = 'https://api.bitget.com';
 const SIGNAL_SOURCE_NAMES = Object.freeze(['gate', 'binance', 'bitget', 'tradexyz', 'okx']);
@@ -146,6 +159,7 @@ export function normalizeOkxSignalSnapshot(payload) {
       category: identity.category,
       venue: 'okx',
       venueSymbol,
+      instrumentType: instType === 'SWAP' ? 'swap' : 'x-perp',
       priceUsd: price,
       ...reportedVolumeFields(
         directQuoteVolume ?? derivedQuoteVolume,
@@ -229,6 +243,7 @@ function gateListings(payload) {
       category: identity.category,
       venue: 'gate',
       venueSymbol,
+      instrumentType: 'perpetual',
       priceUsd: price,
       ...reportedVolumeFields(quoteVolume, 'official-quote-volume'),
       openInterestUsd: quantity !== null && price !== null ? quantity * multiplier * price : null,
@@ -293,6 +308,7 @@ async function collectBinance(baseUrl) {
       category: identity.category,
       venue: 'binance',
       venueSymbol,
+      instrumentType: 'perpetual',
       priceUsd: firstNumber(premium.markPrice, ticker.lastPrice),
       ...reportedVolumeFields(quoteVolume, 'official-quote-volume'),
       openInterestUsd: null,
@@ -358,6 +374,7 @@ async function collectBitget() {
       category: identity.category,
       venue: 'bitget',
       venueSymbol,
+      instrumentType: 'perpetual',
       priceUsd: price,
       ...reportedVolumeFields(quoteVolume, 'official-quote-volume'),
       openInterestUsd: holdingAmount !== null && price !== null ? holdingAmount * price : null,
@@ -414,6 +431,7 @@ async function collectTradeXyz(baseUrl) {
       category: identity.category,
       venue: 'tradexyz',
       venueSymbol,
+      instrumentType: 'perpetual',
       priceUsd: price,
       ...reportedVolumeFields(dayNotionalVolume, 'official-day-notional'),
       openInterestUsd: openInterest !== null && price !== null ? openInterest * price : null,
@@ -527,6 +545,44 @@ async function updateDailyVolumeHistory(assets, nowMs, {
   }
 }
 
+async function updateSpotAnomalyHistory(listings, nowMs, {
+  writeRequested = false,
+  writeAllowed = false,
+} = {}) {
+  try {
+    const cache = getCache({ namespace:SPOT_ANOMALY_HISTORY_NAMESPACE });
+    const storedValue = await cache.get(SPOT_ANOMALY_HISTORY_KEY);
+    const stored = normalizeSpotDailyHistory(storedValue, nowMs);
+    if (!writeRequested || !writeAllowed) {
+      return {
+        status:'partial',
+        stored,
+        writeStatus:writeRequested ? 'skipped-incomplete-sources' : 'read-only',
+        error:null,
+      };
+    }
+    // The authenticated hourly Cron replaces the current UTC day's compact
+    // observation. From the next UTC day, the final successful observation is
+    // the sealed prior-day rolling-24h anchor. Public reads never mutate it.
+    const current = compactSpotDailySnapshot(listings, nowMs);
+    const merged = mergeSpotDailyHistory(stored, current, nowMs);
+    await cache.set(SPOT_ANOMALY_HISTORY_KEY, merged, {
+      ttl:SPOT_ANOMALY_HISTORY_TTL_SECONDS,
+      tags:['rwa-signal-spot-volume-price-history-v1'],
+      name:'RWA Spot volume and price daily anchor history',
+    });
+    return { status:'partial', stored:merged, writeStatus:'stored', error:null };
+  } catch (error) {
+    console.error('[signal-snapshot] Spot anomaly history unavailable', error);
+    return {
+      status:'unavailable',
+      stored:[],
+      writeStatus:'unavailable',
+      error:error?.message || 'runtime cache unavailable',
+    };
+  }
+}
+
 function historyCoverageStatus(snapshotCount) {
   if (snapshotCount >= 168) return 'full';
   if (snapshotCount >= 24) return 'partial';
@@ -552,8 +608,9 @@ export function isSignalSnapshotComparable(sources, expectedSourceNames = null) 
   return names.length > 0 && names.every(name => sources?.[name]?.status === 'full');
 }
 
-export function signalHistoryWriteSucceeded(runtimeHistory, dailyVolumeHistory) {
-  return runtimeHistory?.writeStatus === 'stored' && dailyVolumeHistory?.writeStatus === 'stored';
+export function signalHistoryWriteSucceeded(runtimeHistory, dailyVolumeHistory, spotAnomalyHistory) {
+  return runtimeHistory?.writeStatus === 'stored' && dailyVolumeHistory?.writeStatus === 'stored' &&
+    spotAnomalyHistory?.writeStatus === 'stored';
 }
 
 export async function serveSignalSnapshot(req, res, {
@@ -572,6 +629,20 @@ export async function serveSignalSnapshot(req, res, {
   }
 
   const baseUrl = deploymentBaseUrl(req);
+  // Spot collection is failure-isolated from the existing Perpetual Radar and
+  // starts concurrently so five additional official catalogs do not serialize
+  // endpoint latency. Its child reports its own coverage/status contract.
+  const spotSnapshotPromise = collectSpotMarketSnapshot(baseUrl).catch(error => {
+    console.error('[signal-snapshot] Spot anomaly market snapshot unavailable', error);
+    return {
+      listings:[],
+      sources:Object.fromEntries(SPOT_ANOMALY_SOURCE_NAMES.map(name => [name, {
+        status:'unavailable', listingCount:0, marketFieldCount:0, priceFieldCount:0, warnings:['SOURCE_UNAVAILABLE'],
+      }])),
+      conflicts:[],
+      quarantinedListings:0,
+    };
+  });
   const collectors = {
     gate: () => collectGate(baseUrl),
     binance: () => collectBinance(baseUrl),
@@ -610,10 +681,13 @@ export async function serveSignalSnapshot(req, res, {
   }
 
   const capturedAtMs = Date.now();
+  const spotSnapshot = await spotSnapshotPromise;
   const compact = compactSignalSnapshot(normalized.assets, capturedAtMs, SIGNAL_ASSET_LIMIT);
   const snapshotComparable = isSignalSnapshotComparable(sources, SIGNAL_SOURCE_NAMES);
   const analysisComparable = snapshotComparable && normalized.conflicts.length === 0;
-  const [runtimeHistory, dailyVolumeHistory] = await Promise.all([
+  const spotHistoryComparable = spotSnapshot.listings.length > 0 &&
+    isSpotAnomalyHistoryComparable(spotSnapshot.sources, spotSnapshot.conflicts);
+  const [runtimeHistory, dailyVolumeHistory, spotAnomalyHistory] = await Promise.all([
     updateRuntimeHistory(compact, capturedAtMs, {
       writeRequested:writeHistory,
       writeAllowed:analysisComparable,
@@ -621,6 +695,10 @@ export async function serveSignalSnapshot(req, res, {
     updateDailyVolumeHistory(normalized.allAssets, capturedAtMs, {
       writeRequested:writeHistory,
       writeAllowed:analysisComparable,
+    }),
+    updateSpotAnomalyHistory(spotSnapshot.listings, capturedAtMs, {
+      writeRequested:writeHistory,
+      writeAllowed:spotHistoryComparable,
     }),
   ]);
   const assets = attachSignalAnalysis(normalized.assets, runtimeHistory.previous, capturedAtMs, {
@@ -636,6 +714,34 @@ export async function serveSignalSnapshot(req, res, {
       historyAvailable:dailyVolumeHistory.status !== 'unavailable',
     },
   );
+  const perpCoverageStatus = analysisComparable
+    ? 'full'
+    : availableSources > 0 ? 'partial' : 'unavailable';
+  const spotWriterSucceeded = spotAnomalyHistory.writeStatus === 'stored';
+  const spotVolumePriceAnomalies = buildSpotVolumePriceAnomalies(
+    spotSnapshot.listings,
+    spotAnomalyHistory.stored,
+    capturedAtMs,
+    {
+      sources:spotSnapshot.sources,
+      conflicts:spotSnapshot.conflicts,
+      quarantinedListings:spotSnapshot.quarantinedListings,
+      historyAvailable:spotAnomalyHistory.status !== 'unavailable',
+      perpAssets:normalized.allAssets,
+      perpCoverageStatus,
+      persistence:{
+        mode:'vercel-runtime-cache',
+        status:spotAnomalyHistory.status,
+        namespace:SPOT_ANOMALY_HISTORY_NAMESPACE,
+        writer:{
+          requested:writeHistory,
+          succeeded:writeHistory ? spotWriterSucceeded : null,
+        },
+        writeStatus:spotAnomalyHistory.writeStatus,
+        error:spotAnomalyHistory.error ? 'spot daily history runtime cache unavailable' : null,
+      },
+    },
+  );
   const volumeValues = normalized.assets.map(asset => asset.volume24hUsd).filter(Number.isFinite);
   const oiValues = normalized.assets.map(asset => asset.openInterestUsd).filter(Number.isFinite);
   const responseStatus = analysisComparable
@@ -644,7 +750,7 @@ export async function serveSignalSnapshot(req, res, {
   const historyStatus = runtimeHistory.status === 'unavailable'
     ? 'unavailable'
     : historyCoverageStatus(runtimeHistory.stored.length);
-  const writerSucceeded = signalHistoryWriteSucceeded(runtimeHistory, dailyVolumeHistory);
+  const writerSucceeded = signalHistoryWriteSucceeded(runtimeHistory, dailyVolumeHistory, spotAnomalyHistory);
 
   if (publicCache) {
     setPublicCache(res, 300, 600);
@@ -701,6 +807,14 @@ export async function serveSignalSnapshot(req, res, {
         writeStatus:dailyVolumeHistory.writeStatus,
         error:dailyVolumeHistory.error ? 'daily volume runtime cache unavailable' : null,
       },
+      spotVolumePrice: {
+        namespace:SPOT_ANOMALY_HISTORY_NAMESPACE,
+        status:spotAnomalyHistory.status,
+        retentionDays:SPOT_ANOMALY_HISTORY_DAYS,
+        storedDays:spotAnomalyHistory.stored.length,
+        writeStatus:spotAnomalyHistory.writeStatus,
+        error:spotAnomalyHistory.error ? 'spot daily history runtime cache unavailable' : null,
+      },
     },
     history: {
       status: historyStatus,
@@ -714,6 +828,7 @@ export async function serveSignalSnapshot(req, res, {
     },
     aggregateHistory: aggregateHistoryPoints(runtimeHistory.stored),
     perpVolumeAnomalies,
+    spotVolumePriceAnomalies,
     assets,
   });
 }

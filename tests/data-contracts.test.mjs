@@ -410,13 +410,15 @@ test('signal snapshot cron is authenticated and never CDN cached', async () => {
   }
 });
 
-test('public Signal Radar is read-only while the authenticated cron writes both histories', async () => {
+test('public Signal Radar is read-only while the authenticated cron writes all three histories', async () => {
   const [source, cronSource] = await Promise.all([
     readFile(new URL('../api/signal-snapshot.js', import.meta.url), 'utf8'),
     readFile(new URL('../api/signal-snapshot-cron.js', import.meta.url), 'utf8'),
   ]);
   assert.match(source, /const DAILY_VOLUME_HISTORY_NAMESPACE = 'rwa-signal-volume-daily-v1'/);
   assert.match(source, /const DAILY_VOLUME_HISTORY_KEY = 'daily-volume-history-v1'/);
+  assert.match(source, /SPOT_ANOMALY_HISTORY_NAMESPACE/);
+  assert.match(source, /const SPOT_ANOMALY_HISTORY_KEY = 'spot-volume-price-daily-v1'/);
   assert.match(source, /return serveSignalSnapshot\(req, res, \{ publicCache:true, writeHistory:false \}\)/);
   assert.match(cronSource, /serveSignalSnapshot\(req, res, \{ publicCache:false, writeHistory:true \}\)/);
   assert.match(source, /updateDailyVolumeHistory\(normalized\.allAssets/,
@@ -424,15 +426,35 @@ test('public Signal Radar is read-only while the authenticated cron writes both 
   assert.match(source, /writeRequested:writeHistory[\s\S]*?writeAllowed:analysisComparable/);
   assert.match(source, /res\.status\(writeHistory && !writerSucceeded \? 503 : 200\)/,
     'an authenticated history writer must not report HTTP 200 when either cache write fails or is skipped');
-  assert.equal(signalHistoryWriteSucceeded({ writeStatus:'stored' }, { writeStatus:'stored' }), true);
+  assert.equal(signalHistoryWriteSucceeded(
+    { writeStatus:'stored' },
+    { writeStatus:'stored' },
+    { writeStatus:'stored' },
+  ), true);
+  assert.equal(signalHistoryWriteSucceeded({ writeStatus:'stored' }, { writeStatus:'stored' }), false);
   assert.equal(signalHistoryWriteSucceeded(
     { writeStatus:'stored' },
     { writeStatus:'skipped-incomplete-sources' },
-  ), false);
-  assert.equal(signalHistoryWriteSucceeded(
-    { writeStatus:'unavailable' },
     { writeStatus:'stored' },
   ), false);
+  assert.equal(signalHistoryWriteSucceeded(
+    { writeStatus:'stored' },
+    { writeStatus:'stored' },
+    { writeStatus:'unavailable' },
+  ), false);
+});
+
+test('Signal health allows the bounded Spot cold-start budget without retrying the snapshot', async () => {
+  const [health, spotAnomaly] = await Promise.all([
+    readFile(new URL('../api/health.js', import.meta.url), 'utf8'),
+    readFile(new URL('../api/_lib/spot-volume-price-anomaly.js', import.meta.url), 'utf8'),
+  ]);
+  const budget = Number(spotAnomaly.match(/SPOT_ANOMALY_COLLECTION_BUDGET_MS = ([\d_]+)/)?.[1]?.replaceAll('_',''));
+  const probe = sourceBetween(health, 'async function probeSignalRadar(baseUrl)', 'async function probeFunding(baseUrl');
+  const timeout = Number(probe.match(/timeoutMs:(\d[\d_]*)/)?.[1]?.replaceAll('_',''));
+  assert.ok(Number.isFinite(budget) && Number.isFinite(timeout));
+  assert.ok(timeout >= budget + 5_000, 'health must outwait a valid cold Spot collection with safety margin');
+  assert.match(probe, /retries:0/);
 });
 
 test('traditional activity is a standalone top-level page', async () => {
@@ -466,9 +488,10 @@ test('Signal Radar and Asset Intelligence use server history and one canonical d
   assert.match(html, /data-p="cross"[\s\S]*?RWA Signal Radar/);
   assert.match(html, /id="page-cross"[\s\S]*?id="radarTableRegion"/);
   const radarPage = sourceBetween(html, '<div class="page-container" id="page-cross">', '</div><!-- END page-cross -->');
-  assert.match(radarPage, /id="radarKpis"[\s\S]*?id="perpVolumeAnomalySection"[\s\S]*?id="competitorListingsSection"/,
-    'contract-volume anomalies must sit ahead of competitor listings in Signal Radar');
+  assert.match(radarPage, /id="radarKpis"[\s\S]*?id="perpVolumeAnomalySection"[\s\S]*?id="spotVolumePriceAnomalySection"[\s\S]*?id="competitorListingsSection"/,
+    'Perp and Spot anomaly monitors must sit ahead of competitor listings in Signal Radar');
   assert.equal((html.match(/id="perpVolumeAnomalySection"/g) || []).length, 1);
+  assert.equal((html.match(/id="spotVolumePriceAnomalySection"/g) || []).length, 1);
   assert.match(radarPage, /Perpetual Volume Anomalies[\s\S]*?HIGH[\s\S]*?MEDIUM[\s\S]*?DOWN/);
   assert.match(radarPage, /id="perpVolumeAnomalyLevelFilter"[\s\S]*?id="perpVolumeAnomalyCategoryFilter"[\s\S]*?id="perpVolumeAnomalyVenueFilter"[\s\S]*?id="perpVolumeAnomalyStatusFilter"/);
   assert.match(radarPage, /id="perpVolumeAnomalyMore"[\s\S]*?More · 50 \/ 100/);
@@ -489,6 +512,30 @@ test('Signal Radar and Asset Intelligence use server history and one canonical d
   assert.match(html, /if \(!perpVolumeAnomalyContractValid\(payload\)\) \{[\s\S]*?payload\.perpVolumeAnomalies = unavailablePerpVolumeAnomalySection\(payload\)/,
     'an invalid additive volume section must fail closed without taking down the existing Radar payload');
   assert.doesNotMatch(html, /!perpVolumeAnomalyContractValid\(payload\)\) throw new Error\('Invalid signal snapshot'\)/);
+  assert.match(radarPage, /RWA Spot Volume &amp; Price Anomalies[\s\S]*?\$500K/);
+  assert.match(radarPage, /Volume ≥ 3×[\s\S]*?24h gain ≥ 15%/);
+  assert.match(radarPage, /id="spotVolumePriceAnomalyTriggerFilter"[\s\S]*?id="spotVolumePriceAnomalyCategoryFilter"[\s\S]*?id="spotVolumePriceAnomalyVenueFilter"[\s\S]*?id="spotVolumePriceAnomalyPerpFilter"[\s\S]*?id="spotVolumePriceAnomalyStatusFilter"/);
+  assert.match(radarPage, /id="spotVolumePriceAnomalyMore"[\s\S]*?More · 50 \/ 100/);
+  assert.match(html, /const section = payload\?\.spotVolumePriceAnomalies/);
+  assert.match(html, /section\.formulaVersion !== SPOT_VOLUME_PRICE_ANOMALY_FORMULA_VERSION/);
+  assert.match(html, /if \(!spotVolumePriceAnomalyContractValid\(payload\)\) \{[\s\S]*?payload\.spotVolumePriceAnomalies = unavailableSpotVolumePriceAnomalySection\(payload\)/,
+    'an invalid additive Spot child must fail closed without taking down the existing Radar or Perp panel');
+  assert.doesNotMatch(html, /!spotVolumePriceAnomalyContractValid\(payload\)\) throw new Error\('Invalid signal snapshot'\)/);
+  const spotTriggerReader = sourceBetween(html, 'function spotVolumePriceAnomalyTrigger(row)', 'function spotVolumePriceAnomalyValue(row, key)');
+  assert.match(spotTriggerReader, /row\?\.trigger/);
+  assert.doesNotMatch(spotTriggerReader, /currentVolume|yesterdayVolume|volumeRatio|priceChange|>=|<=/,
+    'the browser must display the server trigger rather than reclassifying market values');
+  assert.match(html, /rows\.slice\(0, spotVolumePriceAnomalyExpanded \? 100 : 50\)/);
+  assert.match(html, /declaredListingKey === listingKey[\s\S]*?declaredAssetKey === expectedAssetKey/);
+  assert.match(html, /countValues\.alerts === countValues\.volumeSpike \+ countValues\.priceSurge - countValues\.both/);
+  assert.match(html, /Number\.isInteger\(rank\) && rank === rowIndex \+ 1/,
+    'Spot child ranks must be contiguous server ranks, not optional display hints');
+  assert.match(html, /const expectedRatio = yesterdayVolume !== null && yesterdayVolume > 0[\s\S]*?row\?\.volumeTriggered === expectedVolumeTriggered[\s\S]*?row\?\.priceTriggered === expectedPriceTriggered[\s\S]*?trigger === expectedTrigger/,
+    'the additive-child gate must verify row arithmetic and OR-trigger booleans before rendering');
+  assert.match(html, /source\.priceFieldCount/,
+    'the five Spot source chips and contract must expose price-field completeness separately from volume');
+  assert.match(html, /sectionStatus !== 'full'[\s\S]*?coverage\.volumeComparableListings[\s\S]*?coverage\.priceComparableListings/,
+    'only complete five-source/current/history coverage may support a Full no-alert conclusion');
   const volumeLevelReader = sourceBetween(html, 'function perpVolumeAnomalyLevel(row)', 'function perpVolumeAnomalyRowStatus(row)');
   assert.match(volumeLevelReader, /\['high','medium','down'\]\.includes\(level\)/);
   assert.doesNotMatch(volumeLevelReader, /ratio7d|currentVolume|average7d|>=|<=/,
@@ -673,6 +720,11 @@ test('bilingual runtime translates singular coverage and locale fragments withou
   assert.equal(window.translateUi('Stale Trad quote · excluded', 'zh-CN'), '传统市场报价已陈旧 · 已排除');
   assert.equal(window.translateUi('1079/1079 listings available', 'zh-CN'), '1079/1079 个上市标的数据可用');
   assert.equal(window.translateUi('share value + option notional ·', 'zh-CN'), '股票价值 + 期权名义价值 ·');
+  assert.equal(window.translateUi('RWA Spot Volume & Price Anomalies', 'zh-CN'), 'RWA 现货量价异动');
+  assert.equal(window.translateUi('Vol 1/2 · Price 0/2', 'zh-CN'), '成交量 1/2 · 涨跌幅 0/2');
+  assert.equal(window.translateUi('VOLUME ≥ 3×', 'zh-CN'), '成交量 ≥ 3×');
+  assert.equal(window.translateUi('PRICE ≥ 15%', 'zh-CN'), '价格 ≥ 15%');
+  assert.equal(window.translateUi('BOTH', 'zh-CN'), '两项同时触发');
 
   window.setUiLanguage('zh-CN');
   assert.equal(treeWalks, 1);

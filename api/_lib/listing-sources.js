@@ -73,6 +73,15 @@ function normalizedUpper(value) {
   return normalized(value).toUpperCase();
 }
 
+function boundedSourcePolicy(deadlineAt, { retries = 0, baseDelayMs = 250 } = {}) {
+  if (!Number.isFinite(deadlineAt)) {
+    return { timeoutMs:SOURCE_TIMEOUT_MS, retries, baseDelayMs };
+  }
+  const remainingMs = Math.floor(deadlineAt - Date.now());
+  if (remainingMs < 250) throw new TypeError('Spot collection deadline exhausted');
+  return { timeoutMs:Math.min(SOURCE_TIMEOUT_MS, remainingMs), retries:0, baseDelayMs };
+}
+
 export function isDedicatedTradeXyzSource(value) {
   return /^dex:(?:xyz|tradexyz)$/i.test(normalized(value));
 }
@@ -99,7 +108,7 @@ export function krakenListingCandidate(pairName, pair, officialEtfSet = ETF_UNDE
 }
 
 function listing(market, venue, venueSymbol, canonicalSymbol, category, extras = {}) {
-  return {
+  const row = {
     market,
     venue,
     venueSymbol: normalizedUpper(venueSymbol),
@@ -109,6 +118,15 @@ function listing(market, venue, venueSymbol, canonicalSymbol, category, extras =
     identityStatus: extras.identityStatus || 'verified',
     identityEvidence: extras.identityEvidence || null,
   };
+  // Market-data routing metadata is carried only where the official catalog
+  // distinguishes otherwise identical API products. Listing Audit ignores
+  // these additive fields; identity still comes exclusively from the fields
+  // above.
+  if (extras.marketDataProfile) row.marketDataProfile = normalized(extras.marketDataProfile);
+  if (Array.isArray(extras.marketAliases)) {
+    row.marketAliases = [...new Set(extras.marketAliases.map(normalizedUpper).filter(Boolean))];
+  }
+  return row;
 }
 
 export function gateExactLegacySpotListing(pair) {
@@ -145,19 +163,19 @@ function assertFullDeclaredCatalog(payload, label) {
   return instruments;
 }
 
-async function fetchSameOrigin(baseUrl, path) {
+async function fetchSameOrigin(baseUrl, path, { deadlineAt = null } = {}) {
   return fetchJsonWithPolicy(
     `${baseUrl}${path}`,
     { headers: { Accept: 'application/json' } },
-    { timeoutMs: SOURCE_TIMEOUT_MS, retries: 0 },
+    boundedSourcePolicy(deadlineAt, { retries:0 }),
   );
 }
 
-async function fetchBitget(path) {
+async function fetchBitget(path, { deadlineAt = null } = {}) {
   const payload = await fetchJsonWithPolicy(
     `${BITGET_BASE}${path}`,
     { headers: { Accept: 'application/json' } },
-    { timeoutMs: SOURCE_TIMEOUT_MS, retries: 1, baseDelayMs: 250 },
+    boundedSourcePolicy(deadlineAt, { retries:Number.isFinite(deadlineAt) ? 0 : 1, baseDelayMs:250 }),
   );
   if (!payload || payload.code !== '00000' || !Array.isArray(payload.data)) {
     throw new TypeError('Invalid Bitget official catalog');
@@ -283,8 +301,8 @@ async function collectOkxPerp(baseUrl) {
   return assertCatalogBounds('perp', 'okx', rows);
 }
 
-async function collectBitgetSpot() {
-  const instruments = await fetchBitget('/api/v3/market/instruments?category=SPOT');
+async function collectBitgetSpot(deadlineAt = null) {
+  const instruments = await fetchBitget('/api/v3/market/instruments?category=SPOT', { deadlineAt });
   const rows = new Map();
   for (const instrument of instruments) {
     if (instrument?.status !== 'online' || !['USD', 'USDT'].includes(normalizedUpper(instrument?.quoteCoin))) continue;
@@ -296,6 +314,7 @@ async function collectBitgetSpot() {
       if (!identity) continue;
       const legacyRow = listing('spot', 'bitget', instrument.symbol, identity.symbol, identity.category, {
         name: instrument?.symbolName,
+        marketDataProfile: 'bitget-standard',
         identityEvidence: 'exact audited Bitget RWA asset in the live official instruments catalog',
       });
       rows.set(legacyRow.venueSymbol, legacyRow);
@@ -308,6 +327,7 @@ async function collectBitgetSpot() {
     if (!identity) continue;
     const realityRow = listing('spot', 'bitget', instrument.symbol, identity.symbol, identity.category, {
       name: identityException?.name || instrument?.symbolName,
+      marketDataProfile: 'bitget-reality',
       identityEvidence: identityException
         ? 'audited exact Bitget Reality type exception'
         : `Bitget isReality=yes; symbolType=${instrument.symbolType || 'stock'}`,
@@ -317,8 +337,8 @@ async function collectBitgetSpot() {
   return assertCatalogBounds('spot', 'bitget', [...rows.values()]);
 }
 
-async function collectGateSpot(baseUrl) {
-  const payload = await fetchSameOrigin(baseUrl, '/api/gate-bulk?type=spot-snapshot');
+async function collectGateSpot(baseUrl, deadlineAt = null) {
+  const payload = await fetchSameOrigin(baseUrl, '/api/gate-bulk?type=spot-snapshot', { deadlineAt });
   const rawPairs = (Array.isArray(payload?.pairs) ? payload.pairs : [])
     .filter(pair => pair?.trade_status === 'tradable' && ['USD', 'USDT'].includes(normalizedUpper(pair?.quote)));
   if (!rawPairs.length) throw new TypeError('Gate Spot official pair catalog unavailable');
@@ -343,19 +363,23 @@ async function collectGateSpot(baseUrl) {
   return { listings: rows, rawPairs };
 }
 
-async function collectKrakenSpot(baseUrl) {
+async function collectKrakenSpot(baseUrl, deadlineAt = null) {
+  const krakenPolicy = boundedSourcePolicy(deadlineAt, {
+    retries:Number.isFinite(deadlineAt) ? 0 : 1,
+    baseDelayMs:250,
+  });
   const [standardPayload, tokenizedPayload, directoryPayload] = await Promise.all([
     fetchJsonWithPolicy(
       `${KRAKEN_BASE}/AssetPairs`,
       { headers: { Accept: 'application/json' } },
-      { timeoutMs: SOURCE_TIMEOUT_MS, retries: 1, baseDelayMs: 250 },
+      krakenPolicy,
     ),
     fetchJsonWithPolicy(
       `${KRAKEN_BASE}/AssetPairs?aclass_base=tokenized_asset`,
       { headers: { Accept: 'application/json' } },
-      { timeoutMs: SOURCE_TIMEOUT_MS, retries: 1, baseDelayMs: 250 },
+      krakenPolicy,
     ),
-    fetchSameOrigin(baseUrl, '/api/us-market-directory'),
+    fetchSameOrigin(baseUrl, '/api/us-market-directory', { deadlineAt }),
   ]);
   for (const payload of [standardPayload, tokenizedPayload]) {
     if (!payload || (Array.isArray(payload.error) && payload.error.length) || !payload.result || typeof payload.result !== 'object') {
@@ -373,13 +397,21 @@ async function collectKrakenSpot(baseUrl) {
     ...Object.entries(tokenizedPayload.result),
   ]) {
     const candidate = krakenListingCandidate(pairName, pair, officialEtfSet);
-    if (candidate) bySymbol.set(candidate.venueSymbol, candidate);
+    if (candidate) bySymbol.set(candidate.venueSymbol, {
+      ...candidate,
+      pairName,
+      marketDataProfile: normalized(pair?.aclass_base).toLowerCase() === 'tokenized_asset'
+        ? 'kraken-tokenized'
+        : 'kraken-standard',
+    });
   }
   const rows = [];
   for (const entry of bySymbol.values()) {
     const identity = normalizeSignalIdentity(entry.underlying, entry.category, { venue: 'kraken' });
     if (!identity) continue;
     rows.push(listing('spot', 'kraken', entry.venueSymbol, identity.symbol, identity.category, {
+      marketDataProfile: entry.marketDataProfile,
+      marketAliases: [entry.venueSymbol, entry.pairName],
       identityEvidence: entry.category === 'commodity'
         ? 'exact audited Kraken RWA asset in the live official AssetPairs catalog'
         : 'Kraken official tokenized_asset AssetPairs catalog',
@@ -388,8 +420,8 @@ async function collectKrakenSpot(baseUrl) {
   return assertCatalogBounds('spot', 'kraken', rows);
 }
 
-async function collectBinanceSpot(baseUrl) {
-  const payload = await fetchSameOrigin(baseUrl, '/api/binance-public?endpoint=spot-snapshot');
+async function collectBinanceSpot(baseUrl, deadlineAt = null) {
+  const payload = await fetchSameOrigin(baseUrl, '/api/binance-public?endpoint=spot-snapshot', { deadlineAt });
   if (payload?.schemaVersion !== 1 || payload?.catalogStatus !== 'full') {
     throw new TypeError('Binance admitted Spot catalog unavailable');
   }
@@ -406,8 +438,8 @@ async function collectBinanceSpot(baseUrl) {
   return assertCatalogBounds('spot', 'binance', rows);
 }
 
-async function collectOkxSpot(baseUrl) {
-  const payload = await fetchSameOrigin(baseUrl, '/api/okx-market?type=spot-snapshot');
+async function collectOkxSpot(baseUrl, deadlineAt = null) {
+  const payload = await fetchSameOrigin(baseUrl, '/api/okx-market?type=spot-snapshot', { deadlineAt });
   const rows = [];
   for (const instrument of assertFullDeclaredCatalog(payload, 'OKX Spot')) {
     const canonical = canonicalOkxSpotSymbol(instrument);
@@ -507,4 +539,39 @@ export async function collectListingSourceObservations(baseUrl) {
     }
   }
   return settled.map(({ rawPairs, ...observation }) => observation);
+}
+
+// Signal Radar needs the complete verified Spot universe without fetching the
+// five Perpetual catalogs a second time. Keep this routed through the exact
+// same private collectors so listing monitoring and anomaly history cannot
+// drift into separate ticker-based identity rules.
+export async function collectVerifiedSpotListingSourceObservations(baseUrl, { deadlineAt = null } = {}) {
+  const definitions = [
+    ['spot', 'bitget', () => collectBitgetSpot(deadlineAt)],
+    ['spot', 'gate', () => collectGateSpot(baseUrl, deadlineAt)],
+    ['spot', 'kraken', () => collectKrakenSpot(baseUrl, deadlineAt)],
+    ['spot', 'binance', () => collectBinanceSpot(baseUrl, deadlineAt)],
+    ['spot', 'okx', () => collectOkxSpot(baseUrl, deadlineAt)],
+  ];
+  return mapWithConcurrency(definitions, 5, async ([market, venue, collect]) => {
+    try {
+      const value = await collect();
+      return {
+        market,
+        venue,
+        status: 'full',
+        listings: (Array.isArray(value) ? value : value.listings)
+          .filter(row => row?.identityStatus === 'verified'),
+        reason: null,
+      };
+    } catch (error) {
+      return {
+        market,
+        venue,
+        status: 'unavailable',
+        listings: [],
+        reason: error?.message || 'official catalog unavailable',
+      };
+    }
+  });
 }

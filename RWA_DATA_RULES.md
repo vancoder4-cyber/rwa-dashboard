@@ -345,7 +345,7 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 
 ### 服务端信号快照
 
-- `GET /api/signal-snapshot` 是固定来源、GET-only、无 query 的服务端分析接口。来源只能是 Gate、Binance、Bitget、trade.xyz 与 OKX 的官方 catalog/market snapshot；官方 identity/category 缺失的 listing 必须 fail closed。OKX 的 SWAP/X-Perp 保留为 listing 后再按 canonical 聚合，`instCategory=1` 直接拒绝。通用小时信号 universe 是在身份 quarantine 后按 `24h USD volume + USD OI` 排序的 Top 100，响应与该小时历史使用同一 universe，不能返回永远没有小时历史资格的后排资产；独立的合约成交量日历史按下述规则覆盖全量 verified RWA perpetual universe，不受 Top 100 截断。
+- `GET /api/signal-snapshot` 是固定来源、GET-only、无 query 的服务端分析接口。通用小时信号与合约成交量来源只能是 Gate、Binance、Bitget、trade.xyz 与 OKX 的官方 catalog/market snapshot；专用现货量价异动来源只能是 Gate、Kraken、Bitget、Binance 与 OKX 的官方 Spot catalog/market snapshot。官方 identity/category 缺失的 listing 必须 fail closed。OKX 的 SWAP/X-Perp 保留为 listing 后再按 canonical 聚合，`instCategory=1` 直接拒绝。通用小时信号 universe 是在身份 quarantine 后按 `24h USD volume + USD OI` 排序的 Top 100，响应与该小时历史使用同一 universe，不能返回永远没有小时历史资格的后排资产；独立的合约成交量日历史按下述规则覆盖全量 verified RWA perpetual universe，不受 Top 100 截断。
 - 普通 `crypto/coin/token/meme` category 在服务端直接拒绝。相同 canonical symbol 出现互斥 category 时，该 symbol 整体 quarantine 并计入 `identityConflicts`，不得选择价格更像股票的一侧。
 - 服务端证券生命周期、ETF underlying、显式 wrapper alias、精确官方类型和 Binance bStock 映射集中在 `api/_lib/security-identity.js`。结尾 `B` 不能通用剥离；只有审计过的 bStock wrapper 表可以映射 underlying。客户端 `SECURITY_LISTING_REGISTRY` / `ETF_SYMBOLS` / `TOKENIZED_ETF_WRAPPERS` 与服务端 registry 必须由 contract test 校验一致，避免场所笼统的 `stock` 类型把 QQQ、SPY、SOXL、MUU 等 ETF 错标 Equity。
 - Funding 年化必须使用每个合约实际 interval：`rate × (24 / intervalHours) × 365`。真实零费率保留为 0；缺失保持 null。
@@ -362,10 +362,20 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 - 身份或数据不完整一律 fail closed：当前 volume 缺失、任一应有 listing 缺值、五源覆盖不完整、日锚点不足，或 exact listing cohort fingerprint 发生变化时，不计算可比比例，不生成 DOWN/Normal 结论，也不能沿用旧 cohort 的基线。fingerprint 变化后的资产必须以新 cohort 重新累计 7 日基线。
 - 日历史按 UTC day bucket 幂等更新并保留 45 日；同一日重试只能替换该日快照，不能增加一个伪造观察日。只有受 `CRON_SECRET` 保护且 `no-store` 的 `/api/signal-snapshot-cron` 可以写入，公开 `/api/signal-snapshot` 与浏览器均为只读。首次 7 个可比日保持 Warming；第 8 个日桶才可形成首个 7 日比例，连续 37 个可比日桶后 30 日频率才成熟。Runtime Cache 逐出或历史不可用时重新 Warming/Unavailable，绝不能显示为无异动。
 
+### 现货量价异动
+
+- `spotVolumePriceAnomalies` 以**精确现货 listing**为观察单位，不按裸 ticker 或 canonical asset 合并。listing 主键固定为 `spot:venue:venueSymbol`，身份键固定为 `category:canonical`；同一 underlying 的 USD/USDT 或不同 wrapper 必须保留为不同观察行。交易所官方产品 catalog/type 是准入依据；ticker、名称、价格相似或已有合约同名均不能证明是 RWA。跨 category 同 canonical 冲突时整体 quarantine，不能让 Crypto 同名资产进入历史或告警。
+- 每行先应用 `currentVolumeUsd >= 500000` 的硬过滤，再按 OR 关系判断：`currentVolumeUsd / yesterdayVolumeUsd >= 3.0`，或 `priceChange24hPct >= 15`。边界值包含在内；跌幅 `<= -15%` 不属于本版“涨幅”告警。前一日成交量缺失、非正数、不可比或时间戳不是前一个已封存 UTC day 时，成交量条件不可用；真实 0 必须保留为 0，但比例保持 null 且不得触发 volume，不能把 0 与缺失互换。价格条件仍可在 Day 1 独立触发。
+- “昨日”是前一个已封存 UTC-date 桶里、同一 exact listing 的 rolling-24h USD turnover 锚点，不宣称为交易所 UTC 自然日成交量。当前与昨日的 listing key、identity、quote/单位和采集方法 fingerprint 必须一致；任一变化都重新 Warming。历史同一 UTC 日重试只能覆盖，不得追加伪观察；只保留最近 8 个 UTC 日，足以得到一个前日锚点并允许连续性检查。
+- 成交量必须是 quote/USD turnover，不得把 base shares/tokens 当成美元。Gate 使用 `quote_volume`，Binance 使用 `quoteVolume`，Bitget Reality 使用 `platformTurnover24h`（不得回退到底层传统市场 `turnover24h`），OKX Spot 使用 `volCcy24h`；Kraken 可用 `v[1] × p[1]` 估算 USD turnover 并标 Estimated。缺失、负数、NaN、过期或不支持字段保持 null，不能通过 `|| 0` 进入过滤、比例或排序。
+- 涨幅必须来自同一 listing 的 rolling-24h open/last 口径：Gate `change_percentage`、Binance `priceChangePercent`、Bitget `price24hPcnt`、OKX `open24h`。Kraken ticker 的 `o` 从 UTC 午夜起算，不是 rolling 24h open，因此本功能中 Kraken `priceChange24hPct` 固定 Unavailable，不能据此触发价格告警。
+- `perpCoverage` 只能按相同 `category:canonical` 连接当前五个合约官方目录，并保留每个 exact `{venue, venueSymbol, instrumentType}`；不能按裸 ticker 猜测，也不能把多个 OKX contract 折叠掉。只有五个合约 source catalog 都为 Full 时，空 contracts 才能解释为“未上线合约”；否则覆盖状态为 Partial/Unavailable。
+- 五个 Spot source 必须分别披露 catalog、ticker、`marketFieldCount` 与 `priceFieldCount`，界面按 `Vol observed/listings · Price observed/listings` 展示字段完整度。Kraken 的 `priceFieldCount` 固定为 0，这是明确不支持的语义而不是数据 0。只有五源 catalog/当前成交量覆盖完整、身份无冲突且历史写入资格成立时，板块才能宣称 Full 或“无异动”；任一来源 Partial/Unavailable 时允许展示可验证行，但板块必须降级，且不能用空表得出无告警结论。
+
 ### 历史连续性
 
-- 当前五源版本通过受 `CRON_SECRET` 保护且 `no-store` 的 `/api/signal-snapshot-cron`，按 UTC 小时桶幂等写入 Vercel Runtime Cache namespace `rwa-signal-radar-v2`；全量合约成交量日锚点单独写入 `rwa-signal-volume-daily-v1`，不能与 Top 100 小时历史混存。只有两份历史都确认写入时 writer 才能返回 HTTP 200；五源不完整而跳过、任一缓存写失败或容量校验失败都必须返回非 2xx，不能让 Cron 把历史缺口记录为成功。公开的 `/api/signal-snapshot` 是 CDN 缓存读接口，不能直接作为 Cron target。通用信号最多保留 168 个小时快照、每个资产最多返回 48 点；独立合约成交量日历史保留 45 日。浏览器 `localStorage` 不再是 KPI、Radar 或成交量异动历史的数据源。
-- 只有 Gate、Binance、Bitget、trade.xyz、OKX 五份 source snapshot 都为 Full 时才把当前桶写进通用小时历史或独立成交量日历史。来源不完整时允许返回当前 Partial 监控结果，但不写基线，不产生成交量比例/频率，且没有越过绝对阈值的资产不能显示为 Normal。新增或移除场所、改变聚合字段定义时必须启用新的历史 namespace/version，不能把不同 source/cohort 分布直接比较。
+- 当前版本通过受 `CRON_SECRET` 保护且 `no-store` 的 `/api/signal-snapshot-cron`，按 UTC 小时桶幂等写入 Vercel Runtime Cache namespace `rwa-signal-radar-v2`；全量合约成交量日锚点单独写入 `rwa-signal-volume-daily-v1`；精确 Spot listing 的前日量价锚点单独写入 `rwa-signal-spot-volume-price-history-v1`。三类历史不能混存。只有三份历史都确认写入时 writer 才能返回 HTTP 200；来源不完整而跳过、任一缓存写失败或 1.75 MB 容量校验失败都必须返回 HTTP 503，不能让 Cron 把历史缺口记录为成功。公开的 `/api/signal-snapshot` 是 CDN 缓存读接口，不能直接作为 Cron target。通用信号最多保留 168 个小时快照、每个资产最多返回 48 点；合约成交量日历史保留 45 日，Spot 量价历史保留 8 日。浏览器 `localStorage` 不再是 KPI、Radar 或成交量异动历史的数据源。
+- 只有 Gate、Binance、Bitget、trade.xyz、OKX 五份 Perp source snapshot 都为 Full 时才把当前桶写进通用小时历史或独立合约成交量日历史；Spot 量价日历史只存成交量，因此必须要求 Gate、Kraken、Bitget、Binance、OKX 五份官方 Spot catalog 均可用、所有 admitted exact listing 的 `marketFieldCount === listingCount`、无 catalog identity rejection 且无 identity conflict。仅因 `priceFieldCount` 不完整而变成 Partial 的 Spot source 仍可写入完整 volume baseline，但当前板块继续为 Partial，不能据此宣称价格覆盖或“无异动”；任何 catalog/volume/identity 缺口都必须跳过 Spot 写入并令 Cron 返回 503。来源不完整时允许返回当前 Partial 监控结果，但不生成依赖缺失基线的比例，也不能把空表解释为 Normal。新增或移除场所、改变单位、采集字段、identity 或 listing cohort 定义时必须启用新的历史 namespace/version，不能比较不同方法分布。
 - Runtime Cache 跨部署保留但属于区域 best-effort cache，可能被逐出，不是永久数据库。因此 API 的 persistence 主状态最多为 Partial，并明确返回 continuity、region、storedSnapshots 和 baseline coverage。
 - 如需 30 日以上、跨 region 严格连续、可审计的历史，应迁移到 Neon/Postgres（run 表 + observation 表 + signal/fingerprint 表）；在迁移前不得把本缓存描述为永久数据库。
 

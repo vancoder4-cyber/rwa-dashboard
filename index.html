@@ -571,6 +571,29 @@ th.op-col:hover { color:var(--foreground-dim) !important; }
 .volume-anomaly-flag { display:inline-flex; padding:2px 5px; border-radius:5px; color:#6D3CA3; background:rgba(175,82,222,.09); font:700 8px/1.25 Inter,sans-serif; white-space:nowrap; }
 .volume-anomaly-flag.streak { color:#9A6700; background:rgba(255,184,0,.11); }
 .volume-anomaly-method { margin:0 16px 12px; color:var(--foreground-dim); font-size:8.5px; line-height:1.5; }
+.spot-anomaly-summary.alerts .listing-summary-value { color:#C62828; }
+.spot-anomaly-summary.volume .listing-summary-value { color:#9A6700; }
+.spot-anomaly-summary.price .listing-summary-value { color:#AF2D55; }
+.spot-anomaly-summary.perp .listing-summary-value { color:#0055CC; }
+.spot-anomaly-table { min-width:1240px; }
+.spot-anomaly-table thead th:nth-child(2), .spot-anomaly-table tbody td:nth-child(2),
+.spot-anomaly-table thead th:nth-child(7), .spot-anomaly-table tbody td:nth-child(7) { text-align:left; }
+.spot-anomaly-instrument { margin-top:3px; color:var(--foreground-dim); font:500 8px/1.4 'JetBrains Mono',monospace; }
+.spot-anomaly-triggers { display:flex; align-items:center; flex-wrap:wrap; gap:4px; }
+.spot-anomaly-trigger { display:inline-flex; align-items:center; gap:5px; padding:3px 7px; border-radius:999px; font:800 8.5px/1 Inter,sans-serif; white-space:nowrap; }
+.spot-anomaly-trigger::before { content:''; width:5px; height:5px; border-radius:50%; background:currentColor; }
+.spot-anomaly-trigger.volume-spike { color:#9A6700; background:rgba(255,184,0,.12); }
+.spot-anomaly-trigger.price-surge { color:#AF2D55; background:rgba(255,45,85,.10); }
+.spot-anomaly-trigger.both { color:#C62828; background:rgba(255,59,48,.10); }
+.spot-anomaly-sources { display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin:0 16px 12px; }
+.spot-anomaly-source { display:inline-flex; align-items:center; gap:5px; padding:4px 7px; border:1px solid var(--border); border-radius:7px; background:rgba(255,255,255,.38); color:var(--foreground-dim); font-size:8px; line-height:1.25; }
+.spot-anomaly-source strong { color:var(--foreground-sec); font-size:8.5px; }
+.spot-anomaly-perp { min-width:220px; max-width:310px; }
+.spot-anomaly-perp-head { display:flex; align-items:center; gap:6px; margin-bottom:4px; color:var(--foreground-sec); font:750 9px/1.35 Inter,sans-serif; }
+.spot-anomaly-contracts { display:flex; flex-direction:column; align-items:flex-start; gap:3px; }
+.spot-anomaly-contract { max-width:100%; color:var(--foreground-dim); font:500 8px/1.35 'JetBrains Mono',monospace; overflow-wrap:anywhere; }
+.spot-anomaly-contract strong { color:var(--foreground-sec); font-family:Inter,sans-serif; }
+.spot-anomaly-unlisted { color:var(--foreground-dim); font:650 9px/1.4 Inter,sans-serif; }
 .spot-vc-row { display:flex; justify-content:space-between; padding:4px 0; font-size:12px; }
 .spot-vc-row-label { color:var(--foreground-dim); }
 .spot-vc-row-val { font-family:'JetBrains Mono',monospace; font-weight:600; }
@@ -2122,6 +2145,63 @@ input[type="checkbox"] {
       </div>
       <div class="radar-more-wrap" id="perpVolumeAnomalyMoreWrap" style="display:none">
         <button type="button" class="radar-more" id="perpVolumeAnomalyMore" onclick="showMorePerpVolumeAnomalies()">More · 50 / 100</button>
+      </div>
+    </section>
+
+    <section class="section-card volume-anomaly-monitor" id="spotVolumePriceAnomalySection" aria-labelledby="spotVolumePriceAnomalyTitle">
+      <div class="listing-monitor-head">
+        <div>
+          <h3 class="listing-monitor-title" id="spotVolumePriceAnomalyTitle">RWA Spot Volume &amp; Price Anomalies</h3>
+          <p class="listing-monitor-lede">Monitors verified RWA spot venue instruments. An alert is raised when current rolling 24h USD volume is at least 3× its prior-day comparable anchor OR the official 24h price gain is at least +15%. Instruments below $500K current 24h volume are excluded.</p>
+        </div>
+        <div class="listing-monitor-asof" id="spotVolumePriceAnomalyAsOf">Snapshot<br>not loaded</div>
+      </div>
+      <div class="listing-monitor-summary" id="spotVolumePriceAnomalySummary" aria-live="polite"></div>
+      <div class="listing-monitor-banner warming" id="spotVolumePriceAnomalyStatus">Open Signal Radar to load server-side spot volume and price anomalies.</div>
+      <div class="spot-anomaly-sources" id="spotVolumePriceAnomalySources" aria-label="Spot source coverage">Spot sources not loaded.</div>
+      <div class="volume-anomaly-method" id="spotVolumePriceAnomalyMethod">The server applies the two alert conditions with OR logic after the $500K liquidity filter. The prior-day volume anchor is a comparable sealed observation, while exact perpetual venue contracts are joined by verified category and canonical underlying.</div>
+      <div class="radar-toolbar">
+        <select class="radar-control" id="spotVolumePriceAnomalyTriggerFilter" aria-label="Filter spot anomaly trigger" onchange="setSpotVolumePriceAnomalyFilter('trigger',this.value)">
+          <option value="all">All spot anomaly triggers</option>
+          <option value="volume_spike">Volume ≥ 3×</option>
+          <option value="price_surge">24h gain ≥ 15%</option>
+          <option value="both">Both conditions</option>
+        </select>
+        <select class="radar-control" id="spotVolumePriceAnomalyCategoryFilter" aria-label="Filter spot anomaly category" onchange="setSpotVolumePriceAnomalyFilter('category',this.value)">
+          <option value="all">All categories</option>
+        </select>
+        <select class="radar-control" id="spotVolumePriceAnomalyVenueFilter" aria-label="Filter spot anomaly venue" onchange="setSpotVolumePriceAnomalyFilter('venue',this.value)">
+          <option value="all">All spot venues</option>
+        </select>
+        <select class="radar-control" id="spotVolumePriceAnomalyPerpFilter" aria-label="Filter perpetual listing status" onchange="setSpotVolumePriceAnomalyFilter('perp',this.value)">
+          <option value="all">All perpetual statuses</option>
+          <option value="listed">Perpetual listed</option>
+          <option value="not-listed">No perpetual listing</option>
+          <option value="unknown">Perpetual coverage unknown</option>
+        </select>
+        <select class="radar-control" id="spotVolumePriceAnomalyStatusFilter" aria-label="Filter spot anomaly data status" onchange="setSpotVolumePriceAnomalyFilter('status',this.value)">
+          <option value="all">All data statuses</option>
+          <option value="full">Full</option>
+          <option value="partial">Partial</option>
+          <option value="estimated">Estimated</option>
+          <option value="unavailable">Unavailable</option>
+        </select>
+        <select class="radar-control" id="spotVolumePriceAnomalySort" aria-label="Sort spot anomalies" onchange="setSpotVolumePriceAnomalySort(this.value)">
+          <option value="priority">Alert priority</option>
+          <option value="ratio">Volume ratio</option>
+          <option value="change">24h price gain</option>
+          <option value="volume">Current 24h volume</option>
+          <option value="perp">Perpetual coverage</option>
+          <option value="asset">Asset A–Z</option>
+        </select>
+        <input class="radar-control radar-search" id="spotVolumePriceAnomalySearch" type="search" placeholder="Search spot anomalies or contracts..." aria-label="Search spot anomalies or contracts" oninput="setSpotVolumePriceAnomalySearch(this.value)">
+        <span class="radar-result-count" id="spotVolumePriceAnomalyResultCount"></span>
+      </div>
+      <div id="spotVolumePriceAnomalyTableRegion" aria-live="polite">
+        <div class="radar-empty"><div class="radar-empty-title">Open Signal Radar to load</div><div class="radar-empty-detail">This section displays only server-classified spot volume or price anomalies above the liquidity floor.</div></div>
+      </div>
+      <div class="radar-more-wrap" id="spotVolumePriceAnomalyMoreWrap" style="display:none">
+        <button type="button" class="radar-more" id="spotVolumePriceAnomalyMore" onclick="showMoreSpotVolumePriceAnomalies()">More · 50 / 100</button>
       </div>
     </section>
 
@@ -5183,6 +5263,14 @@ function assetIntelligenceEvidence(identity) {
     const candidate = assetIntelligenceIdentity({ canonical:row?.symbol, category:row?.category, source:'server signal snapshot' });
     return candidate?.assetKey === assetKey;
   })) sources.add('verified server signal snapshot');
+  if (spotVolumePriceAnomalyRows(spotVolumePriceAnomalyPayload()).some(row => {
+    const candidate = assetIntelligenceIdentity({
+      canonical:spotVolumePriceAnomalyIdentity(row).symbol,
+      category:spotVolumePriceAnomalyIdentity(row).category,
+      source:'server Spot anomaly snapshot',
+    });
+    return candidate?.assetKey === assetKey;
+  })) sources.add('verified server Spot anomaly snapshot');
   return { verified:sources.size > 0, sources:[...sources] };
 }
 
@@ -8062,6 +8150,7 @@ const SIGNAL_RETRY_BASE = 5 * 60 * 1000;
 const SIGNAL_RETRY_MAX = 30 * 60 * 1000;
 const SIGNAL_SCHEMA_VERSION = 'rwa-signal-snapshot/v1';
 const PERP_VOLUME_ANOMALY_FORMULA_VERSION = 'rwa-perp-volume-anomaly-1.0';
+const SPOT_VOLUME_PRICE_ANOMALY_FORMULA_VERSION = 'rwa-spot-volume-price-anomaly-1.0';
 let signalSnapshotCache = null;
 let signalSnapshotPromise = null;
 let signalSnapshotLoading = false;
@@ -8073,6 +8162,8 @@ let radarExpanded = false;
 const radarFilter = { severity:'all', type:'all', category:'all', search:'', sort:'server' };
 let perpVolumeAnomalyExpanded = false;
 const perpVolumeAnomalyFilter = { level:'all', category:'all', venue:'all', status:'all', search:'', sort:'priority' };
+let spotVolumePriceAnomalyExpanded = false;
+const spotVolumePriceAnomalyFilter = { trigger:'all', category:'all', venue:'all', perp:'all', status:'all', search:'', sort:'priority' };
 const LISTING_AUDIT_SCHEMA_VERSION = 'rwa-listing-audit/v1';
 const LISTING_HISTORY_RETENTION_DAYS = 45;
 const LISTING_CHANGES_TTL = 5 * 60 * 1000;
@@ -8887,6 +8978,455 @@ function renderPerpVolumeAnomalies(payload) {
   renderPerpVolumeAnomalyTable(section);
 }
 
+function spotVolumePriceAnomalyPayload(payload = signalSnapshotCache?.payload) {
+  const section = payload?.spotVolumePriceAnomalies;
+  return section && typeof section === 'object' && !Array.isArray(section) ? section : null;
+}
+
+function spotVolumePriceAnomalyTrigger(row) {
+  const trigger = String(row?.trigger || '').trim().toLowerCase();
+  return ['volume_spike','price_surge','both'].includes(trigger) ? trigger : 'unavailable';
+}
+
+function spotVolumePriceAnomalyValue(row, key) {
+  const aliases = {
+    currentVolumeUsd:['currentVolumeUsd','current24hVolumeUsd'],
+    yesterdayVolumeUsd:['yesterdayVolumeUsd','previousDayVolumeUsd','priorDayVolumeUsd'],
+    volumeRatio:['volumeRatio','ratio24h','ratio'],
+    priceChange24hPct:['priceChange24hPct','change24hPct','priceChangePct'],
+  };
+  for (const field of aliases[key] || [key]) {
+    const value = numberOrNull(row?.[field]);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+function spotVolumePriceAnomalyIdentity(row) {
+  const spot = row?.spot && typeof row.spot === 'object' ? row.spot : {};
+  const symbol = String(row?.canonicalSymbol || row?.symbol || '').trim().toUpperCase();
+  const category = String(row?.category || '').trim().toLowerCase();
+  const venue = String(row?.venue || spot.venue || '').trim().toLowerCase();
+  const venueSymbol = String(row?.venueSymbol || spot.venueSymbol || '').trim().toUpperCase();
+  return { symbol, category, venue, venueSymbol };
+}
+
+function spotVolumePriceAnomalyPerpCoverage(row) {
+  const coverage = row?.perpCoverage && typeof row.perpCoverage === 'object' ? row.perpCoverage : {};
+  const rawContracts = Array.isArray(row?.perpContracts)
+    ? row.perpContracts
+    : Array.isArray(coverage.contracts) ? coverage.contracts : [];
+  const contracts = rawContracts.map(contract => ({
+    venue:String(contract?.venue || '').trim().toLowerCase(),
+    venueSymbol:String(contract?.venueSymbol || contract?.symbol || '').trim().toUpperCase(),
+    instrumentType:String(contract?.instrumentType || contract?.marketType || '').trim(),
+  })).filter(contract => contract.venue && contract.venueSymbol);
+  const declaredListed = typeof row?.perpListed === 'boolean' || row?.perpListed === null
+    ? row.perpListed
+    : typeof coverage.listed === 'boolean' || coverage.listed === null ? coverage.listed : undefined;
+  const listed = declaredListed === undefined ? (contracts.length ? true : null) : declaredListed;
+  const status = radarSafeStatus(row?.perpStatus || row?.fieldStatus?.perpCoverage || coverage.status);
+  return { listed, status, contracts };
+}
+
+function spotVolumePriceAnomalyContractValid(payload) {
+  const section = payload?.spotVolumePriceAnomalies;
+  const rows = section?.rows;
+  const thresholds = section?.thresholds || {};
+  const volumeRatioThreshold = numberOrNull(thresholds.volumeRatio);
+  const priceChangeThreshold = numberOrNull(thresholds.priceRisePct);
+  const liquidityFloor = numberOrNull(thresholds.minCurrentVolumeUsd);
+  const relation = String(thresholds.logic || '').toLowerCase();
+  const coverage = section?.coverage || {};
+  const counts = section?.counts || {};
+  const history = section?.history || {};
+  const methodology = section?.methodology || {};
+  const persistence = section?.persistence || {};
+  const expectedSourceNames = ['gate','kraken','bitget','binance','okx'];
+  const sourceKeys = section?.sources && typeof section.sources === 'object' && !Array.isArray(section.sources)
+    ? Object.keys(section.sources)
+    : [];
+  const sourcesValid = sourceKeys.length === expectedSourceNames.length &&
+    expectedSourceNames.every(name => sourceKeys.includes(name) && (() => {
+      const source = section.sources[name];
+      const sourceStatus = String(source?.status || '').toLowerCase();
+      const listingCount = numberOrNull(source?.listingCount);
+      const volumeFieldCount = numberOrNull(source?.marketFieldCount);
+      const priceFieldCount = numberOrNull(source?.priceFieldCount);
+      return source && ['full','partial','unavailable'].includes(sourceStatus) &&
+        Number.isInteger(listingCount) && listingCount >= 0 &&
+        Number.isInteger(volumeFieldCount) && volumeFieldCount >= 0 && volumeFieldCount <= listingCount &&
+        Number.isInteger(priceFieldCount) && priceFieldCount >= 0 && priceFieldCount <= listingCount &&
+        (name !== 'kraken' || priceFieldCount === 0) &&
+        (sourceStatus !== 'full' || (listingCount > 0 && volumeFieldCount === listingCount &&
+          (name === 'kraken' || priceFieldCount === listingCount))) &&
+        Array.isArray(source.warnings) && source.warnings.every(warning => typeof warning === 'string');
+    })());
+  const observedAvailableSources = sourcesValid
+    ? expectedSourceNames.filter(name => String(section.sources[name].status).toLowerCase() !== 'unavailable').length
+    : null;
+  const observedFullSources = sourcesValid
+    ? expectedSourceNames.filter(name => String(section.sources[name].status).toLowerCase() === 'full').length
+    : null;
+  const observedListingTotal = sourcesValid
+    ? expectedSourceNames.reduce((sum,name) => sum + numberOrNull(section.sources[name].listingCount),0)
+    : null;
+  const methodologyValid = methodology.grain === 'exact-venue-instrument' &&
+    ['currentVolume','priorVolume','volumeComparison','priceChange','krakenPriceChange']
+      .every(key => typeof methodology[key] === 'string' && methodology[key].length > 0);
+  const persistenceValid = persistence.mode === 'vercel-runtime-cache' &&
+    persistence.namespace === 'rwa-signal-spot-volume-price-history-v1' &&
+    ['partial','unavailable'].includes(String(persistence.status || '').toLowerCase()) &&
+    persistence.writer?.requested === false && persistence.writer?.succeeded === null &&
+    persistence.writeStatus === 'read-only';
+  const countKeys = ['alerts','volumeSpike','priceSurge','both','perpListed','filteredLowLiquidity','filterUnknown'];
+  const countValues = Object.fromEntries(countKeys.map(key => [key, numberOrNull(counts[key])]));
+  const countsValid = countKeys.every(key => Number.isInteger(countValues[key]) && countValues[key] >= 0) &&
+    countValues.alerts === countValues.volumeSpike + countValues.priceSurge - countValues.both &&
+    countValues.both <= Math.min(countValues.volumeSpike,countValues.priceSurge) &&
+    countValues.perpListed <= countValues.alerts;
+  const coverageNumbers = ['availableSources','fullSources','verifiedListings','quarantinedListings','volumeAvailableListings','priorVolumeAvailableListings','priceAvailableListings','liquidityEligibleListings','volumeComparableListings','priceComparableListings','identityConflicts']
+    .map(key => numberOrNull(coverage[key]));
+  const coverageValid = numberOrNull(coverage.expectedSources) === 5 &&
+    coverageNumbers.every(value => Number.isInteger(value) && value >= 0) &&
+    numberOrNull(coverage.availableSources) === observedAvailableSources &&
+    numberOrNull(coverage.fullSources) === observedFullSources &&
+    numberOrNull(coverage.verifiedListings) + numberOrNull(coverage.quarantinedListings) === observedListingTotal &&
+    numberOrNull(coverage.volumeAvailableListings) <= numberOrNull(coverage.verifiedListings) &&
+    numberOrNull(coverage.priorVolumeAvailableListings) <= numberOrNull(coverage.volumeAvailableListings) &&
+    numberOrNull(coverage.priceAvailableListings) <= numberOrNull(coverage.verifiedListings) &&
+    numberOrNull(coverage.liquidityEligibleListings) <= numberOrNull(coverage.volumeAvailableListings) &&
+    numberOrNull(coverage.volumeComparableListings) <= numberOrNull(coverage.liquidityEligibleListings) &&
+    numberOrNull(coverage.priceComparableListings) <= numberOrNull(coverage.liquidityEligibleListings);
+  const conservationValid = countValues.filteredLowLiquidity + countValues.filterUnknown +
+      numberOrNull(coverage.liquidityEligibleListings) === numberOrNull(coverage.verifiedListings) &&
+    countValues.alerts <= numberOrNull(coverage.liquidityEligibleListings);
+  const historyValid = ['full','partial','warming','unavailable'].includes(String(history.status || '').toLowerCase()) &&
+    history.namespace === 'rwa-signal-spot-volume-price-history-v1' &&
+    history.cadence === 'utc-daily-sealed' && numberOrNull(history.retentionDays) === 8;
+  const sectionStatus = String(section?.status || '').toLowerCase();
+  const fullCoherent = sectionStatus !== 'full' || (
+    numberOrNull(coverage.availableSources) === 5 && numberOrNull(coverage.fullSources) === 5 &&
+    numberOrNull(coverage.identityConflicts) === 0 && countValues.filterUnknown === 0 &&
+    String(history.status || '').toLowerCase() === 'full' &&
+    numberOrNull(coverage.volumeComparableListings) === numberOrNull(coverage.liquidityEligibleListings) &&
+    numberOrNull(coverage.priceComparableListings) === numberOrNull(coverage.liquidityEligibleListings)
+  );
+  const allowedCategories = new Set(['equity','etf','commodity','index','fx','pre-ipo','bond']);
+  const allowedSpotVenues = new Set(['gate','binance','bitget','kraken','okx']);
+  const allowedPerpVenues = new Set(['gate','binance','bitget','tradexyz','okx']);
+  if (!section || section.formulaVersion !== SPOT_VOLUME_PRICE_ANOMALY_FORMULA_VERSION ||
+      !['full','partial','warming','unavailable'].includes(sectionStatus) ||
+      !Number.isFinite(Date.parse(section.generatedAt)) || !Array.isArray(rows) ||
+      rows.length !== Math.min(countValues.alerts,100) || !countsValid || !coverageValid || !conservationValid || !sourcesValid ||
+      !methodologyValid || !persistenceValid || !historyValid || !fullCoherent ||
+      volumeRatioThreshold !== 3 || priceChangeThreshold !== 15 || liquidityFloor !== 500000 || relation !== 'or') return false;
+  const listingKeys = new Set();
+  return rows.every((row, rowIndex) => {
+    const { symbol, category, venue, venueSymbol } = spotVolumePriceAnomalyIdentity(row);
+    const trigger = spotVolumePriceAnomalyTrigger(row);
+    const rank = numberOrNull(row?.rank);
+    const status = radarSafeStatus(row?.status);
+    const currentVolume = spotVolumePriceAnomalyValue(row,'currentVolumeUsd');
+    const yesterdayVolume = spotVolumePriceAnomalyValue(row,'yesterdayVolumeUsd');
+    const ratio = spotVolumePriceAnomalyValue(row,'volumeRatio');
+    const priceChange = spotVolumePriceAnomalyValue(row,'priceChange24hPct');
+    const perp = spotVolumePriceAnomalyPerpCoverage(row);
+    const listingKey = `spot:${venue}:${venueSymbol}`;
+    const declaredListingKey = String(row?.listingKey || '').trim();
+    const declaredAssetKey = String(row?.assetKey || '').trim().toLowerCase();
+    const expectedAssetKey = `${category}:${symbol}`.toLowerCase();
+    const contractKeys = perp.contracts.map(contract => `${contract.venue}:${contract.venueSymbol}`);
+    const expectedRatio = yesterdayVolume !== null && yesterdayVolume > 0
+      ? Math.round((currentVolume / yesterdayVolume) * 10000) / 10000
+      : null;
+    const ratioCoherent = ratio === expectedRatio;
+    const expectedVolumeTriggered = expectedRatio !== null && expectedRatio >= volumeRatioThreshold;
+    const expectedPriceTriggered = priceChange !== null && priceChange >= priceChangeThreshold;
+    const expectedTrigger = expectedVolumeTriggered && expectedPriceTriggered
+      ? 'both'
+      : expectedVolumeTriggered ? 'volume_spike' : expectedPriceTriggered ? 'price_surge' : null;
+    const triggerValuesPresent = trigger === 'volume_spike'
+      ? yesterdayVolume !== null && ratio !== null
+      : trigger === 'price_surge'
+        ? priceChange !== null
+        : yesterdayVolume !== null && ratio !== null && priceChange !== null;
+    const perpCoherent = perp.listed === true
+      ? perp.contracts.length > 0
+      : perp.listed === false
+        ? perp.status === 'full' && perp.contracts.length === 0
+        : perp.contracts.length === 0 && perp.status !== 'full';
+    const rankValid = Number.isInteger(rank) && rank === rowIndex + 1;
+    const valid = /^[A-Z0-9][A-Z0-9._-]{0,39}$/.test(symbol) && allowedCategories.has(category) &&
+      allowedSpotVenues.has(venue) && /^[A-Z0-9][A-Z0-9._:/-]{0,79}$/.test(venueSymbol) &&
+      declaredListingKey === listingKey && declaredAssetKey === expectedAssetKey &&
+      trigger !== 'unavailable' && rankValid && !listingKeys.has(listingKey) &&
+      ['full','partial','estimated','unavailable'].includes(status) && currentVolume !== null && currentVolume >= 500000 &&
+      triggerValuesPresent && (yesterdayVolume === null || yesterdayVolume >= 0) && ratioCoherent &&
+      row?.volumeTriggered === expectedVolumeTriggered && row?.priceTriggered === expectedPriceTriggered &&
+      expectedTrigger !== null && trigger === expectedTrigger;
+    const contractsValid = contractKeys.length === new Set(contractKeys).size && perp.contracts.every(contract =>
+      allowedPerpVenues.has(contract.venue) && /^[A-Z0-9][A-Z0-9._:/-]{0,79}$/.test(contract.venueSymbol)
+    );
+    if (valid && contractsValid && perpCoherent) {
+      listingKeys.add(listingKey);
+      return true;
+    }
+    return false;
+  });
+}
+
+function unavailableSpotVolumePriceAnomalySection(payload) {
+  return {
+    formulaVersion:SPOT_VOLUME_PRICE_ANOMALY_FORMULA_VERSION,
+    generatedAt:payload?.generatedAt || null,
+    status:'unavailable',
+    thresholds:{ volumeRatio:3, priceRisePct:15, minCurrentVolumeUsd:500000, logic:'or' },
+    coverage:{ expectedSources:5, availableSources:0, fullSources:0, verifiedListings:0, liquidityEligibleListings:0, volumeComparableListings:0, priceComparableListings:0, identityConflicts:0 },
+    counts:{ alerts:null, volumeSpike:null, priceSurge:null, both:null, filteredLowLiquidity:null, filterUnknown:null, perpListed:null },
+    history:{ status:'unavailable', namespace:'', cadence:'utc-daily-sealed', retentionDays:8, priorDay:null },
+    methodology:{ grain:'exact-venue-instrument' },
+    persistence:{ attempted:false, stored:false, reason:'unavailable' },
+    sources:{},
+    rows:[],
+  };
+}
+
+function spotVolumePriceAnomalyPanelStatus(section) {
+  const status = String(section?.status || '').toLowerCase();
+  const normalized = ['full','partial','warming','unavailable'].includes(status) ? status : 'warming';
+  return signalSnapshotError && section && normalized === 'full' ? 'partial' : normalized;
+}
+
+function spotVolumePriceAnomalyRowStatus(row) {
+  return radarSafeStatus(row?.status);
+}
+
+function spotVolumePriceAnomalyRows(section) {
+  return (Array.isArray(section?.rows) ? section.rows : []).filter(row => {
+    const identity = spotVolumePriceAnomalyIdentity(row);
+    return identity.symbol && identity.category && identity.venue && identity.venueSymbol &&
+      spotVolumePriceAnomalyTrigger(row) !== 'unavailable';
+  });
+}
+
+function spotVolumePriceAnomalyVenueLabel(venue) {
+  const key = String(venue || '').toLowerCase();
+  return SPOT_VENUE_NAMES?.[key] || VENUES[key]?.name || key;
+}
+
+function updateSpotVolumePriceAnomalyFilterOptions(section) {
+  const rows = spotVolumePriceAnomalyRows(section);
+  const categories = [...new Set(rows.map(row => spotVolumePriceAnomalyIdentity(row).category).filter(Boolean))].sort();
+  const venues = [...new Set(rows.map(row => spotVolumePriceAnomalyIdentity(row).venue).filter(Boolean))]
+    .sort((left, right) => spotVolumePriceAnomalyVenueLabel(left).localeCompare(spotVolumePriceAnomalyVenueLabel(right)));
+  populateRadarFilter(
+    'spotVolumePriceAnomalyCategoryFilter',
+    categories.map(key => ({ key, label:key.replace(/\b\w/g, letter => letter.toUpperCase()) })),
+    'All categories',
+    spotVolumePriceAnomalyFilter.category,
+  );
+  populateRadarFilter(
+    'spotVolumePriceAnomalyVenueFilter',
+    venues.map(key => ({ key, label:spotVolumePriceAnomalyVenueLabel(key) })),
+    'All spot venues',
+    spotVolumePriceAnomalyFilter.venue,
+  );
+  spotVolumePriceAnomalyFilter.category = document.getElementById('spotVolumePriceAnomalyCategoryFilter')?.value || 'all';
+  spotVolumePriceAnomalyFilter.venue = document.getElementById('spotVolumePriceAnomalyVenueFilter')?.value || 'all';
+}
+
+function filteredSpotVolumePriceAnomalyRows(section) {
+  const query = spotVolumePriceAnomalyFilter.search.trim().toLowerCase();
+  const filtered = spotVolumePriceAnomalyRows(section).map((row, serverIndex) => ({ row, serverIndex })).filter(({ row }) => {
+    const identity = spotVolumePriceAnomalyIdentity(row);
+    const trigger = spotVolumePriceAnomalyTrigger(row);
+    const triggerMatch = spotVolumePriceAnomalyFilter.trigger === 'all' || trigger === spotVolumePriceAnomalyFilter.trigger ||
+      (trigger === 'both' && ['volume_spike','price_surge'].includes(spotVolumePriceAnomalyFilter.trigger));
+    const categoryMatch = spotVolumePriceAnomalyFilter.category === 'all' || identity.category === spotVolumePriceAnomalyFilter.category;
+    const venueMatch = spotVolumePriceAnomalyFilter.venue === 'all' || identity.venue === spotVolumePriceAnomalyFilter.venue;
+    const perp = spotVolumePriceAnomalyPerpCoverage(row);
+    const perpKey = perp.listed === true ? 'listed' : perp.listed === false ? 'not-listed' : 'unknown';
+    const perpMatch = spotVolumePriceAnomalyFilter.perp === 'all' || perpKey === spotVolumePriceAnomalyFilter.perp;
+    const statusMatch = spotVolumePriceAnomalyFilter.status === 'all' || spotVolumePriceAnomalyRowStatus(row) === spotVolumePriceAnomalyFilter.status;
+    const searchText = [
+      identity.symbol, row?.name, identity.venue, spotVolumePriceAnomalyVenueLabel(identity.venue), identity.venueSymbol,
+      ...perp.contracts.flatMap(contract => [contract.venue, spotVolumePriceAnomalyVenueLabel(contract.venue), contract.venueSymbol]),
+    ].filter(Boolean).join(' ').toLowerCase();
+    return triggerMatch && categoryMatch && venueMatch && perpMatch && statusMatch && (!query || searchText.includes(query));
+  });
+  if (spotVolumePriceAnomalyFilter.sort === 'asset') {
+    filtered.sort((left, right) => spotVolumePriceAnomalyIdentity(left.row).symbol.localeCompare(spotVolumePriceAnomalyIdentity(right.row).symbol) || left.serverIndex - right.serverIndex);
+  } else if (spotVolumePriceAnomalyFilter.sort === 'ratio') {
+    filtered.sort((left, right) => (spotVolumePriceAnomalyValue(right.row,'volumeRatio') ?? -Infinity) - (spotVolumePriceAnomalyValue(left.row,'volumeRatio') ?? -Infinity) || left.serverIndex - right.serverIndex);
+  } else if (spotVolumePriceAnomalyFilter.sort === 'change') {
+    filtered.sort((left, right) => (spotVolumePriceAnomalyValue(right.row,'priceChange24hPct') ?? -Infinity) - (spotVolumePriceAnomalyValue(left.row,'priceChange24hPct') ?? -Infinity) || left.serverIndex - right.serverIndex);
+  } else if (spotVolumePriceAnomalyFilter.sort === 'volume') {
+    filtered.sort((left, right) => (spotVolumePriceAnomalyValue(right.row,'currentVolumeUsd') ?? -Infinity) - (spotVolumePriceAnomalyValue(left.row,'currentVolumeUsd') ?? -Infinity) || left.serverIndex - right.serverIndex);
+  } else if (spotVolumePriceAnomalyFilter.sort === 'perp') {
+    filtered.sort((left, right) => spotVolumePriceAnomalyPerpCoverage(right.row).contracts.length - spotVolumePriceAnomalyPerpCoverage(left.row).contracts.length || left.serverIndex - right.serverIndex);
+  } else {
+    filtered.sort((left, right) => (numberOrNull(left.row?.rank) ?? left.serverIndex + 1) - (numberOrNull(right.row?.rank) ?? right.serverIndex + 1) || left.serverIndex - right.serverIndex);
+  }
+  return filtered;
+}
+
+function spotVolumePriceAnomalyCount(section, ...keys) {
+  for (const key of keys) {
+    const count = numberOrNull(section?.counts?.[key] ?? section?.[key]);
+    if (count !== null) return Math.max(0,Math.trunc(count)).toLocaleString(window.uiLocale());
+  }
+  return '—';
+}
+
+function renderSpotVolumePriceAnomalySummary(section) {
+  const host = document.getElementById('spotVolumePriceAnomalySummary');
+  if (!host) return;
+  const both = spotVolumePriceAnomalyCount(section,'both');
+  const excluded = spotVolumePriceAnomalyCount(section,'filteredLowLiquidity');
+  host.innerHTML = `
+    <div class="listing-summary-item spot-anomaly-summary alerts"><div class="listing-summary-label">Alert instruments</div><div class="listing-summary-value">${spotVolumePriceAnomalyCount(section,'alerts','total')}</div><div class="listing-summary-sub">${both === '—' ? 'OR logic' : `${both} meet both conditions`}</div></div>
+    <div class="listing-summary-item spot-anomaly-summary volume"><div class="listing-summary-label">Volume ≥ 3×</div><div class="listing-summary-value">${spotVolumePriceAnomalyCount(section,'volumeSpike','volume3x')}</div><div class="listing-summary-sub">vs prior-day anchor</div></div>
+    <div class="listing-summary-item spot-anomaly-summary price"><div class="listing-summary-label">24h gain ≥ 15%</div><div class="listing-summary-value">${spotVolumePriceAnomalyCount(section,'priceSurge','priceUp15')}</div><div class="listing-summary-sub">${excluded === '—' ? '$500K floor' : `${excluded} below $500K excluded`}</div></div>
+    <div class="listing-summary-item spot-anomaly-summary perp"><div class="listing-summary-label">Perpetual listed</div><div class="listing-summary-value">${spotVolumePriceAnomalyCount(section,'perpListed')}</div><div class="listing-summary-sub">exact venue contracts</div></div>`;
+}
+
+function renderSpotVolumePriceAnomalyStatus(section) {
+  const host = document.getElementById('spotVolumePriceAnomalyStatus');
+  const asOf = document.getElementById('spotVolumePriceAnomalyAsOf');
+  if (!host || !asOf) return;
+  const generatedAt = section?.generatedAt;
+  asOf.innerHTML = `Snapshot<br>${Number.isFinite(Date.parse(generatedAt)) ? escapeHtml(radarTimestamp(generatedAt)) : 'not loaded'}`;
+  const panelStatus = spotVolumePriceAnomalyPanelStatus(section);
+  const rows = spotVolumePriceAnomalyRows(section);
+  let text;
+  if (signalSnapshotLoading && !section) {
+    text = 'Loading server-side spot volume and price anomalies…';
+  } else if (!section || panelStatus === 'warming') {
+    text = 'Spot prior-day volume baseline is warming. Known price-surge alerts remain visible, but no all-clear conclusion is available yet.';
+  } else if (panelStatus === 'unavailable') {
+    text = 'Spot volume and price anomaly data is unavailable. No alert or no-alert conclusion is available.';
+  } else if (panelStatus === 'partial') {
+    text = signalSnapshotError && String(section?.status || '').toLowerCase() === 'full'
+      ? `Spot volume and price anomaly refresh failed (${signalSnapshotError}). Last-known alerts remain visible, but the cached snapshot cannot support a no-alert conclusion.`
+      : 'Spot volume and price anomaly coverage is Partial. Known alerts remain visible; missing spot, history or perpetual coverage cannot support a no-alert conclusion.';
+  } else if (!rows.length) {
+    text = 'No qualifying RWA spot volume or price anomalies in this snapshot';
+  } else {
+    text = 'Server-side RWA spot volume and price anomaly classification is Full.';
+  }
+  host.className = `listing-monitor-banner ${panelStatus === 'full' ? '' : panelStatus}`.trim();
+  host.textContent = text;
+}
+
+function renderSpotVolumePriceAnomalySources(section) {
+  const host = document.getElementById('spotVolumePriceAnomalySources');
+  if (!host) return;
+  const sourceNames = ['gate','kraken','bitget','binance','okx'];
+  host.innerHTML = sourceNames.map(name => {
+    const source = section?.sources?.[name] || {};
+    const status = ['full','partial','unavailable'].includes(String(source.status || '').toLowerCase())
+      ? String(source.status).toLowerCase()
+      : 'unavailable';
+    const listingCount = numberOrNull(source.listingCount);
+    const marketFieldCount = numberOrNull(source.marketFieldCount);
+    const priceFieldCount = numberOrNull(source.priceFieldCount);
+    const warnings = Array.isArray(source.warnings) ? source.warnings.map(String).filter(Boolean) : [];
+    const coverage = listingCount === null || marketFieldCount === null || priceFieldCount === null
+      ? 'coverage unavailable'
+      : `Vol ${Math.max(0,Math.trunc(marketFieldCount))}/${Math.max(0,Math.trunc(listingCount))} · Price ${Math.max(0,Math.trunc(priceFieldCount))}/${Math.max(0,Math.trunc(listingCount))}`;
+    return `<span class="spot-anomaly-source" title="${escapeHtml(warnings.join(' · ') || coverage)}"><strong>${escapeHtml(spotVolumePriceAnomalyVenueLabel(name))}</strong>${dataStatusBadge(status)}<span>${escapeHtml(coverage)}</span></span>`;
+  }).join('');
+}
+
+function renderSpotVolumePriceAnomalyTable(section) {
+  const host = document.getElementById('spotVolumePriceAnomalyTableRegion');
+  const count = document.getElementById('spotVolumePriceAnomalyResultCount');
+  const moreWrap = document.getElementById('spotVolumePriceAnomalyMoreWrap');
+  const more = document.getElementById('spotVolumePriceAnomalyMore');
+  if (!host || !count || !moreWrap || !more) return;
+  const allRows = spotVolumePriceAnomalyRows(section);
+  const rows = filteredSpotVolumePriceAnomalyRows(section);
+  const visible = rows.slice(0, spotVolumePriceAnomalyExpanded ? 100 : 50);
+  count.textContent = section ? `${visible.length} of ${rows.length}` : '';
+  if (!rows.length) {
+    const panelStatus = spotVolumePriceAnomalyPanelStatus(section);
+    let title, detail;
+    if (!section) {
+      title = 'Open Signal Radar to load';
+      detail = 'This section displays only server-classified spot volume or price anomalies above the liquidity floor.';
+    } else if (allRows.length) {
+      title = 'No known spot anomalies match the current filters';
+      detail = panelStatus === 'full'
+        ? 'Adjust the trigger, category, spot venue, perpetual status, data status or search filters.'
+        : 'Adjust the filters. Coverage is incomplete, so this is not a no-alert conclusion.';
+    } else if (panelStatus === 'full') {
+      title = 'No qualifying RWA spot anomalies in this snapshot';
+      detail = 'All monitored venue instruments were evaluated after the $500K current-volume floor.';
+    } else if (panelStatus === 'partial') {
+      title = 'Spot anomaly coverage is Partial';
+      detail = 'Known alerts remain visible, but incomplete spot, history or perpetual coverage prevents an all-clear conclusion.';
+    } else if (panelStatus === 'unavailable') {
+      title = 'Spot anomaly data is unavailable';
+      detail = 'No alert or no-alert conclusion is available.';
+    } else {
+      title = 'Spot prior-day volume baseline is warming';
+      detail = 'Price-surge alerts can appear immediately; volume-ratio alerts require a comparable prior-day anchor.';
+    }
+    host.innerHTML = `<div class="radar-empty"><div class="radar-empty-title">${escapeHtml(title)}</div><div class="radar-empty-detail">${escapeHtml(detail)}</div></div>`;
+    moreWrap.style.display = 'none';
+    return;
+  }
+  const htmlRows = visible.map(({ row, serverIndex }) => {
+    const identity = spotVolumePriceAnomalyIdentity(row);
+    const rank = numberOrNull(row?.rank) ?? serverIndex + 1;
+    const trigger = spotVolumePriceAnomalyTrigger(row);
+    const triggerLabel = trigger === 'volume_spike' ? 'VOLUME ≥ 3×' : trigger === 'price_surge' ? 'PRICE ≥ 15%' : 'BOTH';
+    const triggerClass = trigger.replace('_','-');
+    const currentVolume = spotVolumePriceAnomalyValue(row,'currentVolumeUsd');
+    const yesterdayVolume = spotVolumePriceAnomalyValue(row,'yesterdayVolumeUsd');
+    const ratio = spotVolumePriceAnomalyValue(row,'volumeRatio');
+    const change = spotVolumePriceAnomalyValue(row,'priceChange24hPct');
+    const perp = spotVolumePriceAnomalyPerpCoverage(row);
+    const fieldStatus = row?.fieldStatus || {};
+    const currentStatus = radarSafeStatus(fieldStatus.currentVolume || fieldStatus.currentVolumeUsd || row?.status);
+    const yesterdayStatus = radarSafeStatus(fieldStatus.yesterdayVolume || fieldStatus.yesterdayVolumeUsd);
+    const ratioStatus = radarSafeStatus(fieldStatus.volumeRatio || row?.status);
+    const changeStatus = radarSafeStatus(fieldStatus.priceChange || fieldStatus.priceChange24hPct || row?.status);
+    const contractHtml = perp.contracts.map(contract => `<div class="spot-anomaly-contract"><strong>${escapeHtml(spotVolumePriceAnomalyVenueLabel(contract.venue))}</strong> · <span data-i18n-skip>${escapeHtml(contract.venueSymbol)}</span>${contract.instrumentType ? ` · ${escapeHtml(contract.instrumentType)}` : ''}</div>`).join('');
+    const perpHtml = perp.listed === true
+      ? `<div class="spot-anomaly-perp-head">Listed · ${perp.contracts.length} contract${perp.contracts.length === 1 ? '' : 's'} ${dataStatusBadge(perp.status)}</div><div class="spot-anomaly-contracts">${contractHtml}</div>`
+      : perp.listed === false
+        ? `<div class="spot-anomaly-unlisted">No perpetual listing · ${dataStatusBadge(perp.status)}</div>`
+        : `<div class="spot-anomaly-unlisted">Perpetual coverage unknown · ${dataStatusBadge(perp.status)}</div>`;
+    const changeText = change === null ? '—' : `${change >= 0 ? '+' : ''}${change.toFixed(2)}%`;
+    return `<tr class="radar-row volume-anomaly-row" ${assetIntelligenceTriggerAttrs(identity.symbol, identity.category, 'spot volume and price anomalies')}>
+      <td><div class="radar-asset-symbol"><span class="radar-rank">#${escapeHtml(rank)}</span> <span data-i18n-skip>${escapeHtml(identity.symbol)}</span></div><div class="radar-asset-meta"><span class="radar-category">${escapeHtml(identity.category)}</span>${row?.name ? `<span data-i18n-skip>${escapeHtml(row.name)}</span>` : ''}</div><div class="spot-anomaly-instrument"><strong>${escapeHtml(spotVolumePriceAnomalyVenueLabel(identity.venue))}</strong> · <span data-i18n-skip>${escapeHtml(identity.venueSymbol)}</span></div></td>
+      <td><div class="spot-anomaly-triggers"><span class="spot-anomaly-trigger ${triggerClass} i18n-ui-token">${escapeHtml(triggerLabel)}</span></div><div class="radar-baseline">OR condition · server classified</div></td>
+      <td><div class="radar-value-status"><span>${fmtVolume(currentVolume)}</span>${dataStatusBadge(currentStatus)}</div></td>
+      <td><div class="radar-value-status"><span>${fmtVolume(yesterdayVolume)}</span>${dataStatusBadge(yesterdayStatus)}</div></td>
+      <td><div class="volume-anomaly-ratio">${ratio === null ? '—' : `${ratio.toFixed(2)}×`}</div><div class="radar-baseline">${dataStatusBadge(ratioStatus)}</div></td>
+      <td><div class="volume-anomaly-ratio">${changeText}</div><div class="radar-baseline">${dataStatusBadge(changeStatus)}</div></td>
+      <td class="spot-anomaly-perp">${perpHtml}</td>
+      <td><div>${dataStatusBadge(spotVolumePriceAnomalyRowStatus(row))}</div><div class="radar-baseline">Liquidity floor · $500K</div></td>
+    </tr>`;
+  }).join('');
+  host.innerHTML = `<div class="radar-table-wrap"><table class="radar-table volume-anomaly-table spot-anomaly-table"><thead><tr><th>Asset / Spot Instrument</th><th>Trigger</th><th>Current 24h Volume</th><th>Prior-day 24h Anchor</th><th>Volume Ratio</th><th>24h Price Gain</th><th>Perpetual Contracts</th><th>Data Status</th></tr></thead><tbody>${htmlRows}</tbody></table></div>`;
+  moreWrap.style.display = rows.length > 50 ? 'block' : 'none';
+  more.setAttribute('aria-expanded', String(spotVolumePriceAnomalyExpanded));
+  more.setAttribute('aria-controls', 'spotVolumePriceAnomalyTableRegion');
+  more.textContent = spotVolumePriceAnomalyExpanded ? `Less · ${visible.length} / ${rows.length}` : `More · ${visible.length} / ${Math.min(rows.length,100)}`;
+}
+
+function renderSpotVolumePriceAnomalies(payload) {
+  const section = spotVolumePriceAnomalyPayload(payload);
+  if (section) updateSpotVolumePriceAnomalyFilterOptions(section);
+  renderSpotVolumePriceAnomalySummary(section);
+  renderSpotVolumePriceAnomalyStatus(section);
+  renderSpotVolumePriceAnomalySources(section);
+  renderSpotVolumePriceAnomalyTable(section);
+}
+
 function renderRadarStatus(payload, indexedRows) {
   const host = document.getElementById('radarStatus');
   if (!host) return;
@@ -9040,6 +9580,7 @@ function renderSignalRadar() {
   renderRadarMeta(payload, indexedRows);
   renderRadarKpis(payload, indexedRows);
   renderPerpVolumeAnomalies(payload);
+  renderSpotVolumePriceAnomalies(payload);
   renderCompetitorListings();
   renderRadarTable(payload, indexedRows);
 }
@@ -9068,6 +9609,12 @@ async function loadSignalSnapshot(force = false) {
       if (!perpVolumeAnomalyContractValid(payload)) {
         console.warn('[Signal Radar] perpetual volume anomaly section unavailable or invalid');
         payload.perpVolumeAnomalies = unavailablePerpVolumeAnomalySection(payload);
+      }
+      // Keep this additive child isolated too: invalid or legacy-missing Spot
+      // anomaly data must never take down the existing Radar or Perp panel.
+      if (!spotVolumePriceAnomalyContractValid(payload)) {
+        console.warn('[Signal Radar] spot volume and price anomaly section unavailable or invalid');
+        payload.spotVolumePriceAnomalies = unavailableSpotVolumePriceAnomalySection(payload);
       }
       signalSnapshotCache = { receivedAt:Date.now(), payload };
       signalSnapshotFailures = 0;
@@ -9152,6 +9699,35 @@ function setPerpVolumeAnomalySort(value) {
 
 function showMorePerpVolumeAnomalies() {
   perpVolumeAnomalyExpanded = !perpVolumeAnomalyExpanded;
+  renderSignalRadar();
+}
+
+function setSpotVolumePriceAnomalyFilter(key, value) {
+  if (!['trigger','category','venue','perp','status'].includes(key)) return;
+  const normalized = String(value || 'all').toLowerCase();
+  if (key === 'trigger') spotVolumePriceAnomalyFilter.trigger = ['all','volume_spike','price_surge','both'].includes(normalized) ? normalized : 'all';
+  else if (key === 'perp') spotVolumePriceAnomalyFilter.perp = ['all','listed','not-listed','unknown'].includes(normalized) ? normalized : 'all';
+  else if (key === 'status') spotVolumePriceAnomalyFilter.status = ['all','full','partial','estimated','unavailable'].includes(normalized) ? normalized : 'all';
+  else spotVolumePriceAnomalyFilter[key] = normalized || 'all';
+  spotVolumePriceAnomalyExpanded = false;
+  renderSignalRadar();
+}
+
+function setSpotVolumePriceAnomalySearch(value) {
+  spotVolumePriceAnomalyFilter.search = String(value || '');
+  spotVolumePriceAnomalyExpanded = false;
+  renderSignalRadar();
+}
+
+function setSpotVolumePriceAnomalySort(value) {
+  const normalized = String(value || 'priority').toLowerCase();
+  spotVolumePriceAnomalyFilter.sort = ['priority','ratio','change','volume','perp','asset'].includes(normalized) ? normalized : 'priority';
+  spotVolumePriceAnomalyExpanded = false;
+  renderSignalRadar();
+}
+
+function showMoreSpotVolumePriceAnomalies() {
+  spotVolumePriceAnomalyExpanded = !spotVolumePriceAnomalyExpanded;
   renderSignalRadar();
 }
 

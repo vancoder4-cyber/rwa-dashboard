@@ -24,6 +24,13 @@ import {
   PERP_VOLUME_HIGH_FREQUENCY_MIN_ELIGIBLE_DAYS,
   PERP_VOLUME_HISTORY_DAYS,
 } from './_lib/volume-anomaly.js';
+import {
+  SPOT_ANOMALY_FORMULA_VERSION,
+  SPOT_ANOMALY_HISTORY_DAYS,
+  SPOT_ANOMALY_HISTORY_NAMESPACE,
+  SPOT_ANOMALY_SOURCE_NAMES,
+  SPOT_ANOMALY_THRESHOLDS,
+} from './_lib/spot-volume-price-anomaly.js';
 import { fetchJsonWithPolicy, fetchWithPolicy, mapWithConcurrency } from './_lib/upstream.js';
 
 export const config = { regions: ['sin1'], maxDuration: 60 };
@@ -47,6 +54,18 @@ const SIGNAL_SNAPSHOT_STATUSES = new Set(['full', 'partial']);
 const VOLUME_ANOMALY_STATUSES = new Set(['full', 'partial', 'warming', 'unavailable']);
 const RWA_SIGNAL_CATEGORIES = new Set(['equity', 'etf', 'commodity', 'index', 'fx', 'bond', 'pre-ipo']);
 const SIGNAL_VENUES = new Set(['gate', 'binance', 'bitget', 'tradexyz', 'okx']);
+const SPOT_ANOMALY_VENUES = new Set(['gate', 'kraken', 'bitget', 'binance', 'okx']);
+const SPOT_ANOMALY_FIELD_STATUSES = new Set(['full', 'partial', 'estimated', 'unavailable']);
+const SPOT_ANOMALY_SECTION_STATUSES = new Set(['full', 'partial', 'warming', 'unavailable']);
+const SPOT_ANOMALY_PERSISTENCE_STATUSES = new Set(['partial', 'unavailable']);
+const SPOT_ANOMALY_SOURCE_STATUSES = new Set(['full', 'partial', 'unavailable']);
+const SPOT_ANOMALY_WRITE_STATUSES = new Set([
+  'stored',
+  'read-only',
+  'skipped-incomplete-sources',
+  'unavailable',
+]);
+const SPOT_ANOMALY_USD_QUOTES = new Set(['USD', 'USDT']);
 const SIGNAL_SNAPSHOT_MAX_AGE_MS = 2 * 60 * 60 * 1_000;
 const SIGNAL_SNAPSHOT_FUTURE_TOLERANCE_MS = 5 * 60 * 1_000;
 const SIGNAL_VOLUME_DAILY_NAMESPACE = 'rwa-signal-volume-daily-v1';
@@ -327,6 +346,270 @@ function volumeAnomalyRowValid(row) {
   return ratio <= PERP_VOLUME_ANOMALY_THRESHOLDS.down;
 }
 
+function exactSpotAnomalySources(section) {
+  const sources = section?.sources;
+  if (!sources || typeof sources !== 'object' || Array.isArray(sources)) return false;
+  const sourceKeys = Object.keys(sources);
+  if (sourceKeys.length !== SPOT_ANOMALY_SOURCE_NAMES.length ||
+      new Set(sourceKeys).size !== sourceKeys.length ||
+      !SPOT_ANOMALY_SOURCE_NAMES.every(sourceKey => sourceKeys.includes(sourceKey))) {
+    return false;
+  }
+  return SPOT_ANOMALY_SOURCE_NAMES.every(sourceKey => {
+    const source = sources[sourceKey];
+    return source && typeof source === 'object' &&
+      SPOT_ANOMALY_SOURCE_STATUSES.has(String(source.status || '').toLowerCase()) &&
+      Number.isInteger(source.listingCount) && source.listingCount >= 0 &&
+      Number.isInteger(source.marketFieldCount) && source.marketFieldCount >= 0 &&
+      source.marketFieldCount <= source.listingCount &&
+      Number.isInteger(source.priceFieldCount) && source.priceFieldCount >= 0 &&
+      source.priceFieldCount <= source.listingCount &&
+      (sourceKey !== 'kraken' || source.priceFieldCount === 0) &&
+      (source.status !== 'full' || (source.listingCount > 0 &&
+        source.marketFieldCount === source.listingCount &&
+        (sourceKey === 'kraken' || source.priceFieldCount === source.listingCount))) &&
+      Array.isArray(source.warnings) && source.warnings.every(warning => typeof warning === 'string');
+  });
+}
+
+function exactUtcDayMs(value) {
+  if (typeof value !== 'string') return null;
+  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00.000Z` : value;
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) && parsed % UTC_DAY_MS === 0 ? parsed : null;
+}
+
+function spotAnomalyPerpCoverageValid(row) {
+  const coverage = row?.perpCoverage;
+  if (!coverage || typeof coverage !== 'object' || Array.isArray(coverage)) return false;
+  const status = String(coverage.status || '').toLowerCase();
+  if (!['full', 'partial', 'unavailable'].includes(status)) return false;
+  if (![true, false, null].includes(coverage.listed) || !Array.isArray(coverage.contracts)) return false;
+  const contractKeys = [];
+  for (const contract of coverage.contracts) {
+    const venue = String(contract?.venue || '').toLowerCase();
+    const venueSymbol = String(contract?.venueSymbol || '');
+    const instrumentType = String(contract?.instrumentType || '');
+    if (!SIGNAL_VENUES.has(venue) ||
+        !/^[A-Z0-9][A-Z0-9._:/-]{0,79}$/.test(venueSymbol) ||
+        !/^[A-Za-z0-9][A-Za-z0-9 ._:/-]{0,39}$/.test(instrumentType)) return false;
+    contractKeys.push(`${venue}:${venueSymbol}`);
+  }
+  if (new Set(contractKeys).size !== contractKeys.length) return false;
+  if (coverage.listed === true) return coverage.contracts.length > 0;
+  if (coverage.listed === false) return status === 'full' && coverage.contracts.length === 0;
+  return status !== 'full' && coverage.contracts.length === 0;
+}
+
+function spotAnomalyRowValid(row, sources) {
+  const category = signalCategory(row?.category);
+  const symbol = String(row?.symbol || '').trim().toUpperCase();
+  const venue = String(row?.venue || '').trim().toLowerCase();
+  const venueSymbol = String(row?.venueSymbol || '').trim().toUpperCase();
+  const quote = String(row?.quote || '').trim().toUpperCase();
+  const currentVolume = row?.currentVolumeUsd;
+  const yesterdayVolume = row?.yesterdayVolumeUsd;
+  const ratio = row?.volumeRatio;
+  const priceChange = row?.priceChange24hPct;
+  const volumeComparable = Number.isFinite(yesterdayVolume) && yesterdayVolume > 0;
+  const expectedRatio = volumeComparable
+    ? Math.round((currentVolume / yesterdayVolume) * 10_000) / 10_000
+    : null;
+  const ratioCoherent = expectedRatio === null
+    ? ratio === null
+    : Number.isFinite(ratio) && Math.abs(ratio - expectedRatio) <= 0.0001;
+  const expectedVolumeTriggered = Number.isFinite(ratio) && ratio >= SPOT_ANOMALY_THRESHOLDS.volumeRatio;
+  const expectedPriceTriggered = Number.isFinite(priceChange) &&
+    priceChange >= SPOT_ANOMALY_THRESHOLDS.priceRisePct;
+  const expectedTrigger = expectedVolumeTriggered && expectedPriceTriggered
+    ? 'both'
+    : expectedVolumeTriggered ? 'volume_spike' : expectedPriceTriggered ? 'price_surge' : null;
+  const fieldStatus = row?.fieldStatus;
+  const rowStatus = String(row?.status || '').toLowerCase();
+  const reasonCodes = row?.reasonCodes;
+  const currentVolumeStatus = String(fieldStatus?.currentVolume || '').toLowerCase();
+  const yesterdayVolumeStatus = String(fieldStatus?.yesterdayVolume || '').toLowerCase();
+  const volumeRatioStatus = String(fieldStatus?.volumeRatio || '').toLowerCase();
+  const priceChangeStatus = String(fieldStatus?.priceChange || '').toLowerCase();
+  const perpStatus = String(row?.perpCoverage?.status || '').toLowerCase();
+  const expectedRowStatus = String(sources?.[venue]?.status || '').toLowerCase() !== 'full' || perpStatus !== 'full'
+    ? 'partial'
+    : expectedVolumeTriggered ? 'estimated' : 'full';
+  const expectedReasonCodes = [
+    ...(expectedVolumeTriggered ? ['VOLUME_SPIKE'] : []),
+    ...(expectedPriceTriggered ? ['PRICE_SURGE'] : []),
+    ...(yesterdayVolume === 0 ? ['ZERO_PRIOR_VOLUME'] : []),
+    ...(perpStatus !== 'full' ? ['PERP_COVERAGE_INCOMPLETE'] : []),
+  ];
+
+  if (!Number.isInteger(row?.rank) || row.rank <= 0 ||
+      !RWA_SIGNAL_CATEGORIES.has(category) || !/^[A-Z0-9][A-Z0-9.-]{0,39}$/.test(symbol) ||
+      !SPOT_ANOMALY_VENUES.has(venue) || !/^[A-Z0-9][A-Z0-9._:/-]{0,79}$/.test(venueSymbol) ||
+      !SPOT_ANOMALY_USD_QUOTES.has(quote) ||
+      row?.listingKey !== `spot:${venue}:${venueSymbol}` || row?.assetKey !== `${category}:${symbol}` ||
+      !Number.isFinite(currentVolume) || currentVolume < SPOT_ANOMALY_THRESHOLDS.minCurrentVolumeUsd ||
+      !(yesterdayVolume === null || (Number.isFinite(yesterdayVolume) && yesterdayVolume >= 0)) ||
+      !(priceChange === null || Number.isFinite(priceChange)) || !ratioCoherent ||
+      row?.volumeTriggered !== expectedVolumeTriggered || row?.priceTriggered !== expectedPriceTriggered ||
+      row?.trigger !== expectedTrigger || expectedTrigger === null ||
+      !SPOT_ANOMALY_FIELD_STATUSES.has(rowStatus) || rowStatus !== expectedRowStatus ||
+      !fieldStatus || typeof fieldStatus !== 'object' || Array.isArray(fieldStatus) ||
+      !['full', 'estimated'].includes(currentVolumeStatus) ||
+      yesterdayVolumeStatus !== (yesterdayVolume === null ? 'unavailable' : 'estimated') ||
+      volumeRatioStatus !== (ratio === null ? 'unavailable' : 'estimated') ||
+      priceChangeStatus !== (priceChange === null ? 'unavailable' : 'full') ||
+      String(fieldStatus.perpCoverage || '').toLowerCase() !== String(row?.perpCoverage?.status || '').toLowerCase() ||
+      !spotAnomalyPerpCoverageValid(row) || !Array.isArray(reasonCodes) ||
+      new Set(reasonCodes).size !== reasonCodes.length ||
+      reasonCodes.some(code => typeof code !== 'string' || !/^[A-Z0-9_]{2,80}$/.test(code)) ||
+      reasonCodes.length !== expectedReasonCodes.length ||
+      expectedReasonCodes.some(code => !reasonCodes.includes(code))) {
+    return false;
+  }
+  return venue !== 'kraken' || (priceChange === null && fieldStatus.priceChange === 'unavailable' &&
+    row.priceTriggered === false && row.trigger !== 'price_surge' && row.trigger !== 'both');
+}
+
+function validateSpotVolumePriceAnomalies(section, generatedAtMs) {
+  const status = String(section?.status || '').toLowerCase();
+  const formulaValid = section?.formulaVersion === SPOT_ANOMALY_FORMULA_VERSION;
+  const generatedAt = Date.parse(section?.generatedAt);
+  const timestampValid = Number.isFinite(generatedAt) && Number.isFinite(generatedAtMs) &&
+    Math.abs(generatedAt - generatedAtMs) <= 1_000;
+  const thresholds = section?.thresholds;
+  const thresholdsValid = thresholds?.volumeRatio === SPOT_ANOMALY_THRESHOLDS.volumeRatio &&
+    thresholds?.priceRisePct === SPOT_ANOMALY_THRESHOLDS.priceRisePct &&
+    thresholds?.minCurrentVolumeUsd === SPOT_ANOMALY_THRESHOLDS.minCurrentVolumeUsd &&
+    String(thresholds?.logic || '').toLowerCase() === 'or';
+  const methodology = section?.methodology;
+  const methodologyValid = methodology && typeof methodology === 'object' && !Array.isArray(methodology) &&
+    methodology.grain === 'exact-venue-instrument' &&
+    ['currentVolume', 'priorVolume', 'volumeComparison', 'priceChange', 'krakenPriceChange']
+      .every(key => typeof methodology[key] === 'string' && methodology[key].length > 0);
+  const sourcesValid = exactSpotAnomalySources(section);
+  const sourceValues = sourcesValid ? SPOT_ANOMALY_SOURCE_NAMES.map(key => section.sources[key]) : [];
+  const observedAvailableSources = sourceValues.filter(source => source.status !== 'unavailable').length;
+  const observedFullSources = sourceValues.filter(source => source.status === 'full').length;
+  const observedVerifiedListings = sourceValues.reduce((sum, source) => sum + source.listingCount, 0);
+  const coverage = section?.coverage;
+  const coverageCountKeys = [
+    'verifiedListings', 'quarantinedListings', 'identityConflicts', 'volumeAvailableListings',
+    'priorVolumeAvailableListings', 'priceAvailableListings', 'liquidityEligibleListings',
+    'volumeComparableListings', 'priceComparableListings',
+  ];
+  const coverageCountsValid = coverageCountKeys.every(key => Number.isInteger(coverage?.[key]) && coverage[key] >= 0);
+  const coverageValid = coverageCountsValid && coverage?.expectedSources === SPOT_ANOMALY_SOURCE_NAMES.length &&
+    coverage?.availableSources === observedAvailableSources && coverage?.fullSources === observedFullSources &&
+    coverage?.verifiedListings + coverage?.quarantinedListings === observedVerifiedListings &&
+    coverage.volumeAvailableListings <= coverage.verifiedListings &&
+    coverage.priorVolumeAvailableListings <= coverage.volumeAvailableListings &&
+    coverage.priceAvailableListings <= coverage.verifiedListings &&
+    coverage.liquidityEligibleListings <= coverage.volumeAvailableListings &&
+    coverage.volumeComparableListings <= coverage.liquidityEligibleListings &&
+    coverage.priceComparableListings <= coverage.liquidityEligibleListings;
+  const spotIdentityConflicts = Number.isInteger(coverage?.identityConflicts) ? coverage.identityConflicts : null;
+  const identityConflict = spotIdentityConflicts !== null && spotIdentityConflicts > 0;
+
+  const rows = Array.isArray(section?.rows) ? section.rows : null;
+  const invalidRows = rows ? rows.filter(row => !spotAnomalyRowValid(row, section?.sources)) : [];
+  const ranks = rows ? rows.map(row => row?.rank) : [];
+  const listingKeys = rows ? rows.map(row => row?.listingKey) : [];
+  const rowsValid = rows !== null && invalidRows.length === 0 && rows.length <= 100 &&
+    new Set(listingKeys).size === listingKeys.length &&
+    new Set(ranks).size === ranks.length && ranks.every((rank, index) => rank === index + 1);
+  const observedRowCounts = rows ? {
+    volumeSpike:rows.filter(row => row?.volumeTriggered === true).length,
+    priceSurge:rows.filter(row => row?.priceTriggered === true).length,
+    both:rows.filter(row => row?.trigger === 'both').length,
+    perpListed:rows.filter(row => row?.perpCoverage?.listed === true).length,
+  } : null;
+  const counts = section?.counts;
+  const countKeys = ['alerts', 'volumeSpike', 'priceSurge', 'both', 'perpListed'];
+  const declaredCountsValid = countKeys.every(key => Number.isInteger(counts?.[key]) && counts[key] >= 0) &&
+    counts.alerts === counts.volumeSpike + counts.priceSurge - counts.both &&
+    counts.both <= Math.min(counts.volumeSpike, counts.priceSurge) && counts.perpListed <= counts.alerts;
+  const rowCountsValid = observedRowCounts !== null && rows.length === Math.min(counts?.alerts ?? -1, 100) &&
+    ['volumeSpike', 'priceSurge', 'both', 'perpListed'].every(key =>
+      observedRowCounts[key] <= counts[key] && (counts.alerts > 100 || observedRowCounts[key] === counts[key]));
+  const countsValid = declaredCountsValid && rowCountsValid &&
+    Number.isInteger(counts?.filteredLowLiquidity) && counts.filteredLowLiquidity >= 0 &&
+    Number.isInteger(counts?.filterUnknown) && counts.filterUnknown >= 0 &&
+    coverageValid && counts.filteredLowLiquidity + counts.filterUnknown +
+      coverage.liquidityEligibleListings === coverage.verifiedListings &&
+    counts.alerts <= coverage.liquidityEligibleListings;
+
+  const generatedDay = Number.isFinite(generatedAtMs)
+    ? Math.floor(generatedAtMs / UTC_DAY_MS) * UTC_DAY_MS
+    : null;
+  const history = section?.history;
+  const historyStatus = String(history?.status || '').toLowerCase();
+  const storedDays = history?.storedDays;
+  const priorDayMs = history?.priorDay === null ? null : exactUtcDayMs(history?.priorDay);
+  const oldestAtMs = history?.oldestAt === null ? null : exactUtcDayMs(history?.oldestAt);
+  const newestAtMs = history?.newestAt === null ? null : exactUtcDayMs(history?.newestAt);
+  const emptyHistory = storedDays === 0 && history?.priorDay === null &&
+    history?.oldestAt === null && history?.newestAt === null;
+  const populatedHistory = Number.isInteger(storedDays) && storedDays > 0 &&
+    oldestAtMs !== null && newestAtMs !== null && oldestAtMs <= newestAtMs && newestAtMs <= generatedDay &&
+    oldestAtMs >= generatedDay - (SPOT_ANOMALY_HISTORY_DAYS - 1) * UTC_DAY_MS &&
+    newestAtMs - oldestAtMs >= (storedDays - 1) * UTC_DAY_MS;
+  const priorDayValid = history?.priorDay === null || priorDayMs === generatedDay - UTC_DAY_MS;
+  const historyValid = history && SPOT_ANOMALY_SECTION_STATUSES.has(historyStatus) &&
+    history.namespace === SPOT_ANOMALY_HISTORY_NAMESPACE && history.cadence === 'utc-daily-sealed' &&
+    history.retentionDays === SPOT_ANOMALY_HISTORY_DAYS && Number.isInteger(storedDays) &&
+    storedDays >= 0 && storedDays <= SPOT_ANOMALY_HISTORY_DAYS && (emptyHistory || populatedHistory) &&
+    priorDayValid && (historyStatus !== 'full' || priorDayMs !== null);
+
+  const persistence = section?.persistence;
+  const persistenceStatus = String(persistence?.status || '').toLowerCase();
+  const writeStatus = String(persistence?.writeStatus || '').toLowerCase();
+  const persistenceReadStateValid =
+    (persistenceStatus === 'partial' && writeStatus === 'read-only' && persistence?.error === null) ||
+    (persistenceStatus === 'unavailable' && writeStatus === 'unavailable' &&
+      typeof persistence?.error === 'string' && persistence.error.length > 0);
+  const persistenceValid = persistence?.mode === 'vercel-runtime-cache' &&
+    SPOT_ANOMALY_PERSISTENCE_STATUSES.has(persistenceStatus) &&
+    persistence?.namespace === SPOT_ANOMALY_HISTORY_NAMESPACE &&
+    persistence?.writer?.requested === false && persistence?.writer?.succeeded === null &&
+    SPOT_ANOMALY_WRITE_STATUSES.has(writeStatus) && persistenceReadStateValid;
+
+  const statusValid = SPOT_ANOMALY_SECTION_STATUSES.has(status);
+  const allSourcesFull = sourcesValid && observedFullSources === SPOT_ANOMALY_SOURCE_NAMES.length;
+  const statusCoherent = statusValid &&
+    (status !== 'full' || (allSourcesFull && !identityConflict && historyStatus === 'full' &&
+      counts?.filterUnknown === 0 &&
+      coverage?.volumeComparableListings === coverage?.liquidityEligibleListings &&
+      coverage?.priceComparableListings === coverage?.liquidityEligibleListings)) &&
+    (status !== 'warming' || historyStatus === 'warming') &&
+    (status !== 'unavailable' || rows?.length === 0);
+  const cryptoCategoryCount = rows
+    ? rows.filter(row => !RWA_SIGNAL_CATEGORIES.has(signalCategory(row?.category))).length
+    : 0;
+  const contractValid = Boolean(section) && formulaValid && timestampValid && thresholdsValid &&
+    methodologyValid && sourcesValid && coverageValid && rowsValid && countsValid && historyValid &&
+    persistenceValid && statusCoherent && cryptoCategoryCount === 0;
+  return {
+    contractValid,
+    status,
+    formulaValid,
+    timestampValid,
+    thresholdsValid,
+    methodologyValid,
+    sourcesValid,
+    allSourcesFull,
+    coverageValid,
+    countsValid,
+    historyValid,
+    persistenceValid,
+    statusCoherent,
+    identityConflicts:spotIdentityConflicts,
+    identityConflict,
+    rows:rows?.length ?? null,
+    invalidRows:invalidRows.length,
+    cryptoCategoryCount,
+  };
+}
+
 export function validateSignalRadarSnapshot(payload, now = Date.now()) {
   const generatedAtMs = Date.parse(payload?.generatedAt);
   const ageMs = Number.isFinite(generatedAtMs) ? now - generatedAtMs : null;
@@ -430,7 +713,26 @@ export function validateSignalRadarSnapshot(payload, now = Date.now()) {
   const invalidVolumeCategories = volumeRows
     ? volumeRows.filter(row => !RWA_SIGNAL_CATEGORIES.has(signalCategory(row?.category)))
     : [];
-  const cryptoCategoryCount = invalidAssetCategories.length + invalidVolumeCategories.length;
+  const spotVolumePrice = validateSpotVolumePriceAnomalies(payload?.spotVolumePriceAnomalies, generatedAtMs);
+  const spotTopPersistence = persistence?.spotVolumePrice;
+  const spotTopPersistenceStatus = String(spotTopPersistence?.status || '').toLowerCase();
+  const spotTopWriteStatus = String(spotTopPersistence?.writeStatus || '').toLowerCase();
+  const spotTopReadStateValid =
+    (spotTopPersistenceStatus === 'partial' && spotTopWriteStatus === 'read-only' &&
+      spotTopPersistence?.error === null) ||
+    (spotTopPersistenceStatus === 'unavailable' && spotTopWriteStatus === 'unavailable' &&
+      typeof spotTopPersistence?.error === 'string' && spotTopPersistence.error.length > 0);
+  const spotTopPersistenceValid = spotTopPersistence?.namespace === SPOT_ANOMALY_HISTORY_NAMESPACE &&
+    SPOT_ANOMALY_PERSISTENCE_STATUSES.has(spotTopPersistenceStatus) &&
+    spotTopPersistence?.retentionDays === SPOT_ANOMALY_HISTORY_DAYS &&
+    Number.isInteger(spotTopPersistence?.storedDays) && spotTopPersistence.storedDays >= 0 &&
+    spotTopPersistence.storedDays <= SPOT_ANOMALY_HISTORY_DAYS &&
+    spotTopPersistence.storedDays === payload?.spotVolumePriceAnomalies?.history?.storedDays &&
+    SPOT_ANOMALY_WRITE_STATUSES.has(spotTopWriteStatus) && spotTopReadStateValid &&
+    spotTopPersistence.status === payload?.spotVolumePriceAnomalies?.persistence?.status &&
+    spotTopPersistence.writeStatus === payload?.spotVolumePriceAnomalies?.persistence?.writeStatus;
+  const cryptoCategoryCount = invalidAssetCategories.length + invalidVolumeCategories.length +
+    spotVolumePrice.cryptoCategoryCount;
   const rowsValid = volumeRows !== null && invalidVolumeRows.length === 0 && uniqueVolumeRanks &&
     volumeRows.length <= readyAssets &&
     (volumeStatus !== 'unavailable' || volumeRows.length === 0);
@@ -457,20 +759,30 @@ export function validateSignalRadarSnapshot(payload, now = Date.now()) {
     thresholdsValid && volumeStatusValid && monitoredCoverageValid && readinessValid && countsValid &&
     historyStateValid && persistenceContractValid && volumeStatusCoherent && rowsValid;
   const contractValid = schemaValid && sourcesValid && coverageValid && responseStatusValid &&
-    responseStatusCoherent && assetsValid && volumeContractValid;
-  const hardFailure = !contractValid || !fresh || identityConflict;
+    responseStatusCoherent && assetsValid && volumeContractValid && spotVolumePrice.contractValid &&
+    spotTopPersistenceValid;
+  const hardFailure = !contractValid || !fresh || identityConflict || spotVolumePrice.identityConflict ||
+    spotVolumePrice.status === 'unavailable';
   const warmingOrDegraded = responseStatus !== 'full' || volumeStatus !== 'full' ||
-    availableSources < expectedSources || persistence?.status === 'unavailable';
+    spotVolumePrice.status !== 'full' || availableSources < expectedSources ||
+    persistence?.status === 'unavailable';
   const status = hardFailure ? 'fail' : warmingOrDegraded ? 'warn' : 'pass';
 
   let reason = null;
   if (identityConflict) reason = `${identityConflicts} cross-category identity conflict(s) detected by Signal Radar`;
+  else if (spotVolumePrice.identityConflict) {
+    reason = `${spotVolumePrice.identityConflicts} Spot cross-category identity conflict(s) detected by Signal Radar`;
+  }
   else if (!schemaValid) reason = 'Signal Radar schema version is invalid';
   else if (!sourcesValid || !coverageValid || !responseStatusCoherent) {
     reason = 'Signal Radar five-source coverage or status contract is invalid';
   }
   else if (!fresh) reason = 'Signal Radar snapshot is older than two hours or has a future timestamp';
   else if (!volumeContractValid) reason = 'Perpetual volume anomaly contract or row semantics are invalid';
+  else if (!spotVolumePrice.contractValid || !spotTopPersistenceValid) {
+    reason = 'Spot volume/price anomaly contract, persistence, or row semantics are invalid';
+  }
+  else if (spotVolumePrice.status === 'unavailable') reason = 'Spot volume/price anomaly coverage is unavailable';
   else if (!assetsValid) reason = 'Signal Radar contains a non-RWA or Crypto category';
   else if (warmingOrDegraded) reason = 'Signal Radar or perpetual volume history is Warming, Partial, or Unavailable';
 
@@ -503,6 +815,8 @@ export function validateSignalRadarSnapshot(payload, now = Date.now()) {
     persistenceContractValid,
     volumeRows:Array.isArray(volumeRows) ? volumeRows.length : null,
     invalidVolumeRows:invalidVolumeRows.length,
+    spotVolumePrice,
+    spotTopPersistenceValid,
     cryptoCategoryCount,
     reason,
   };
@@ -516,14 +830,20 @@ async function probeSignalRadar(baseUrl) {
     const payload = await fetchJsonWithPolicy(
       `${baseUrl}/api/signal-snapshot`,
       { headers:{ Accept:'application/json' } },
-      { timeoutMs:20_000, retries:0 },
+      // A cold Signal snapshot gives the isolated Spot collector a 23-second
+      // absolute budget. Keep the read-only health probe above that valid
+      // ceiling so a slow-but-successful cold snapshot is not a false outage.
+      { timeoutMs:30_000, retries:0 },
     );
     const validation = validateSignalRadarSnapshot(payload);
     return checkResult('signal-radar-volume', validation.status, {
       latencyMs:Date.now() - startedAt,
       generatedAt:payload?.generatedAt || null,
       ...validation,
-    }, { critical:validation.identityConflict || validation.cryptoCategoryCount > 0 });
+    }, {
+      critical:validation.identityConflict || validation.spotVolumePrice?.identityConflict ||
+        validation.cryptoCategoryCount > 0 || validation.spotVolumePrice?.status === 'unavailable',
+    });
   } catch (error) {
     return checkResult('signal-radar-volume', 'fail', {
       latencyMs:Date.now() - startedAt,
