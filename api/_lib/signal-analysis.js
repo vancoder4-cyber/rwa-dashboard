@@ -176,6 +176,8 @@ export function aggregateSignalListings(listings, limit = SIGNAL_ASSET_LIMIT) {
         volumeMethod: String(row.volumeMethod || '').trim().toLowerCase() || null,
         volumeStatus: String(row.volumeStatus || '').trim().toLowerCase() || 'unavailable',
         openInterestUsd: finiteOrNull(row.openInterestUsd),
+        openInterestMethod: String(row.openInterestMethod || '').trim().toLowerCase() || null,
+        openInterestStatus: String(row.openInterestStatus || '').trim().toLowerCase() || 'unavailable',
         fundingAnnualizedPct: annualizedFundingPct(row),
         change24hPct: finiteOrNull(row.change24hPct),
       })),

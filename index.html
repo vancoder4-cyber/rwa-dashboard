@@ -594,6 +594,37 @@ th.op-col:hover { color:var(--foreground-dim) !important; }
 .spot-anomaly-contract { max-width:100%; color:var(--foreground-dim); font:500 8px/1.35 'JetBrains Mono',monospace; overflow-wrap:anywhere; }
 .spot-anomaly-contract strong { color:var(--foreground-sec); font-family:Inter,sans-serif; }
 .spot-anomaly-unlisted { color:var(--foreground-dim); font:650 9px/1.4 Inter,sans-serif; }
+.oi-liquidation-summary.alerts .listing-summary-value { color:#C62828; }
+.oi-liquidation-summary.oi .listing-summary-value { color:#0055CC; }
+.oi-liquidation-summary.proxy .listing-summary-value { color:#AF2D55; }
+.oi-liquidation-summary.positioning .listing-summary-value { color:#6D3CA3; }
+.oi-liquidation-table { min-width:1780px; }
+.oi-liquidation-table thead th:nth-child(2), .oi-liquidation-table tbody td:nth-child(2),
+.oi-liquidation-table thead th:nth-child(4), .oi-liquidation-table tbody td:nth-child(4),
+.oi-liquidation-table thead th:nth-child(8), .oi-liquidation-table tbody td:nth-child(8),
+.oi-liquidation-table thead th:nth-child(9), .oi-liquidation-table tbody td:nth-child(9),
+.oi-liquidation-table thead th:nth-child(10), .oi-liquidation-table tbody td:nth-child(10) { text-align:left; }
+.oi-liquidation-alerts { display:flex; align-items:center; flex-wrap:wrap; gap:4px; min-width:150px; }
+.oi-liquidation-alert { display:inline-flex; align-items:center; gap:5px; padding:3px 7px; border-radius:999px; font:800 8.5px/1 Inter,sans-serif; white-space:nowrap; }
+.oi-liquidation-alert::before { content:''; width:5px; height:5px; border-radius:50%; background:currentColor; }
+.oi-liquidation-alert.oi-rising { color:#0055CC; background:rgba(0,122,255,.09); }
+.oi-liquidation-alert.liquidation-proxy, .oi-liquidation-alert.large-liquidation-proxy { color:#C62828; background:rgba(255,59,48,.10); }
+.oi-history-closes { min-width:220px; display:flex; align-items:flex-end; gap:6px; }
+.oi-history-close { min-width:62px; padding:5px 6px; border:1px solid var(--border); border-radius:6px; background:rgba(255,255,255,.38); }
+.oi-history-day { color:var(--foreground-dim); font:600 7.5px/1.2 Inter,sans-serif; white-space:nowrap; }
+.oi-history-value { margin-top:3px; color:var(--foreground-sec); font:650 8.5px/1.2 'JetBrains Mono',monospace; white-space:nowrap; }
+.oi-trend { display:inline-flex; margin-top:4px; padding:2px 5px; border-radius:5px; font:750 8px/1.2 Inter,sans-serif; white-space:nowrap; }
+.oi-trend.rising { color:#248A3D; background:rgba(52,199,89,.09); }
+.oi-trend.not-rising { color:#9A6700; background:rgba(255,184,0,.10); }
+.oi-trend.warming, .oi-trend.unavailable { color:var(--foreground-dim); background:rgba(120,120,128,.08); }
+.oi-trader-ratio { min-width:270px; max-width:360px; }
+.oi-trader-bias { display:inline-flex; margin-top:4px; padding:2px 6px; border-radius:5px; font:750 8px/1.2 Inter,sans-serif; text-transform:capitalize; }
+.oi-trader-bias.bullish { color:#248A3D; background:rgba(52,199,89,.09); }
+.oi-trader-bias.bearish { color:#C62828; background:rgba(255,59,48,.09); }
+.oi-trader-bias.neutral { color:#9A6700; background:rgba(255,184,0,.10); }
+.oi-trader-bias.mixed { color:#6D3CA3; background:rgba(175,82,222,.10); }
+.oi-trader-bias.unavailable { color:var(--foreground-dim); background:rgba(120,120,128,.08); }
+.oi-liquidation-venues { min-width:150px; max-width:230px; white-space:normal; }
 .spot-vc-row { display:flex; justify-content:space-between; padding:4px 0; font-size:12px; }
 .spot-vc-row-label { color:var(--foreground-dim); }
 .spot-vc-row-val { font-family:'JetBrains Mono',monospace; font-weight:600; }
@@ -2202,6 +2233,62 @@ input[type="checkbox"] {
       </div>
       <div class="radar-more-wrap" id="spotVolumePriceAnomalyMoreWrap" style="display:none">
         <button type="button" class="radar-more" id="spotVolumePriceAnomalyMore" onclick="showMoreSpotVolumePriceAnomalies()">More · 50 / 100</button>
+      </div>
+    </section>
+
+    <section class="section-card volume-anomaly-monitor" id="oiLiquidationAnomalySection" aria-labelledby="oiLiquidationAnomalyTitle">
+      <div class="listing-monitor-head">
+        <div>
+          <h3 class="listing-monitor-title" id="oiLiquidationAnomalyTitle" aria-label="OI Positioning & Large-Liquidation Proxy">OI Positioning &amp; Large-Liquidation Proxy</h3>
+          <p class="listing-monitor-lede">Tracks server-classified open-interest positioning, completed-day OI trends and rapid OI drawdowns across verified RWA perpetual markets. “Large-liquidation proxy” is a deleveraging proxy—not a trade-by-trade liquidation feed.</p>
+        </div>
+        <div class="listing-monitor-asof" id="oiLiquidationAnomalyAsOf">Snapshot<br>not loaded</div>
+      </div>
+      <div class="listing-monitor-summary" id="oiLiquidationAnomalySummary" aria-live="polite"></div>
+      <div class="listing-monitor-banner warming" id="oiLiquidationAnomalyStatus">Open Signal Radar to load server-side OI positioning and large-liquidation proxy alerts.</div>
+      <div class="volume-anomaly-method" id="oiLiquidationAnomalyMethod">All alerts, trends and trader bias labels are supplied by the server. OI USD drawdown is also affected by mark-price changes, so the proxy cannot identify which long or short positions were liquidated and must not be read as actual large-liquidation prints.</div>
+      <div class="spot-anomaly-sources" id="oiLiquidationAnomalySources" aria-label="OI source observation coverage">OI sources not loaded.</div>
+      <div class="radar-toolbar">
+        <select class="radar-control" id="oiLiquidationAnomalyTypeFilter" aria-label="Filter OI and liquidation proxy alert type" onchange="setOiLiquidationAnomalyFilter('type',this.value)">
+          <option value="all">All OI alert types</option>
+        </select>
+        <select class="radar-control" id="oiLiquidationAnomalyCategoryFilter" aria-label="Filter OI and liquidation proxy category" onchange="setOiLiquidationAnomalyFilter('category',this.value)">
+          <option value="all">All categories</option>
+        </select>
+        <select class="radar-control" id="oiLiquidationAnomalyVenueFilter" aria-label="Filter OI and liquidation proxy venue" onchange="setOiLiquidationAnomalyFilter('venue',this.value)">
+          <option value="all">All venues</option>
+        </select>
+        <select class="radar-control" id="oiLiquidationAnomalyBiasFilter" aria-label="Filter Binance top trader bias" onchange="setOiLiquidationAnomalyFilter('bias',this.value)">
+          <option value="all">All trader biases</option>
+          <option value="bullish">Bullish</option>
+          <option value="bearish">Bearish</option>
+          <option value="neutral">Neutral</option>
+          <option value="mixed">Mixed</option>
+          <option value="unavailable">Unavailable</option>
+        </select>
+        <select class="radar-control" id="oiLiquidationAnomalyStatusFilter" aria-label="Filter OI and liquidation proxy data status" onchange="setOiLiquidationAnomalyFilter('status',this.value)">
+          <option value="all">All data statuses</option>
+          <option value="full">Full</option>
+          <option value="partial">Partial</option>
+          <option value="estimated">Estimated</option>
+          <option value="unavailable">Unavailable</option>
+        </select>
+        <select class="radar-control" id="oiLiquidationAnomalySort" aria-label="Sort OI and liquidation proxy alerts" onchange="setOiLiquidationAnomalySort(this.value)">
+          <option value="priority">Alert priority</option>
+          <option value="oi">Current OI</option>
+          <option value="drawdown">Peak drawdown</option>
+          <option value="volume">24h volume</option>
+          <option value="trader-ratio">Top trader ratio</option>
+          <option value="asset">Asset A–Z</option>
+        </select>
+        <input class="radar-control radar-search" id="oiLiquidationAnomalySearch" type="search" placeholder="Search OI and liquidation proxy alerts..." aria-label="Search OI and liquidation proxy alerts" oninput="setOiLiquidationAnomalySearch(this.value)">
+        <span class="radar-result-count" id="oiLiquidationAnomalyResultCount"></span>
+      </div>
+      <div id="oiLiquidationAnomalyTableRegion" aria-live="polite">
+        <div class="radar-empty"><div class="radar-empty-title">Open Signal Radar to load</div><div class="radar-empty-detail">This section displays only server-classified OI positioning and large-liquidation proxy alerts.</div></div>
+      </div>
+      <div class="radar-more-wrap" id="oiLiquidationAnomalyMoreWrap" style="display:none">
+        <button type="button" class="radar-more" id="oiLiquidationAnomalyMore" onclick="showMoreOiLiquidationAnomalies()">More · 50 / 100</button>
       </div>
     </section>
 
@@ -5271,6 +5358,14 @@ function assetIntelligenceEvidence(identity) {
     });
     return candidate?.assetKey === assetKey;
   })) sources.add('verified server Spot anomaly snapshot');
+  if (oiLiquidationAnomalyRows(oiLiquidationAnomalyPayload()).some(row => {
+    const candidate = assetIntelligenceIdentity({
+      canonical:row?.symbol,
+      category:row?.category,
+      source:'server OI and liquidation proxy snapshot',
+    });
+    return candidate?.assetKey === assetKey;
+  })) sources.add('verified server OI and liquidation proxy snapshot');
   return { verified:sources.size > 0, sources:[...sources] };
 }
 
@@ -8151,6 +8246,8 @@ const SIGNAL_RETRY_MAX = 30 * 60 * 1000;
 const SIGNAL_SCHEMA_VERSION = 'rwa-signal-snapshot/v1';
 const PERP_VOLUME_ANOMALY_FORMULA_VERSION = 'rwa-perp-volume-anomaly-1.0';
 const SPOT_VOLUME_PRICE_ANOMALY_FORMULA_VERSION = 'rwa-spot-volume-price-anomaly-1.0';
+const OI_LIQUIDATION_ANOMALY_FORMULA_VERSION = 'rwa-oi-liquidation-proxy-1.0';
+const OI_LIQUIDATION_HISTORY_NAMESPACE = 'rwa-signal-oi-liquidation-hourly-v1';
 let signalSnapshotCache = null;
 let signalSnapshotPromise = null;
 let signalSnapshotLoading = false;
@@ -8164,6 +8261,8 @@ let perpVolumeAnomalyExpanded = false;
 const perpVolumeAnomalyFilter = { level:'all', category:'all', venue:'all', status:'all', search:'', sort:'priority' };
 let spotVolumePriceAnomalyExpanded = false;
 const spotVolumePriceAnomalyFilter = { trigger:'all', category:'all', venue:'all', perp:'all', status:'all', search:'', sort:'priority' };
+let oiLiquidationAnomalyExpanded = false;
+const oiLiquidationAnomalyFilter = { type:'all', category:'all', venue:'all', bias:'all', status:'all', search:'', sort:'priority' };
 const LISTING_AUDIT_SCHEMA_VERSION = 'rwa-listing-audit/v1';
 const LISTING_HISTORY_RETENTION_DAYS = 45;
 const LISTING_CHANGES_TTL = 5 * 60 * 1000;
@@ -9427,6 +9526,677 @@ function renderSpotVolumePriceAnomalies(payload) {
   renderSpotVolumePriceAnomalyTable(section);
 }
 
+function oiLiquidationAnomalyPayload(payload = signalSnapshotCache?.payload) {
+  const section = payload?.oiLiquidationAnomalies;
+  return section && typeof section === 'object' && !Array.isArray(section) ? section : null;
+}
+
+function oiLiquidationAnomalyTrigger(row) {
+  const trigger = String(row?.trigger || '').trim().toLowerCase();
+  return ['oi_rising','liquidation_proxy','both'].includes(trigger) ? trigger : 'unavailable';
+}
+
+function oiLiquidationAnomalyTrend(row) {
+  const trend = String(row?.completedDailyTrend || '').trim().toLowerCase();
+  return ['rising','not-rising','warming','unavailable'].includes(trend) ? trend : 'unavailable';
+}
+
+function oiLiquidationAnomalyRowStatus(row) {
+  return radarSafeStatus(row?.status);
+}
+
+function oiLiquidationTopTraderPositions(row) {
+  return (Array.isArray(row?.topTraderPositions) ? row.topTraderPositions : []).map(position => ({
+    venueSymbol:String(position?.venueSymbol || '').trim().toUpperCase(),
+    status:radarSafeStatus(position?.status),
+    longShortRatio:numberOrNull(position?.longShortRatio),
+    longPositionPct:numberOrNull(position?.longPositionPct),
+    shortPositionPct:numberOrNull(position?.shortPositionPct),
+    bias:['bullish','bearish','neutral','unavailable'].includes(String(position?.bias || '').toLowerCase())
+      ? String(position.bias).toLowerCase()
+      : 'unavailable',
+    observedAt:position?.observedAt || null,
+  })).filter(position => position.venueSymbol);
+}
+
+function oiLiquidationOverallTraderBias(row) {
+  const declared = String(row?.overallTraderBias || '').trim().toLowerCase();
+  const bias = ['bullish','bearish','neutral','mixed','unavailable'].includes(declared) ? declared : 'unavailable';
+  const hasAvailableExactPosition = oiLiquidationTopTraderPositions(row)
+    .some(position => position.status === 'full' && position.longShortRatio !== null && position.bias !== 'unavailable');
+  return hasAvailableExactPosition ? bias : 'unavailable';
+}
+
+function oiLiquidationTraderBiasLabel(bias) {
+  const normalized = String(bias || '').toLowerCase();
+  if (normalized === 'bullish') return 'Bullish';
+  if (normalized === 'bearish') return 'Bearish';
+  if (normalized === 'neutral') return 'Neutral';
+  if (normalized === 'mixed') return 'Mixed';
+  return 'Unavailable';
+}
+
+function oiLiquidationHistoryReady(section) {
+  const history = section?.history || {};
+  return history.ready === true || String(history.status || '').toLowerCase() === 'full';
+}
+
+function oiLiquidationExpectedTrigger(row, thresholds) {
+  const currentVolume = numberOrNull(row?.currentVolume24hUsd);
+  const minimumVolume = numberOrNull(thresholds?.minVolume24hUsdExclusive);
+  const liquidationDrop = numberOrNull(thresholds?.liquidationProxyDropUsdExclusive);
+  const requiredCloses = numberOrNull(thresholds?.risingCompletedDays);
+  const closes = Array.isArray(row?.completedDailyCloses) ? row.completedDailyCloses : [];
+  const closeValues = closes.map(close => numberOrNull(close?.openInterestUsd));
+  if (minimumVolume === null || !(currentVolume > minimumVolume) ||
+      liquidationDrop === null || !Number.isInteger(requiredCloses) || requiredCloses <= 0) return null;
+  const oiTriggered = closes.length === requiredCloses && closeValues.every((value, index) =>
+    value !== null && value >= 0 && (index === 0 || value > closeValues[index - 1]));
+  const drawdown = numberOrNull(row?.drawdown24hUsd);
+  const liquidationTriggered = drawdown !== null && drawdown > liquidationDrop;
+  return oiTriggered && liquidationTriggered
+    ? 'both'
+    : oiTriggered ? 'oi_rising' : liquidationTriggered ? 'liquidation_proxy' : null;
+}
+
+function oiLiquidationAnomalyContractValid(payload) {
+  const section = payload?.oiLiquidationAnomalies;
+  const rows = section?.rows;
+  const status = String(section?.status || '').toLowerCase();
+  const allowedCategories = new Set(['equity','etf','commodity','index','fx','pre-ipo','bond']);
+  const allowedVenues = new Set(['gate','binance','bitget','tradexyz','okx']);
+  const expectedSources = ['gate','binance','bitget','tradexyz','okx'];
+  const thresholds = section?.thresholds || {};
+  const thresholdKeys = ['minVolume24hUsdExclusive','liquidationProxyDropUsdExclusive','risingCompletedDays','peakLookbackHours','topTraderBullishAbove','topTraderBearishBelow','logic'];
+  const thresholdsValid = Object.keys(thresholds).length === thresholdKeys.length &&
+    thresholdKeys.every(key => Object.prototype.hasOwnProperty.call(thresholds,key)) &&
+    thresholds.minVolume24hUsdExclusive === 1000000 && thresholds.liquidationProxyDropUsdExclusive === 2000000 &&
+    thresholds.risingCompletedDays === 3 && thresholds.peakLookbackHours === 24 &&
+    thresholds.topTraderBullishAbove === 1.05 && thresholds.topTraderBearishBelow === 0.95 &&
+    thresholds.logic === 'or';
+  const methodology = section?.methodology;
+  const methodologyKeys = ['universe','eligibility','openInterest','threeDayTrend','liquidationProxy','logic','topTraderPositions','limitations'];
+  const methodologyValid = methodology && typeof methodology === 'object' && !Array.isArray(methodology) &&
+    Object.keys(methodology).length === methodologyKeys.length && methodologyKeys.every(key =>
+      typeof methodology[key] === 'string' && methodology[key].trim()
+    );
+  const sourceKeys = section?.sources && typeof section.sources === 'object' && !Array.isArray(section.sources)
+    ? Object.keys(section.sources)
+    : [];
+  const catalogBlocker = /(?:IDENTITY|INSTRUMENTS_UNAVAILABLE|CATALOG|UPSTREAM_COVERAGE)/;
+  const sourcesValid = sourceKeys.length === expectedSources.length && expectedSources.every(name => {
+    const source = section?.sources?.[name];
+    const sourceStatus = String(source?.status || '').toLowerCase();
+    const values = ['listingCount','volumeFieldCount','openInterestFieldCount']
+      .map(key => source?.[key]);
+    const [listingCount, volumeFieldCount, openInterestFieldCount] = values;
+    const hasCatalogBlocker = Array.isArray(source?.warnings) && source.warnings
+      .some(warning => catalogBlocker.test(String(warning).toUpperCase()));
+    const fullFields = listingCount > 0 && volumeFieldCount === listingCount && openInterestFieldCount === listingCount;
+    const partialFields = listingCount > 0 && (volumeFieldCount > 0 || openInterestFieldCount > 0) &&
+      (!fullFields || hasCatalogBlocker);
+    const unavailableFields = volumeFieldCount === 0 && openInterestFieldCount === 0;
+    return source && ['full','partial','unavailable'].includes(sourceStatus) &&
+      values.every(value => Number.isInteger(value) && value >= 0) && volumeFieldCount <= listingCount &&
+      openInterestFieldCount <= listingCount && Array.isArray(source.warnings) &&
+      source.warnings.every(warning => typeof warning === 'string') &&
+      ((sourceStatus === 'full' && fullFields && !hasCatalogBlocker) || (sourceStatus === 'partial' && partialFields) ||
+        (sourceStatus === 'unavailable' && unavailableFields));
+  });
+  const observedAvailableSources = sourcesValid
+    ? expectedSources.filter(name => String(section.sources[name].status).toLowerCase() !== 'unavailable').length
+    : null;
+  const observedFullCatalogSources = sourcesValid
+    ? expectedSources.filter(name => {
+        const source = section.sources[name];
+        return source.listingCount > 0 &&
+          !source.warnings.some(warning => catalogBlocker.test(String(warning).toUpperCase()));
+      }).length
+    : null;
+  const observedAcceptedListings = sourcesValid
+    ? expectedSources.reduce((sum,name) => sum + numberOrNull(section.sources[name].listingCount),0)
+    : null;
+  const coverage = section?.coverage || {};
+  const coverageKeys = ['expectedSources','availableSources','fullCatalogSources','acceptedListings','verifiedAssets','identityConflicts','volumeEligibleAssets','completeEligibleAssets','missingEligibleAssets','filterUnknownAssets'];
+  const coverageNumbers = coverageKeys.map(key => coverage[key]);
+  const coverageValid = coverage.expectedSources === expectedSources.length &&
+    coverage.availableSources === observedAvailableSources && coverage.fullCatalogSources === observedFullCatalogSources &&
+    coverage.acceptedListings === observedAcceptedListings &&
+    coverageNumbers.every(value => Number.isInteger(value) && value >= 0) &&
+    numberOrNull(coverage.completeEligibleAssets) + numberOrNull(coverage.missingEligibleAssets) === numberOrNull(coverage.volumeEligibleAssets) &&
+    numberOrNull(coverage.volumeEligibleAssets) <= numberOrNull(coverage.verifiedAssets);
+  const counts = section?.counts || {};
+  const countKeys = ['verifiedAssets','filteredLowVolume','filterUnknown','volumeEligibleAssets','completeEligibleAssets','missingEligibleAssets','perpListings','alerts','oiRising','liquidationProxy','both'];
+  const countValues = Object.fromEntries(countKeys.map(key => [key,counts[key]]));
+  const topTraderAvailable = counts.topTraderAvailable;
+  const countsValid = countKeys.every(key => Number.isInteger(countValues[key]) && countValues[key] >= 0) &&
+    Number.isInteger(topTraderAvailable) && topTraderAvailable >= 0 && topTraderAvailable <= countValues.alerts &&
+    countValues.verifiedAssets === numberOrNull(coverage.verifiedAssets) &&
+    countValues.filterUnknown === numberOrNull(coverage.filterUnknownAssets) &&
+    countValues.volumeEligibleAssets === numberOrNull(coverage.volumeEligibleAssets) &&
+    countValues.completeEligibleAssets === numberOrNull(coverage.completeEligibleAssets) &&
+    countValues.missingEligibleAssets === numberOrNull(coverage.missingEligibleAssets) &&
+    countValues.perpListings === numberOrNull(coverage.acceptedListings) &&
+    countValues.filteredLowVolume + countValues.filterUnknown + countValues.volumeEligibleAssets === countValues.verifiedAssets &&
+    countValues.alerts <= countValues.completeEligibleAssets &&
+    countValues.alerts === countValues.oiRising + countValues.liquidationProxy - countValues.both &&
+    countValues.both <= countValues.oiRising && countValues.both <= countValues.liquidationProxy;
+  const history = section?.history || {};
+  const generatedAtMs = Date.parse(section?.generatedAt);
+  const generatedHourMs = Number.isFinite(generatedAtMs) ? Math.floor(generatedAtMs / 3600000) * 3600000 : null;
+  const storedHourlyBuckets = history.storedHourlyBuckets;
+  const oldestAtMs = history.oldestAt === null ? null : Date.parse(history.oldestAt);
+  const latestAtMs = history.latestAt === null ? null : Date.parse(history.latestAt);
+  const emptyHistoryValid = storedHourlyBuckets === 0 && history.oldestAt === null && history.latestAt === null;
+  const populatedHistoryValid = Number.isInteger(storedHourlyBuckets) && storedHourlyBuckets > 0 && storedHourlyBuckets <= 96 &&
+    Number.isFinite(oldestAtMs) && Number.isFinite(latestAtMs) && oldestAtMs % 3600000 === 0 && latestAtMs % 3600000 === 0 &&
+    oldestAtMs <= latestAtMs && latestAtMs <= generatedHourMs && oldestAtMs >= generatedHourMs - 95 * 3600000 &&
+    latestAtMs - oldestAtMs >= (storedHourlyBuckets - 1) * 3600000;
+  const expectedHistoryReady = numberOrNull(coverage.completeEligibleAssets) > 0 &&
+    numberOrNull(history.readyAssets) === numberOrNull(coverage.completeEligibleAssets) &&
+    numberOrNull(history.trendReadyAssets) === numberOrNull(coverage.completeEligibleAssets) &&
+    numberOrNull(history.drawdownReadyAssets) === numberOrNull(coverage.completeEligibleAssets);
+  const historyValid = ['full','partial','warming','unavailable'].includes(String(history.status || '').toLowerCase()) &&
+    typeof history.ready === 'boolean' && history.cadence === 'utc-hourly-idempotent' &&
+    history.retentionHours === 96 && history.requiredHourlyBuckets === 24 && history.requiredCompletedDays === 3 &&
+    ['storedHourlyBuckets','readyAssets','trendReadyAssets','drawdownReadyAssets'].every(key =>
+      Number.isInteger(history[key]) && history[key] >= 0
+    ) && numberOrNull(history.readyAssets) <= numberOrNull(history.trendReadyAssets) &&
+    numberOrNull(history.readyAssets) <= numberOrNull(history.drawdownReadyAssets) &&
+    numberOrNull(history.trendReadyAssets) <= numberOrNull(coverage.completeEligibleAssets) &&
+    numberOrNull(history.drawdownReadyAssets) <= numberOrNull(coverage.completeEligibleAssets) &&
+    history.ready === expectedHistoryReady && (emptyHistoryValid || populatedHistoryValid) &&
+    (String(history.status || '').toLowerCase() !== 'full' || history.ready) &&
+    (String(history.status || '').toLowerCase() !== 'warming' || !history.ready);
+  const persistence = section?.persistence || {};
+  const persistenceStatus = String(persistence.status || '').toLowerCase();
+  const persistenceWriteStatus = String(persistence.writeStatus || '').toLowerCase();
+  const persistenceReadStateValid =
+    (persistenceStatus === 'partial' && persistenceWriteStatus === 'read-only' && persistence.error === null) ||
+    (persistenceStatus === 'unavailable' && persistenceWriteStatus === 'unavailable' &&
+      typeof persistence.error === 'string' && persistence.error.length > 0);
+  const persistenceValid = persistence.mode === 'vercel-runtime-cache' &&
+    persistence.namespace === OI_LIQUIDATION_HISTORY_NAMESPACE &&
+    ['partial','unavailable'].includes(persistenceStatus) &&
+    persistence.writer?.requested === false && persistence.writer?.succeeded === null &&
+    ['stored','read-only','skipped-incomplete-sources','unavailable'].includes(String(persistence.writeStatus || '').toLowerCase()) &&
+    persistenceReadStateValid;
+  const alerts = countValues.alerts;
+  const fullCoherent = status !== 'full' || (
+    numberOrNull(coverage.availableSources) === 5 && expectedSources.every(name =>
+      String(section?.sources?.[name]?.status || '').toLowerCase() === 'full'
+    ) && numberOrNull(coverage.fullCatalogSources) === 5 && numberOrNull(coverage.identityConflicts) === 0 && countValues.filterUnknown === 0 &&
+    numberOrNull(coverage.completeEligibleAssets) === numberOrNull(coverage.volumeEligibleAssets) &&
+    String(history.status || '').toLowerCase() === 'full' && history.ready === true &&
+    numberOrNull(history.readyAssets) === numberOrNull(coverage.completeEligibleAssets) &&
+    numberOrNull(history.trendReadyAssets) === numberOrNull(coverage.completeEligibleAssets) &&
+    numberOrNull(history.drawdownReadyAssets) === numberOrNull(coverage.completeEligibleAssets)
+  );
+  const sectionStatusCoherent = fullCoherent &&
+    (status !== 'warming' || String(history.status || '').toLowerCase() === 'warming') &&
+    (status !== 'unavailable' || (Array.isArray(rows) && rows.length === 0)) &&
+    (numberOrNull(coverage.identityConflicts) === 0 || (Array.isArray(rows) && rows.length === 0));
+  if (!section || section.formulaVersion !== OI_LIQUIDATION_ANOMALY_FORMULA_VERSION ||
+      !['full','partial','warming','unavailable'].includes(status) ||
+      !Number.isFinite(Date.parse(section.generatedAt)) || !Number.isFinite(Date.parse(payload?.generatedAt)) ||
+      Math.abs(Date.parse(section.generatedAt) - Date.parse(payload.generatedAt)) > 1000 || section.rowLimit !== 100 ||
+      !Array.isArray(rows) || rows.length > 100 ||
+      !Number.isInteger(alerts) || alerts < 0 || rows.length !== Math.min(alerts,100) ||
+      !thresholdsValid || !methodologyValid || !sourcesValid || !coverageValid || !countsValid ||
+      !historyValid || !persistenceValid || !sectionStatusCoherent) return false;
+
+  const listingKeys = new Set();
+  const observedCounts = { oiRising:0, liquidationProxy:0, both:0, topTraderAvailable:0 };
+  const rowsValid = rows.every((row, index) => {
+    const rank = numberOrNull(row?.rank);
+    const symbol = String(row?.symbol || '').trim().toUpperCase();
+    const category = String(row?.category || '').trim().toLowerCase();
+    const expectedAssetKey = `${category}:${symbol}`;
+    const trigger = oiLiquidationAnomalyTrigger(row);
+    const trend = oiLiquidationAnomalyTrend(row);
+    const venues = Array.isArray(row?.venues) ? row.venues.map(venue => String(venue || '').toLowerCase()) : [];
+    const listingCount = numberOrNull(row?.listingCount);
+    const currentVolume = numberOrNull(row?.currentVolume24hUsd);
+    const currentOi = numberOrNull(row?.currentOpenInterestUsd);
+    const listings = Array.isArray(row?.listings) ? row.listings : null;
+    const listingRows = [];
+    let listingFieldsValid = Boolean(listings?.length);
+    for (const listing of listings || []) {
+      const venue = String(listing?.venue || '').trim().toLowerCase();
+      const venueSymbol = String(listing?.venueSymbol || '').trim().toUpperCase();
+      const instrumentType = String(listing?.instrumentType || '').trim();
+      const volume = listing?.volume24hUsd;
+      const openInterest = listing?.openInterestUsd;
+      const volumeStatus = String(listing?.volumeStatus || '').toLowerCase();
+      const openInterestStatus = String(listing?.openInterestStatus || '').toLowerCase();
+      const validListing = allowedVenues.has(venue) && /^[A-Z0-9][A-Z0-9._:/-]{0,79}$/.test(venueSymbol) &&
+        /^[A-Za-z0-9][A-Za-z0-9 ._:/-]{0,39}$/.test(instrumentType) &&
+        Number.isFinite(volume) && volume >= 0 && Math.round(volume * 100) / 100 === volume &&
+        ['full','estimated'].includes(volumeStatus) && typeof listing?.volumeMethod === 'string' && listing.volumeMethod.trim() &&
+        Number.isFinite(openInterest) && openInterest >= 0 && Math.round(openInterest * 100) / 100 === openInterest &&
+        ['full','estimated'].includes(openInterestStatus) && typeof listing?.openInterestMethod === 'string' && listing.openInterestMethod.trim();
+      if (!validListing) listingFieldsValid = false;
+      listingRows.push({ venue, venueSymbol, volume, openInterest });
+    }
+    const exactListingKeys = listingRows.map(listing => `${listing.venue}:${listing.venueSymbol}`);
+    const listingVenueSet = new Set(listingRows.map(listing => listing.venue));
+    const aggregateListingVolume = Math.round(listingRows.reduce((sum,listing) => sum + listing.volume,0) * 100) / 100;
+    const aggregateListingOi = Math.round(listingRows.reduce((sum,listing) => sum + listing.openInterest,0) * 100) / 100;
+    listingFieldsValid = listingFieldsValid && exactListingKeys.length === new Set(exactListingKeys).size &&
+      listingCount === listings.length && currentVolume === aggregateListingVolume && currentOi === aggregateListingOi &&
+      venues.length === listingVenueSet.size && venues.every(venue => listingVenueSet.has(venue));
+    const peakOi = numberOrNull(row?.peak24hOpenInterestUsd);
+    const drawdown = numberOrNull(row?.drawdown24hUsd);
+    const closes = Array.isArray(row?.completedDailyCloses) ? row.completedDailyCloses : [];
+    const closeDays = closes.map(close => Date.parse(close?.day));
+    const closeValues = closes.map(close => numberOrNull(close?.openInterestUsd));
+    const generatedDayMs = Number.isFinite(generatedAtMs) ? Math.floor(generatedAtMs / 86400000) * 86400000 : null;
+    const closeRowsValid = closes.length <= 3 && closes.every((close, closeIndex) =>
+      /^\d{4}-\d{2}-\d{2}$/.test(String(close?.day || '')) && Number.isFinite(closeDays[closeIndex]) &&
+      closeDays[closeIndex] % 86400000 === 0 &&
+      Number.isFinite(close?.openInterestUsd) && closeValues[closeIndex] !== null && closeValues[closeIndex] >= 0 &&
+      closeDays[closeIndex] === generatedDayMs - (closes.length - closeIndex) * 86400000
+    );
+    const completeCloses = closes.length === thresholds.risingCompletedDays && closeRowsValid;
+    const closesRising = completeCloses && closeValues.every((value, closeIndex) =>
+      closeIndex === 0 || value > closeValues[closeIndex - 1]);
+    const expectedTrend = completeCloses
+      ? closesRising ? 'rising' : 'not-rising'
+      : String(history.status || '').toLowerCase() === 'unavailable' ? 'unavailable' : 'warming';
+    const trendCoherent = trend === expectedTrend;
+    const peakPairPresent = peakOi !== null && drawdown !== null;
+    const drawdownCoherent = peakPairPresent
+      ? Number.isFinite(row?.peak24hOpenInterestUsd) && Number.isFinite(row?.drawdown24hUsd) &&
+        currentOi !== null && peakOi >= currentOi && Math.abs((peakOi - currentOi) - drawdown) <= 0.02 &&
+        Number.isFinite(Date.parse(row?.peak24hAt)) && Date.parse(row.peak24hAt) <= generatedAtMs &&
+        Date.parse(row.peak24hAt) >= generatedAtMs - 24 * 3600000
+      : peakOi === null && drawdown === null && row?.peak24hAt === null;
+    const expectedTrigger = oiLiquidationExpectedTrigger(row, thresholds);
+    const rawPositions = Array.isArray(row?.topTraderPositions) ? row.topTraderPositions : null;
+    const positions = oiLiquidationTopTraderPositions(row);
+    const positionKeys = positions.map(position => position.venueSymbol);
+    const binanceListingSymbols = new Set(listingRows.filter(listing => listing.venue === 'binance').map(listing => listing.venueSymbol));
+    const positionsValid = rawPositions !== null && positions.length === rawPositions.length &&
+      positionKeys.length === new Set(positionKeys).size && positionKeys.length === binanceListingSymbols.size &&
+      [...binanceListingSymbols].every(venueSymbol => positionKeys.includes(venueSymbol)) &&
+      positions.every((position,positionIndex) => {
+      const available = position.status === 'full';
+      const observedAtMs = Date.parse(position.observedAt);
+      const rawPosition = rawPositions[positionIndex];
+      const expectedBias = position.longShortRatio !== null && position.longShortRatio < thresholds.topTraderBearishBelow
+        ? 'bearish'
+        : position.longShortRatio !== null && position.longShortRatio > thresholds.topTraderBullishAbove
+          ? 'bullish'
+          : 'neutral';
+      const ratioMinimum = position.longPositionPct !== null && position.shortPositionPct !== null
+        ? Math.max(0, position.longPositionPct - 0.005) / (position.shortPositionPct + 0.005)
+        : null;
+      const ratioMaximum = position.longPositionPct !== null && position.shortPositionPct !== null
+        ? (position.longPositionPct + 0.005) / Math.max(0.000001, position.shortPositionPct - 0.005)
+        : null;
+      const numericValid = Number.isFinite(rawPosition?.longShortRatio) && position.longShortRatio !== null && position.longShortRatio >= 0 &&
+        Math.round(position.longShortRatio * 10000) / 10000 === position.longShortRatio &&
+        Number.isFinite(rawPosition?.longPositionPct) && position.longPositionPct !== null && position.longPositionPct >= 0 && position.longPositionPct <= 100 &&
+        Math.round(position.longPositionPct * 100) / 100 === position.longPositionPct &&
+        Number.isFinite(rawPosition?.shortPositionPct) && position.shortPositionPct !== null && position.shortPositionPct > 0 && position.shortPositionPct <= 100 &&
+        Math.round(position.shortPositionPct * 100) / 100 === position.shortPositionPct &&
+        Math.abs(position.longPositionPct + position.shortPositionPct - 100) <= 0.0101 &&
+        ratioMinimum !== null && ratioMaximum !== null &&
+        position.longShortRatio >= ratioMinimum - 0.0001 && position.longShortRatio <= ratioMaximum + 0.0001 &&
+        Number.isFinite(observedAtMs) && observedAtMs <= generatedAtMs && generatedAtMs - observedAtMs <= 3 * 3600000;
+      return /^[A-Z0-9][A-Z0-9._:/-]{0,79}$/.test(position.venueSymbol) &&
+        position.venueSymbol === String(rawPosition?.venueSymbol || '').trim().toUpperCase() &&
+        binanceListingSymbols.has(position.venueSymbol) &&
+        ['full','unavailable'].includes(position.status) &&
+        (available ? numericValid && position.bias === expectedBias && rawPosition?.reasonCode === null :
+          position.longShortRatio === null && position.longPositionPct === null && position.shortPositionPct === null &&
+          position.bias === 'unavailable' && position.observedAt === null &&
+          typeof rawPosition?.reasonCode === 'string' && rawPosition.reasonCode.length > 0);
+    });
+    const overallBias = oiLiquidationOverallTraderBias(row);
+    const hasAvailablePosition = positions.some(position => position.status === 'full');
+    const availableBiases = positions.filter(position => position.status === 'full').map(position => position.bias);
+    const expectedOverallBias = !availableBiases.length
+      ? 'unavailable'
+      : new Set(availableBiases).size === 1 ? availableBiases[0] : 'mixed';
+    const biasCoherent = overallBias === expectedOverallBias;
+    const fieldStatus = row?.fieldStatus;
+    const fieldStatusKeys = ['currentVolume24hUsd','currentOpenInterestUsd','completedDailyCloses','completedDailyTrend','peak24hOpenInterestUsd','drawdown24hUsd','topTraderPositions'];
+    const normalizedFieldStatus = Object.fromEntries(fieldStatusKeys.map(key => [key,String(fieldStatus?.[key] || '').toLowerCase()]));
+    const derivedPositionStatus = !positions.length || !hasAvailablePosition
+      ? 'unavailable'
+      : positions.every(position => position.status === 'full') ? 'full' : 'partial';
+    const expectedClosesStatus = closes.length === 3 ? 'estimated' : closes.length ? 'partial' : 'unavailable';
+    const closeStatusCoherent = normalizedFieldStatus.completedDailyCloses === expectedClosesStatus;
+    const trendStatusCoherent = normalizedFieldStatus.completedDailyTrend === expectedClosesStatus;
+    const peakStatusCoherent = peakPairPresent
+      ? normalizedFieldStatus.peak24hOpenInterestUsd === 'estimated' && normalizedFieldStatus.drawdown24hUsd === 'estimated'
+      : normalizedFieldStatus.peak24hOpenInterestUsd === 'unavailable' &&
+        normalizedFieldStatus.drawdown24hUsd === 'unavailable';
+    const fieldStatusValid = fieldStatus && typeof fieldStatus === 'object' && !Array.isArray(fieldStatus) &&
+      Object.keys(fieldStatus).length === fieldStatusKeys.length && fieldStatusKeys.every(key => Object.prototype.hasOwnProperty.call(fieldStatus,key)) &&
+      normalizedFieldStatus.currentVolume24hUsd === 'estimated' && normalizedFieldStatus.currentOpenInterestUsd === 'estimated' &&
+      closeStatusCoherent && trendStatusCoherent && peakStatusCoherent &&
+      normalizedFieldStatus.topTraderPositions === derivedPositionStatus;
+    const reasonCodes = row?.reasonCodes;
+    const rowKey = `${category}:${symbol}`;
+    const valid = Number.isInteger(row?.rank) && rank === index + 1 &&
+      /^[A-Z0-9][A-Z0-9.-]{0,39}$/.test(symbol) && allowedCategories.has(category) &&
+      row?.assetKey === expectedAssetKey && trigger !== 'unavailable' &&
+      /^[A-Za-z0-9_-]{12,32}$/.test(String(row?.cohortFingerprint || '')) &&
+      oiLiquidationAnomalyRowStatus(row) === 'estimated' &&
+      venues.length > 0 && venues.length === new Set(venues).size && venues.every(venue => allowedVenues.has(venue)) &&
+      Number.isInteger(row?.listingCount) && listingCount >= venues.length && listingFieldsValid &&
+      Number.isFinite(row?.currentVolume24hUsd) && currentVolume > thresholds.minVolume24hUsdExclusive &&
+      Math.round(currentVolume * 100) / 100 === currentVolume &&
+      Number.isFinite(row?.currentOpenInterestUsd) && currentOi >= 0 && Math.round(currentOi * 100) / 100 === currentOi &&
+      closeRowsValid && trendCoherent && expectedTrigger !== null && trigger === expectedTrigger && drawdownCoherent &&
+      positionsValid && (!positions.length || venues.includes('binance')) && biasCoherent && fieldStatusValid &&
+      Array.isArray(reasonCodes) && reasonCodes.length === new Set(reasonCodes).size &&
+      reasonCodes.every(code => typeof code === 'string' && code.trim()) && !listingKeys.has(rowKey);
+    if (!valid) return false;
+    listingKeys.add(rowKey);
+    if (expectedTrigger === 'oi_rising' || expectedTrigger === 'both') observedCounts.oiRising += 1;
+    if (trigger === 'liquidation_proxy' || trigger === 'both') observedCounts.liquidationProxy += 1;
+    if (trigger === 'both') observedCounts.both += 1;
+    if (hasAvailablePosition) observedCounts.topTraderAvailable += 1;
+    return true;
+  });
+  if (!rowsValid) return false;
+  return Object.entries(observedCounts).every(([key, observed]) => {
+    const declared = numberOrNull(counts[key]);
+    return Number.isInteger(declared) && declared >= observed && (alerts > 100 || declared === observed);
+  });
+}
+
+function unavailableOiLiquidationAnomalySection(payload) {
+  return {
+    formulaVersion:OI_LIQUIDATION_ANOMALY_FORMULA_VERSION,
+    generatedAt:payload?.generatedAt || null,
+    status:'unavailable', rowLimit:100,
+    thresholds:{}, methodology:{},
+    sources:{}, coverage:{ expectedSources:5, availableSources:0, fullCatalogSources:0, acceptedListings:0, verifiedAssets:0, identityConflicts:0, volumeEligibleAssets:0, completeEligibleAssets:0, missingEligibleAssets:0, filterUnknownAssets:0 },
+    counts:{ verifiedAssets:null, filteredLowVolume:null, filterUnknown:null, volumeEligibleAssets:null, completeEligibleAssets:null, missingEligibleAssets:null, perpListings:null, alerts:null, oiRising:null, liquidationProxy:null, both:null, topTraderAvailable:null },
+    history:{ status:'unavailable', ready:false, cadence:'utc-hourly-idempotent', storedHourlyBuckets:0, retentionHours:96, requiredHourlyBuckets:24, requiredCompletedDays:3, readyAssets:0, trendReadyAssets:0, drawdownReadyAssets:0, oldestAt:null, latestAt:null },
+    persistence:{ mode:'vercel-runtime-cache', status:'unavailable', namespace:OI_LIQUIDATION_HISTORY_NAMESPACE, writer:{ requested:false, succeeded:null }, writeStatus:'unavailable', error:'OI hourly history unavailable' },
+    rows:[],
+  };
+}
+
+function oiLiquidationAnomalyPanelStatus(section) {
+  const status = String(section?.status || '').toLowerCase();
+  const normalized = ['full','partial','warming','unavailable'].includes(status) ? status : 'warming';
+  if (signalSnapshotError && !section) return 'unavailable';
+  return signalSnapshotError && section && normalized !== 'unavailable' ? 'partial' : normalized;
+}
+
+function oiLiquidationAnomalyRows(section) {
+  return (Array.isArray(section?.rows) ? section.rows : []).filter(row => {
+    const symbol = String(row?.symbol || '').trim();
+    const category = String(row?.category || '').trim();
+    return symbol && category && oiLiquidationAnomalyTrigger(row) !== 'unavailable';
+  });
+}
+
+function oiLiquidationVenueLabel(venue) {
+  return perpVolumeAnomalyVenueLabel(venue);
+}
+
+function oiLiquidationTriggerLabel(trigger) {
+  if (trigger === 'oi_rising') return 'OI rising';
+  if (trigger === 'liquidation_proxy') return 'Large-liquidation proxy';
+  if (trigger === 'both') return 'OI rising + large-liquidation proxy';
+  return 'Unavailable';
+}
+
+function updateOiLiquidationAnomalyFilterOptions(section) {
+  const rows = oiLiquidationAnomalyRows(section);
+  const types = [...new Set(rows.map(oiLiquidationAnomalyTrigger).filter(type => type !== 'unavailable'))];
+  const categories = [...new Set(rows.map(row => String(row.category || '').toLowerCase()).filter(Boolean))].sort();
+  const venues = [...new Set(rows.flatMap(row => Array.isArray(row.venues) ? row.venues : [])
+    .map(venue => String(venue || '').toLowerCase()).filter(Boolean))]
+    .sort((left, right) => oiLiquidationVenueLabel(left).localeCompare(oiLiquidationVenueLabel(right)));
+  populateRadarFilter(
+    'oiLiquidationAnomalyTypeFilter',
+    types.map(key => ({ key, label:oiLiquidationTriggerLabel(key) })),
+    'All OI alert types',
+    oiLiquidationAnomalyFilter.type,
+  );
+  populateRadarFilter(
+    'oiLiquidationAnomalyCategoryFilter',
+    categories.map(key => ({ key, label:key.replace(/\b\w/g, letter => letter.toUpperCase()) })),
+    'All categories',
+    oiLiquidationAnomalyFilter.category,
+  );
+  populateRadarFilter(
+    'oiLiquidationAnomalyVenueFilter',
+    venues.map(key => ({ key, label:oiLiquidationVenueLabel(key) })),
+    'All venues',
+    oiLiquidationAnomalyFilter.venue,
+  );
+  oiLiquidationAnomalyFilter.type = document.getElementById('oiLiquidationAnomalyTypeFilter')?.value || 'all';
+  oiLiquidationAnomalyFilter.category = document.getElementById('oiLiquidationAnomalyCategoryFilter')?.value || 'all';
+  oiLiquidationAnomalyFilter.venue = document.getElementById('oiLiquidationAnomalyVenueFilter')?.value || 'all';
+}
+
+function filteredOiLiquidationAnomalyRows(section) {
+  const query = oiLiquidationAnomalyFilter.search.trim().toLowerCase();
+  const filtered = oiLiquidationAnomalyRows(section).map((row, serverIndex) => ({ row, serverIndex })).filter(({ row }) => {
+    const trigger = oiLiquidationAnomalyTrigger(row);
+    const typeMatch = oiLiquidationAnomalyFilter.type === 'all' || trigger === oiLiquidationAnomalyFilter.type ||
+      (trigger === 'both' && ['oi_rising','liquidation_proxy'].includes(oiLiquidationAnomalyFilter.type));
+    const category = String(row?.category || '').toLowerCase();
+    const categoryMatch = oiLiquidationAnomalyFilter.category === 'all' || category === oiLiquidationAnomalyFilter.category;
+    const venues = (Array.isArray(row?.venues) ? row.venues : []).map(venue => String(venue || '').toLowerCase());
+    const venueMatch = oiLiquidationAnomalyFilter.venue === 'all' || venues.includes(oiLiquidationAnomalyFilter.venue);
+    const bias = oiLiquidationOverallTraderBias(row);
+    const biasMatch = oiLiquidationAnomalyFilter.bias === 'all' || bias === oiLiquidationAnomalyFilter.bias;
+    const rowStatus = oiLiquidationAnomalyRowStatus(row);
+    const statusMatch = oiLiquidationAnomalyFilter.status === 'all' || rowStatus === oiLiquidationAnomalyFilter.status;
+    const positions = oiLiquidationTopTraderPositions(row);
+    const searchText = [row?.symbol, category, trigger, bias, ...venues, ...venues.map(oiLiquidationVenueLabel),
+      ...positions.map(position => position.venueSymbol)].filter(Boolean).join(' ').toLowerCase();
+    return typeMatch && categoryMatch && venueMatch && biasMatch && statusMatch && (!query || searchText.includes(query));
+  });
+  if (oiLiquidationAnomalyFilter.sort === 'asset') {
+    filtered.sort((left, right) => String(left.row?.symbol || '').localeCompare(String(right.row?.symbol || '')) || left.serverIndex - right.serverIndex);
+  } else if (oiLiquidationAnomalyFilter.sort === 'oi') {
+    filtered.sort((left, right) => (numberOrNull(right.row?.currentOpenInterestUsd) ?? -Infinity) - (numberOrNull(left.row?.currentOpenInterestUsd) ?? -Infinity) || left.serverIndex - right.serverIndex);
+  } else if (oiLiquidationAnomalyFilter.sort === 'drawdown') {
+    filtered.sort((left, right) => (numberOrNull(right.row?.drawdown24hUsd) ?? -Infinity) - (numberOrNull(left.row?.drawdown24hUsd) ?? -Infinity) || left.serverIndex - right.serverIndex);
+  } else if (oiLiquidationAnomalyFilter.sort === 'volume') {
+    filtered.sort((left, right) => (numberOrNull(right.row?.currentVolume24hUsd) ?? -Infinity) - (numberOrNull(left.row?.currentVolume24hUsd) ?? -Infinity) || left.serverIndex - right.serverIndex);
+  } else if (oiLiquidationAnomalyFilter.sort === 'trader-ratio') {
+    const maxRatio = row => {
+      const ratios = oiLiquidationTopTraderPositions(row).map(position => position.longShortRatio).filter(Number.isFinite);
+      return ratios.length ? Math.max(...ratios) : null;
+    };
+    filtered.sort((left, right) => (maxRatio(right.row) ?? -Infinity) - (maxRatio(left.row) ?? -Infinity) || left.serverIndex - right.serverIndex);
+  } else {
+    filtered.sort((left, right) => (numberOrNull(left.row?.rank) ?? left.serverIndex + 1) - (numberOrNull(right.row?.rank) ?? right.serverIndex + 1) || left.serverIndex - right.serverIndex);
+  }
+  return filtered;
+}
+
+function oiLiquidationAnomalyCount(section, key) {
+  const count = numberOrNull(section?.counts?.[key]);
+  return count === null ? '—' : Math.max(0,Math.trunc(count)).toLocaleString(window.uiLocale());
+}
+
+function renderOiLiquidationAnomalySummary(section) {
+  const host = document.getElementById('oiLiquidationAnomalySummary');
+  if (!host) return;
+  host.innerHTML = `
+    <div class="listing-summary-item oi-liquidation-summary alerts"><div class="listing-summary-label">Alert assets</div><div class="listing-summary-value">${oiLiquidationAnomalyCount(section,'alerts')}</div><div class="listing-summary-sub">server-classified only</div></div>
+    <div class="listing-summary-item oi-liquidation-summary oi"><div class="listing-summary-label">OI rising</div><div class="listing-summary-value">${oiLiquidationAnomalyCount(section,'oiRising')}</div><div class="listing-summary-sub">3 completed UTC days</div></div>
+    <div class="listing-summary-item oi-liquidation-summary proxy"><div class="listing-summary-label">Large-liquidation proxy</div><div class="listing-summary-value">${oiLiquidationAnomalyCount(section,'liquidationProxy')}</div><div class="listing-summary-sub">not trade-by-trade liquidations</div></div>
+    <div class="listing-summary-item oi-liquidation-summary positioning"><div class="listing-summary-label">Binance positioning</div><div class="listing-summary-value">${oiLiquidationAnomalyCount(section,'topTraderAvailable')}</div><div class="listing-summary-sub">alert assets with exact data</div></div>`;
+}
+
+function renderOiLiquidationAnomalyStatus(section) {
+  const host = document.getElementById('oiLiquidationAnomalyStatus');
+  const asOf = document.getElementById('oiLiquidationAnomalyAsOf');
+  if (!host || !asOf) return;
+  const generatedAt = section?.generatedAt;
+  asOf.innerHTML = `Snapshot<br>${Number.isFinite(Date.parse(generatedAt)) ? escapeHtml(radarTimestamp(generatedAt)) : 'not loaded'}`;
+  const panelStatus = oiLiquidationAnomalyPanelStatus(section);
+  const rows = oiLiquidationAnomalyRows(section);
+  const historyReady = oiLiquidationHistoryReady(section);
+  let text;
+  if (signalSnapshotLoading && !section) {
+    text = 'Loading server-side OI positioning and large-liquidation proxy alerts…';
+  } else if (!section && panelStatus === 'unavailable') {
+    text = 'OI positioning and large-liquidation proxy data is unavailable. No alert or no-alert conclusion is available.';
+  } else if (!section) {
+    text = 'Open Signal Radar to load server-side OI positioning and large-liquidation proxy alerts.';
+  } else if (panelStatus === 'warming' || !historyReady && panelStatus === 'full') {
+    text = 'OI and liquidation-proxy history is warming. No absence conclusion is available until the server marks history ready.';
+  } else if (panelStatus === 'unavailable') {
+    text = 'OI positioning and large-liquidation proxy data is unavailable. No alert or no-alert conclusion is available.';
+  } else if (panelStatus === 'partial') {
+    text = signalSnapshotError
+      ? `OI and liquidation proxy refresh failed (${signalSnapshotError}). Last-known alerts remain visible, but the cached snapshot cannot support a no-anomaly conclusion.`
+      : 'OI positioning and large-liquidation proxy coverage is Partial. Known alerts remain visible; incomplete fields or history cannot support a no-anomaly conclusion.';
+  } else if (!rows.length && historyReady) {
+    text = 'No OI positioning or large-liquidation proxy anomalies in this Full snapshot';
+  } else {
+    text = 'Server-side OI positioning and large-liquidation proxy classification is Full.';
+  }
+  host.className = `listing-monitor-banner ${panelStatus === 'full' && historyReady ? '' : panelStatus === 'full' ? 'warming' : panelStatus}`.trim();
+  host.textContent = text;
+}
+
+function renderOiLiquidationAnomalySources(section) {
+  const host = document.getElementById('oiLiquidationAnomalySources');
+  if (!host) return;
+  if (!section) {
+    host.textContent = 'OI sources not loaded.';
+    return;
+  }
+  host.innerHTML = ['gate','binance','bitget','tradexyz','okx'].map(venue => {
+    const source = section?.sources?.[venue] || {};
+    const status = radarSafeStatus(source.status);
+    const listings = Number.isInteger(source.listingCount) ? source.listingCount : 0;
+    const openInterest = Number.isInteger(source.openInterestFieldCount) ? source.openInterestFieldCount : 0;
+    const volume = Number.isInteger(source.volumeFieldCount) ? source.volumeFieldCount : 0;
+    return `<span class="spot-anomaly-source" title="Official source observation coverage"><strong>${escapeHtml(oiLiquidationVenueLabel(venue))}</strong>${dataStatusBadge(status)}<span>OI ${openInterest}/${listings} · Vol ${volume}/${listings}</span></span>`;
+  }).join('');
+}
+
+function oiLiquidationTrendLabel(trend) {
+  if (trend === 'rising') return 'Rising';
+  if (trend === 'not-rising') return 'Not rising';
+  if (trend === 'warming') return 'Warming';
+  return 'Unavailable';
+}
+
+function renderOiLiquidationAnomalyTable(section) {
+  const host = document.getElementById('oiLiquidationAnomalyTableRegion');
+  const count = document.getElementById('oiLiquidationAnomalyResultCount');
+  const moreWrap = document.getElementById('oiLiquidationAnomalyMoreWrap');
+  const more = document.getElementById('oiLiquidationAnomalyMore');
+  if (!host || !count || !moreWrap || !more) return;
+  const allRows = oiLiquidationAnomalyRows(section);
+  const rows = filteredOiLiquidationAnomalyRows(section);
+  const visible = rows.slice(0, oiLiquidationAnomalyExpanded ? 100 : 50);
+  count.textContent = section ? `${visible.length} of ${rows.length}` : '';
+  if (!rows.length) {
+    const panelStatus = oiLiquidationAnomalyPanelStatus(section);
+    const historyReady = oiLiquidationHistoryReady(section);
+    let title, detail;
+    if (!section) {
+      title = signalSnapshotError
+        ? 'OI positioning and liquidation proxy data is unavailable'
+        : 'Open Signal Radar to load';
+      detail = signalSnapshotError
+        ? 'No alert or no-alert conclusion is available.'
+        : 'This section displays only server-classified OI positioning and large-liquidation proxy alerts.';
+    } else if (allRows.length) {
+      title = 'No known OI or liquidation proxy alerts match the current filters';
+      detail = panelStatus === 'full' && historyReady
+        ? 'Adjust the alert type, category, venue, trader bias, data status or search filters.'
+        : 'Adjust the filters. Coverage or history is incomplete, so this is not a no-anomaly conclusion.';
+    } else if (panelStatus === 'full' && historyReady) {
+      title = 'No OI positioning or large-liquidation proxy anomalies in this snapshot';
+      detail = 'The server reports Full source coverage and ready OI history. The proxy is not a trade-by-trade liquidation feed.';
+    } else if (panelStatus === 'unavailable') {
+      title = 'OI positioning and liquidation proxy data is unavailable';
+      detail = 'No alert or no-alert conclusion is available.';
+    } else if (panelStatus === 'partial') {
+      title = 'OI positioning and liquidation proxy coverage is Partial';
+      detail = 'Known alerts remain visible, but incomplete OI, volume, trader positioning or history prevents an all-clear conclusion.';
+    } else {
+      title = 'OI and liquidation-proxy history is warming';
+      detail = 'The server must finish the required hourly and completed-day history before an absence conclusion is available.';
+    }
+    host.innerHTML = `<div class="radar-empty"><div class="radar-empty-title">${escapeHtml(title)}</div><div class="radar-empty-detail">${escapeHtml(detail)}</div></div>`;
+    moreWrap.style.display = 'none';
+    return;
+  }
+
+  const htmlRows = visible.map(({ row, serverIndex }) => {
+    const symbol = String(row?.symbol || '').trim().toUpperCase();
+    const category = String(row?.category || '').trim().toLowerCase();
+    const rank = numberOrNull(row?.rank) ?? serverIndex + 1;
+    const trigger = oiLiquidationAnomalyTrigger(row);
+    const triggerParts = trigger === 'both' ? ['oi_rising','liquidation_proxy'] : [trigger];
+    const alertHtml = triggerParts.map(type => `<span class="oi-liquidation-alert ${type.replaceAll('_','-')} i18n-ui-token">${escapeHtml(oiLiquidationTriggerLabel(type))}</span>`).join('');
+    const fieldStatus = row?.fieldStatus || {};
+    const currentOiStatus = radarSafeStatus(fieldStatus.currentOpenInterestUsd || fieldStatus.currentOpenInterest);
+    const closesStatus = radarSafeStatus(fieldStatus.completedDailyCloses);
+    const peakStatus = radarSafeStatus(fieldStatus.peak24hOpenInterestUsd || fieldStatus.peak24hOpenInterest);
+    const drawdownStatus = radarSafeStatus(fieldStatus.drawdown24hUsd || fieldStatus.drawdown24h);
+    const volumeStatus = radarSafeStatus(fieldStatus.currentVolume24hUsd || fieldStatus.currentVolume);
+    const closes = Array.isArray(row?.completedDailyCloses) ? row.completedDailyCloses.slice(-3) : [];
+    const closesHtml = closes.length ? closes.map(close => {
+      const parsed = Date.parse(close?.day);
+      const day = Number.isFinite(parsed) ? new Date(parsed).toLocaleDateString(window.uiLocale(), { month:'short', day:'numeric', timeZone:'UTC' }) : '—';
+      return `<div class="oi-history-close"><div class="oi-history-day">${escapeHtml(day)}</div><div class="oi-history-value">${fmtVolume(numberOrNull(close?.openInterestUsd))}</div></div>`;
+    }).join('') : '<span>—</span>';
+    const trend = oiLiquidationAnomalyTrend(row);
+    const positions = oiLiquidationTopTraderPositions(row);
+    const overallBias = oiLiquidationOverallTraderBias(row);
+    const positionsHtml = positions.length ? positions.map(position => {
+      const available = position.status === 'full' && position.longShortRatio !== null && position.bias !== 'unavailable';
+      const ratio = available ? position.longShortRatio.toFixed(3) : '—';
+      const split = available && position.longPositionPct !== null && position.shortPositionPct !== null
+        ? `Long ${position.longPositionPct.toFixed(1)}% · Short ${position.shortPositionPct.toFixed(1)}%`
+        : 'Unavailable';
+      const observed = available && Number.isFinite(Date.parse(position.observedAt)) ? radarTimestamp(position.observedAt) : 'Unavailable';
+      return `<div class="spot-anomaly-contract"><strong>Binance</strong> · <span data-i18n-skip>${escapeHtml(position.venueSymbol)}</span><div>Ratio ${escapeHtml(ratio)} · ${dataStatusBadge(position.status)}</div><div>${escapeHtml(split)} · ${escapeHtml(observed)}</div></div>`;
+    }).join('') : '<div class="spot-anomaly-unlisted">Unavailable</div>';
+    const venues = (Array.isArray(row?.venues) ? row.venues : []).map(oiLiquidationVenueLabel).filter(Boolean);
+    const listingCount = numberOrNull(row?.listingCount);
+    const peakAt = Number.isFinite(Date.parse(row?.peak24hAt)) ? radarTimestamp(row.peak24hAt) : 'Unavailable';
+    return `<tr class="radar-row volume-anomaly-row" ${assetIntelligenceTriggerAttrs(symbol, category, 'oi and liquidation anomalies')}>
+      <td><div class="radar-asset-symbol"><span class="radar-rank">#${escapeHtml(rank)}</span> <span data-i18n-skip>${escapeHtml(symbol)}</span></div><div class="radar-asset-meta"><span class="radar-category">${escapeHtml(category)}</span></div></td>
+      <td><div class="oi-liquidation-alerts">${alertHtml}</div><div class="radar-baseline">Server classified</div></td>
+      <td><div class="radar-value-status"><span>${fmtVolume(numberOrNull(row?.currentOpenInterestUsd))}</span>${dataStatusBadge(currentOiStatus)}</div></td>
+      <td><div class="oi-history-closes">${closesHtml}</div><div class="radar-baseline">${dataStatusBadge(closesStatus)} <span class="oi-trend ${trend}">${escapeHtml(oiLiquidationTrendLabel(trend))}</span></div></td>
+      <td><div class="radar-value-status"><span>${fmtVolume(numberOrNull(row?.peak24hOpenInterestUsd))}</span>${dataStatusBadge(peakStatus)}</div><div class="radar-baseline">${escapeHtml(peakAt)}</div></td>
+      <td><div class="radar-value-status"><span>${fmtVolume(numberOrNull(row?.drawdown24hUsd))}</span>${dataStatusBadge(drawdownStatus)}</div><div class="radar-baseline">Deleveraging proxy</div></td>
+      <td><div class="radar-value-status"><span>${fmtVolume(numberOrNull(row?.currentVolume24hUsd))}</span>${dataStatusBadge(volumeStatus)}</div></td>
+      <td class="oi-trader-ratio"><div class="spot-anomaly-contracts">${positionsHtml}</div><span class="oi-trader-bias ${overallBias} i18n-ui-token">${escapeHtml(oiLiquidationTraderBiasLabel(overallBias))}</span><div class="radar-baseline">${dataStatusBadge(radarSafeStatus(fieldStatus.topTraderPositions))}</div></td>
+      <td class="oi-liquidation-venues"><div class="radar-coverage-venues">${escapeHtml(venues.length ? venues.join(' · ') : 'Unavailable')}</div><div class="radar-baseline">${listingCount === null ? '—' : `${Math.max(0,Math.trunc(listingCount))} listings`}</div></td>
+      <td><div>${dataStatusBadge(oiLiquidationAnomalyRowStatus(row))}</div><div class="radar-baseline">History · ${radarHistoryBadge(String(section?.history?.status || 'unavailable').toLowerCase())}</div><div class="radar-baseline">Aggregated OI and proxy values · ${dataStatusBadge('estimated')}</div></td>
+    </tr>`;
+  }).join('');
+  host.innerHTML = `<div class="radar-table-wrap"><table class="radar-table volume-anomaly-table oi-liquidation-table"><thead><tr><th>Asset</th><th>Alert</th><th>Current OI</th><th>3 Completed-Day OI Closes / Trend</th><th>24h OI Peak</th><th>Peak Drawdown</th><th>24h Volume</th><th>Binance Top Trader Position Ratio / Bias</th><th>Venues</th><th>Data Status</th></tr></thead><tbody>${htmlRows}</tbody></table></div>`;
+  moreWrap.style.display = rows.length > 50 ? 'block' : 'none';
+  more.setAttribute('aria-expanded', String(oiLiquidationAnomalyExpanded));
+  more.setAttribute('aria-controls', 'oiLiquidationAnomalyTableRegion');
+  more.textContent = oiLiquidationAnomalyExpanded ? `Less · ${visible.length} / ${rows.length}` : `More · ${visible.length} / ${Math.min(rows.length,100)}`;
+}
+
+function renderOiLiquidationAnomalies(payload) {
+  const section = oiLiquidationAnomalyPayload(payload);
+  if (section) updateOiLiquidationAnomalyFilterOptions(section);
+  renderOiLiquidationAnomalySummary(section);
+  renderOiLiquidationAnomalyStatus(section);
+  renderOiLiquidationAnomalySources(section);
+  renderOiLiquidationAnomalyTable(section);
+}
+
 function renderRadarStatus(payload, indexedRows) {
   const host = document.getElementById('radarStatus');
   if (!host) return;
@@ -9581,6 +10351,7 @@ function renderSignalRadar() {
   renderRadarKpis(payload, indexedRows);
   renderPerpVolumeAnomalies(payload);
   renderSpotVolumePriceAnomalies(payload);
+  renderOiLiquidationAnomalies(payload);
   renderCompetitorListings();
   renderRadarTable(payload, indexedRows);
 }
@@ -9615,6 +10386,12 @@ async function loadSignalSnapshot(force = false) {
       if (!spotVolumePriceAnomalyContractValid(payload)) {
         console.warn('[Signal Radar] spot volume and price anomaly section unavailable or invalid');
         payload.spotVolumePriceAnomalies = unavailableSpotVolumePriceAnomalySection(payload);
+      }
+      // This panel is additive too. A missing or internally inconsistent child
+      // must fail closed without taking the established Radar modules down.
+      if (!oiLiquidationAnomalyContractValid(payload)) {
+        console.warn('[Signal Radar] OI positioning and liquidation proxy section unavailable or invalid');
+        payload.oiLiquidationAnomalies = unavailableOiLiquidationAnomalySection(payload);
       }
       signalSnapshotCache = { receivedAt:Date.now(), payload };
       signalSnapshotFailures = 0;
@@ -9728,6 +10505,35 @@ function setSpotVolumePriceAnomalySort(value) {
 
 function showMoreSpotVolumePriceAnomalies() {
   spotVolumePriceAnomalyExpanded = !spotVolumePriceAnomalyExpanded;
+  renderSignalRadar();
+}
+
+function setOiLiquidationAnomalyFilter(key, value) {
+  if (!['type','category','venue','bias','status'].includes(key)) return;
+  const normalized = String(value || 'all').toLowerCase();
+  if (key === 'type') oiLiquidationAnomalyFilter.type = ['all','oi_rising','liquidation_proxy','both'].includes(normalized) ? normalized : 'all';
+  else if (key === 'bias') oiLiquidationAnomalyFilter.bias = ['all','bullish','bearish','neutral','mixed','unavailable'].includes(normalized) ? normalized : 'all';
+  else if (key === 'status') oiLiquidationAnomalyFilter.status = ['all','full','partial','estimated','unavailable'].includes(normalized) ? normalized : 'all';
+  else oiLiquidationAnomalyFilter[key] = normalized || 'all';
+  oiLiquidationAnomalyExpanded = false;
+  renderSignalRadar();
+}
+
+function setOiLiquidationAnomalySearch(value) {
+  oiLiquidationAnomalyFilter.search = String(value || '');
+  oiLiquidationAnomalyExpanded = false;
+  renderSignalRadar();
+}
+
+function setOiLiquidationAnomalySort(value) {
+  const normalized = String(value || 'priority').toLowerCase();
+  oiLiquidationAnomalyFilter.sort = ['priority','oi','drawdown','volume','trader-ratio','asset'].includes(normalized) ? normalized : 'priority';
+  oiLiquidationAnomalyExpanded = false;
+  renderSignalRadar();
+}
+
+function showMoreOiLiquidationAnomalies() {
+  oiLiquidationAnomalyExpanded = !oiLiquidationAnomalyExpanded;
   renderSignalRadar();
 }
 

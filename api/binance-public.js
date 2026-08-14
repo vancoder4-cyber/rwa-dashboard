@@ -12,6 +12,7 @@ import {
 export const config = { regions: ['sin1'], maxDuration: 60 };
 
 const BINANCE_FUTURES_BASE = 'https://fapi.binance.com/fapi/v1';
+const BINANCE_DATA_BASE = 'https://fapi.binance.com';
 const BINANCE_SPOT_BASE = 'https://data-api.binance.vision/api/v3';
 const ENDPOINTS = Object.freeze({
   exchangeInfo: '/exchangeInfo',
@@ -27,6 +28,14 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const EXPECTED_DAILY_CANDLES = 30;
 const FUNCTION_BUDGET_MS = 55_000;
 const SPOT_TICKER_BATCH_SIZE = 80;
+const POSITIONING_CONCURRENCY = 20;
+const POSITIONING_BUDGET_MS = 17_000;
+const OI_CACHE_SECONDS = 240;
+const OI_CACHE_SWR_SECONDS = 60;
+const OI_PARTIAL_CACHE_SECONDS = 60;
+const TOP_TRADER_CACHE_SECONDS = 3_300;
+const TOP_TRADER_CACHE_SWR_SECONDS = 300;
+const TOP_TRADER_PARTIAL_CACHE_SECONDS = 300;
 
 function singleQueryValue(value) {
   return typeof value === 'string' ? value : null;
@@ -60,6 +69,58 @@ function isAdmittedBinanceRwaContract(contract) {
   if (contract?.contractType === 'TRADIFI_PERPETUAL') return true;
   return contract?.contractType === 'PERPETUAL' &&
     AUDITED_METAL_EXCEPTIONS.has(String(contract?.baseAsset || ''));
+}
+
+export function selectBinanceRwaContractCatalog(exchangeInfo) {
+  if (!Array.isArray(exchangeInfo?.symbols) || !exchangeInfo.symbols.length) {
+    throw new TypeError('Invalid Binance exchangeInfo catalog');
+  }
+  const rows = [];
+  const seen = new Set();
+  for (const contract of exchangeInfo.symbols) {
+    if (!isAdmittedBinanceRwaContract(contract)) continue;
+    const symbol = String(contract?.symbol || '');
+    const baseAsset = String(contract?.baseAsset || '');
+    if (!BINANCE_SYMBOL_PATTERN.test(symbol) || !BINANCE_BASE_PATTERN.test(baseAsset) || seen.has(symbol)) {
+      throw new TypeError('Invalid or duplicate Binance RWA catalog identity');
+    }
+    seen.add(symbol);
+    rows.push({
+      symbol,
+      baseAsset,
+      contractType:String(contract?.contractType || ''),
+      underlyingType:String(contract?.underlyingType || ''),
+    });
+  }
+  if (!rows.length) throw new TypeError('Binance RWA catalog is empty');
+  return rows.sort((left, right) => left.symbol.localeCompare(right.symbol));
+}
+
+export function normalizeBinanceOpenInterestRow(expectedSymbol, payload, nowMs = Date.now()) {
+  const symbol = String(expectedSymbol || '').trim().toUpperCase();
+  const observedAt = Number(payload?.time);
+  const openInterest = finiteNonnegative(payload?.openInterest);
+  if (!BINANCE_SYMBOL_PATTERN.test(symbol) || String(payload?.symbol || '').trim().toUpperCase() !== symbol ||
+      openInterest === null || !Number.isSafeInteger(observedAt) || observedAt > nowMs + 5 * 60_000 ||
+      observedAt < nowMs - 10 * 60_000) return null;
+  return { symbol, openInterest, observedAt:new Date(observedAt).toISOString() };
+}
+
+export function normalizeBinanceTopTraderPositionRow(expectedSymbol, payload, nowMs = Date.now()) {
+  const symbol = String(expectedSymbol || '').trim().toUpperCase();
+  const rows = Array.isArray(payload) ? payload : [];
+  const row = rows.length === 1 ? rows[0] : null;
+  const timestamp = Number(row?.timestamp);
+  const ratio = finiteNonnegative(row?.longShortRatio);
+  const longAccount = finiteNonnegative(row?.longAccount);
+  const shortAccount = finiteNonnegative(row?.shortAccount);
+  if (!BINANCE_SYMBOL_PATTERN.test(symbol) || !row || String(row.symbol || '').trim().toUpperCase() !== symbol ||
+      ratio === null || longAccount === null || longAccount > 1 || shortAccount === null || shortAccount <= 0 ||
+      shortAccount > 1 || Math.abs(longAccount + shortAccount - 1) > 0.002 ||
+      !Number.isSafeInteger(timestamp) || timestamp > nowMs || timestamp < nowMs - 3 * 60 * 60_000) return null;
+  const computedRatio = longAccount / shortAccount;
+  if (Math.abs(ratio - computedRatio) / Math.max(1, Math.abs(computedRatio)) > 0.01) return null;
+  return { symbol, longShortRatio:ratio, longAccount, shortAccount, timestamp };
 }
 
 export function selectBinanceKlineSymbols(exchangeInfo, tickerRows) {
@@ -245,6 +306,60 @@ async function fetchKlineTotals(symbols, now = Date.now(), deadlineAt = now + FU
   return { results: Object.fromEntries(entries), upstreamFailures };
 }
 
+async function fetchBinancePositioningSnapshot(snapshotType, deadlineAt) {
+  const optionalMarketDataApiKey = String(process.env.BINANCE_MARKET_DATA_API_KEY || '').trim();
+  const exchangeInfo = await fetchBinanceJson('/exchangeInfo', deadlineAt);
+  const instruments = selectBinanceRwaContractCatalog(exchangeInfo);
+  const capturedAtMs = Date.now();
+  let upstreamFailures = 0;
+  const rows = await mapWithConcurrency(instruments, POSITIONING_CONCURRENCY, async instrument => {
+    try {
+      const path = snapshotType === 'open-interest'
+        ? `${BINANCE_FUTURES_BASE}/openInterest?symbol=${encodeURIComponent(instrument.symbol)}`
+        : `${BINANCE_DATA_BASE}/futures/data/topLongShortPositionRatio?${new URLSearchParams({
+            symbol:instrument.symbol,
+            period:'1h',
+            limit:'1',
+          })}`;
+      const headers = { Accept:'application/json' };
+      if (snapshotType === 'top-trader-position-ratio' && optionalMarketDataApiKey) {
+        headers['X-MBX-APIKEY'] = optionalMarketDataApiKey;
+      }
+      const upstream = await fetch(path, {
+        headers,
+        signal:AbortSignal.timeout(timeoutWithinDeadline(deadlineAt, 8_000)),
+      });
+      if (!upstream.ok) {
+        upstreamFailures += 1;
+        return null;
+      }
+      const payload = await upstream.json();
+      const normalized = snapshotType === 'open-interest'
+        ? normalizeBinanceOpenInterestRow(instrument.symbol, payload, capturedAtMs)
+        : normalizeBinanceTopTraderPositionRow(instrument.symbol, payload, capturedAtMs);
+      if (!normalized) upstreamFailures += 1;
+      return normalized;
+    } catch {
+      upstreamFailures += 1;
+      return null;
+    }
+  });
+  const acceptedRows = rows.filter(Boolean).sort((left, right) => left.symbol.localeCompare(right.symbol));
+  if (!acceptedRows.length) throw new Error(`Binance ${snapshotType} snapshot unavailable`);
+  const expected = instruments.length;
+  const observed = acceptedRows.length;
+  return {
+    schemaVersion:1,
+    snapshotType,
+    generatedAt:new Date(capturedAtMs).toISOString(),
+    catalogStatus:'full',
+    status:observed === expected ? 'full' : 'partial',
+    coverage:{ expected, observed, missing:expected - observed, upstreamFailures },
+    instruments,
+    rows:acceptedRows,
+  };
+}
+
 export default async function handler(req, res) {
   const deadlineAt = Date.now() + FUNCTION_BUDGET_MS;
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -256,8 +371,13 @@ export default async function handler(req, res) {
   const endpoint = singleQueryValue(req.query?.endpoint);
   const isKlines = endpoint === 'klines';
   const isSpotSnapshot = endpoint === 'spot-snapshot';
+  const positioningSnapshotType = endpoint === 'oi-snapshot'
+    ? 'open-interest'
+    : endpoint === 'top-trader-snapshot' ? 'top-trader-position-ratio' : null;
   const path = endpoint ? ENDPOINTS[endpoint] : null;
-  if (!isKlines && !isSpotSnapshot && !path) return sendError(res, 400, 'Invalid endpoint');
+  if (!isKlines && !isSpotSnapshot && !positioningSnapshotType && !path) {
+    return sendError(res, 400, 'Invalid endpoint');
+  }
   try {
     rejectUnexpectedQueryKeys(req.query, new Set(['endpoint']));
   } catch (error) {
@@ -319,6 +439,28 @@ export default async function handler(req, res) {
     else if (tickerSnapshot.coverage.status === 'partial') setPublicCache(res, 15, 45);
     else setNoStore(res);
     return res.status(200).json(payload);
+  }
+
+  if (positioningSnapshotType) {
+    try {
+      const positioningDeadlineAt = Math.min(deadlineAt, Date.now() + POSITIONING_BUDGET_MS);
+      const payload = await fetchBinancePositioningSnapshot(positioningSnapshotType, positioningDeadlineAt);
+      res.setHeader('X-RWA-Catalog-Rows', String(payload.coverage.expected));
+      res.setHeader('X-RWA-Observed-Rows', String(payload.coverage.observed));
+      res.setHeader('X-RWA-Snapshot-Status', payload.status);
+      if (positioningSnapshotType === 'open-interest') {
+        if (payload.status === 'full') setPublicCache(res, OI_CACHE_SECONDS, OI_CACHE_SWR_SECONDS);
+        else setPublicCache(res, OI_PARTIAL_CACHE_SECONDS, OI_CACHE_SWR_SECONDS);
+      } else if (payload.status === 'full') {
+        setPublicCache(res, TOP_TRADER_CACHE_SECONDS, TOP_TRADER_CACHE_SWR_SECONDS);
+      } else {
+        setPublicCache(res, TOP_TRADER_PARTIAL_CACHE_SECONDS, TOP_TRADER_CACHE_SWR_SECONDS);
+      }
+      return res.status(200).json(payload);
+    } catch (error) {
+      console.error(`[binance-public] fixed ${positioningSnapshotType} unavailable: ${error?.message || 'unknown error'}`);
+      return sendError(res, 502, `Binance RWA ${positioningSnapshotType} unavailable`);
+    }
   }
 
   try {

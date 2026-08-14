@@ -15,6 +15,15 @@ import {
   normalizeDailyVolumeHistory,
 } from './_lib/volume-anomaly.js';
 import {
+  OI_LIQUIDATION_HISTORY_HOURS,
+  OI_LIQUIDATION_HISTORY_NAMESPACE,
+  buildOiLiquidationAnomalies,
+  compactOiHourlySnapshot,
+  mergeOiHourlyHistory,
+  normalizeBinanceTopTraderPositions,
+  normalizeOiHourlyHistory,
+} from './_lib/oi-liquidation-anomaly.js';
+import {
   categoryFromOfficialSignalType,
   normalizeSignalIdentity,
 } from './_lib/security-identity.js';
@@ -49,8 +58,12 @@ const DAILY_VOLUME_HISTORY_KEY = 'daily-volume-history-v1';
 const DAILY_VOLUME_HISTORY_TTL_SECONDS = 60 * 24 * 60 * 60;
 const SPOT_ANOMALY_HISTORY_KEY = 'spot-volume-price-daily-v1';
 const SPOT_ANOMALY_HISTORY_TTL_SECONDS = 10 * 24 * 60 * 60;
+const OI_LIQUIDATION_HISTORY_KEY = 'oi-liquidation-hourly-v1';
+const OI_LIQUIDATION_HISTORY_TTL_SECONDS = 7 * 24 * 60 * 60;
 const SOURCE_TIMEOUT_MS = 20_000;
 const BITGET_BASE = 'https://api.bitget.com';
+const BINANCE_CORE_TIMEOUT_MS = 12_000;
+const BINANCE_POSITIONING_TIMEOUT_MS = 20_000;
 const SIGNAL_SOURCE_NAMES = Object.freeze(['gate', 'binance', 'bitget', 'tradexyz', 'okx']);
 export const TRADE_XYZ_UNTYPED_RWA_CATEGORIES = Object.freeze({
   URANIUM:'commodity',
@@ -91,6 +104,21 @@ function reportedVolumeFields(value, method, { estimated = false } = {}) {
   };
 }
 
+function reportedOpenInterestFields(value, method, { estimated = true } = {}) {
+  const numeric = finiteOrNull(value);
+  const openInterestUsd = numeric !== null && numeric >= 0 ? numeric : null;
+  return {
+    openInterestUsd,
+    openInterestMethod:openInterestUsd === null ? null : method,
+    openInterestStatus:openInterestUsd === null ? 'unavailable' : estimated ? 'estimated' : 'full',
+  };
+}
+
+function hasCatalogIdentityWarning(warnings) {
+  return (Array.isArray(warnings) ? warnings : []).some(warning =>
+    /(?:IDENTITY|INSTRUMENTS_UNAVAILABLE|CATALOG|UPSTREAM_COVERAGE)/i.test(String(warning)));
+}
+
 function positiveDeltaHours(later, earlier) {
   const laterMs = finiteOrNull(later);
   const earlierMs = finiteOrNull(earlier);
@@ -121,6 +149,7 @@ export function normalizeOkxSignalSnapshot(payload) {
   const oiMap = okxRowsByInstrument(payload?.openInterest);
   const fundingMap = okxRowsByInstrument(payload?.funding);
   const listings = [];
+  let admittedCatalogListings = 0;
 
   for (const instrument of instruments) {
     const venueSymbol = String(instrument?.instId || '').toUpperCase();
@@ -129,6 +158,7 @@ export function normalizeOkxSignalSnapshot(payload) {
     const officialCategory = OKX_SIGNAL_CATEGORIES[String(instrument?.instCategory || '')] || null;
     const isPerpetual = instType === 'SWAP' || (instType === 'FUTURES' && ruleType === 'xperp');
     if (String(instrument?.state || '').toLowerCase() !== 'live' || !isPerpetual || !officialCategory) continue;
+    admittedCatalogListings += 1;
     if (!/^[A-Z0-9_-]{3,80}$/.test(venueSymbol)) continue;
 
     // ctValCcy is official contract metadata. Parsing an ambiguous ticker is
@@ -141,7 +171,10 @@ export function normalizeOkxSignalSnapshot(payload) {
     const mark = markMap.get(venueSymbol) || {};
     const openInterest = oiMap.get(venueSymbol) || {};
     const funding = fundingMap.get(venueSymbol) || {};
-    const price = firstNumber(mark.markPx, ticker.last);
+    const markPrice = finiteOrNull(mark.markPx);
+    const lastPrice = finiteOrNull(ticker.last);
+    const price = markPrice ?? lastPrice;
+    const valuationPriceMethod = markPrice !== null ? 'mark-price' : 'last-price';
     const open24h = finiteOrNull(ticker.open24h);
     const last = finiteOrNull(ticker.last);
     const baseVolume = finiteOrNull(ticker.volCcy24h);
@@ -149,10 +182,21 @@ export function normalizeOkxSignalSnapshot(payload) {
     const derivedQuoteVolume = directQuoteVolume === null && baseVolume !== null && price > 0
       ? baseVolume * price
       : null;
-    const oiBase = firstNumber(openInterest.oiCcy,
-      finiteOrNull(openInterest.oi) !== null && finiteOrNull(instrument.ctVal) !== null
-        ? Number(openInterest.oi) * Number(instrument.ctVal)
-        : null);
+    const directOiUsd = finiteOrNull(openInterest.oiUsd);
+    const oiCcy = finiteOrNull(openInterest.oiCcy);
+    const contractCount = finiteOrNull(openInterest.oi);
+    const contractValue = finiteOrNull(instrument.ctVal);
+    const contractMultiplier = finiteOrNull(instrument.ctMult);
+    let derivedOiUsd = null;
+    let derivedOiMethod = null;
+    if (directOiUsd === null && oiCcy !== null && oiCcy >= 0 && price > 0) {
+      derivedOiUsd = oiCcy * price;
+      derivedOiMethod = `oi-ccy-x-${valuationPriceMethod}`;
+    } else if (directOiUsd === null && contractCount !== null && contractCount >= 0 &&
+        contractValue > 0 && contractMultiplier > 0 && price > 0) {
+      derivedOiUsd = contractCount * contractValue * contractMultiplier * price;
+      derivedOiMethod = `contract-count-x-ctval-x-ctmult-x-${valuationPriceMethod}`;
+    }
 
     listings.push({
       symbol: identity.symbol,
@@ -163,11 +207,14 @@ export function normalizeOkxSignalSnapshot(payload) {
       priceUsd: price,
       ...reportedVolumeFields(
         directQuoteVolume ?? derivedQuoteVolume,
-        directQuoteVolume !== null ? 'official-quote-volume' : 'base-volume-x-price',
+        directQuoteVolume !== null ? 'official-quote-volume' : `base-volume-x-${valuationPriceMethod}`,
         { estimated:directQuoteVolume === null && derivedQuoteVolume !== null },
       ),
-      openInterestUsd: firstNumber(openInterest.oiUsd,
-        oiBase !== null && price !== null ? oiBase * price : null),
+      ...reportedOpenInterestFields(
+        directOiUsd ?? derivedOiUsd,
+        directOiUsd !== null ? 'official-oi-usd' : derivedOiMethod,
+        { estimated:directOiUsd === null },
+      ),
       fundingRate: firstNumber(funding.fundingRate, funding.settFundingRate),
       fundingIntervalHours: okxFundingIntervalHours(funding),
       change24hPct: last !== null && open24h > 0 ? ((last - open24h) / open24h) * 100 : null,
@@ -185,6 +232,7 @@ export function normalizeOkxSignalSnapshot(payload) {
     .filter(([, fieldMap]) => admittedIds.some(instId => !fieldMap.has(instId)))
     .map(([warning]) => warning);
   if (!instruments.length) warnings.unshift('INSTRUMENTS_UNAVAILABLE');
+  if (listings.length !== admittedCatalogListings) warnings.push('IDENTITY_COVERAGE_INCOMPLETE');
   const upstreamWarnings = Array.isArray(payload?.coverage?.warnings) ? payload.coverage.warnings : [];
   warnings.push(...upstreamWarnings.map(value => String(value)).filter(Boolean));
   const explicitCoverage = okxCoverageStatus(payload?.coverage);
@@ -213,12 +261,98 @@ function deploymentBaseUrl(req) {
   return `https://${deployment || 'avenir-rwa-analyst.vercel.app'}`;
 }
 
-async function fetchSameOrigin(baseUrl, path) {
+async function fetchSameOrigin(baseUrl, path, timeoutMs = SOURCE_TIMEOUT_MS) {
   return fetchJsonWithPolicy(
     `${baseUrl}${path}`,
     { headers: { Accept: 'application/json' } },
-    { timeoutMs: SOURCE_TIMEOUT_MS, retries: 0 },
+    { timeoutMs, retries: 0 },
   );
+}
+
+function validateBinancePositioningProxy(payload, snapshotType, nowMs = Date.now()) {
+  const generatedAtMs = Date.parse(payload?.generatedAt);
+  const maximumAgeMs = snapshotType === 'open-interest' ? 15 * 60_000 : 70 * 60_000;
+  const instruments = Array.isArray(payload?.instruments) ? payload.instruments : null;
+  const rows = Array.isArray(payload?.rows) ? payload.rows : null;
+  const coverage = payload?.coverage || {};
+  if (payload?.schemaVersion !== 1 || payload?.snapshotType !== snapshotType || payload?.catalogStatus !== 'full' ||
+      !['full','partial'].includes(String(payload?.status || '').toLowerCase()) ||
+      !Number.isFinite(generatedAtMs) || generatedAtMs > nowMs + 5 * 60_000 || generatedAtMs < nowMs - maximumAgeMs ||
+      !instruments?.length || !rows?.length) throw new TypeError('Invalid Binance positioning proxy snapshot');
+  const symbols = new Set();
+  for (const instrument of instruments) {
+    const symbol = String(instrument?.symbol || '').trim().toUpperCase();
+    const baseAsset = String(instrument?.baseAsset || '').trim().toUpperCase();
+    const contractType = String(instrument?.contractType || '').trim().toUpperCase();
+    const admitted = contractType === 'TRADIFI_PERPETUAL' ||
+      (contractType === 'PERPETUAL' && ['PAXG','XAUT'].includes(baseAsset));
+    if (!/^[A-Z0-9]{2,40}$/.test(symbol) || !/^[A-Z0-9-]{1,40}$/.test(baseAsset) ||
+        !admitted || symbols.has(symbol)) throw new TypeError('Invalid Binance positioning proxy catalog');
+    symbols.add(symbol);
+  }
+  const rowSymbols = rows.map(row => String(row?.symbol || '').trim().toUpperCase());
+  if (new Set(rowSymbols).size !== rowSymbols.length || rowSymbols.some(symbol => !symbols.has(symbol)) ||
+      coverage.expected !== instruments.length || coverage.observed !== rows.length ||
+      coverage.missing !== instruments.length - rows.length || coverage.upstreamFailures !== coverage.missing ||
+      !Number.isInteger(coverage.expected) || !Number.isInteger(coverage.observed) ||
+      !Number.isInteger(coverage.missing) || !Number.isInteger(coverage.upstreamFailures) ||
+      (payload.status === 'full' && rows.length !== instruments.length) ||
+      (payload.status === 'partial' && !(rows.length < instruments.length))) {
+    throw new TypeError('Incoherent Binance positioning proxy coverage');
+  }
+  return { generatedAtMs, symbols, rows };
+}
+
+export function normalizeBinanceOiProxySnapshot(payload, listings, nowMs = Date.now()) {
+  const proxy = validateBinancePositioningProxy(payload, 'open-interest', nowMs);
+  const quantityBySymbol = new Map();
+  for (const row of proxy.rows) {
+    const venueSymbol = String(row?.symbol || '').trim().toUpperCase();
+    const quantity = finiteOrNull(row?.openInterest);
+    const observedAtMs = Date.parse(row?.observedAt);
+    if (quantity === null || quantity < 0 || !Number.isFinite(observedAtMs) ||
+        observedAtMs > proxy.generatedAtMs + 5 * 60_000 || observedAtMs < proxy.generatedAtMs - 10 * 60_000) {
+      throw new TypeError('Invalid Binance open-interest proxy row');
+    }
+    quantityBySymbol.set(venueSymbol, quantity);
+  }
+  return new Map((Array.isArray(listings) ? listings : []).map(listing => {
+    const venueSymbol = String(listing?.venueSymbol || '').trim().toUpperCase();
+    const quantity = quantityBySymbol.get(venueSymbol);
+    const price = finiteOrNull(listing?.priceUsd);
+    const valuationPriceMethod = String(listing?.oiValuationPriceMethod || '').trim().toLowerCase();
+    if (!proxy.symbols.has(venueSymbol) || quantity === undefined || !(price > 0) ||
+        !['mark-price','last-price'].includes(valuationPriceMethod)) return [venueSymbol, null];
+    return [venueSymbol, reportedOpenInterestFields(
+      quantity * price,
+      `open-interest-x-${valuationPriceMethod}`,
+    )];
+  }));
+}
+
+export function normalizeBinanceTopTraderProxySnapshot(payload, venueSymbols, nowMs = Date.now()) {
+  const proxy = validateBinancePositioningProxy(payload, 'top-trader-position-ratio', nowMs);
+  const rowsBySymbol = new Map(proxy.rows.map(row => [String(row?.symbol || '').trim().toUpperCase(), row]));
+  const symbols = [...new Set((Array.isArray(venueSymbols) ? venueSymbols : [])
+    .map(value => String(value || '').trim().toUpperCase())
+    .filter(value => /^[A-Z0-9]{2,40}$/.test(value)))].sort();
+  return new Map(symbols.map(venueSymbol => {
+    const row = rowsBySymbol.get(venueSymbol);
+    if (!proxy.symbols.has(venueSymbol) || !row) return [venueSymbol, {
+      venueSymbol, status:'unavailable', longShortRatio:null, longPositionPct:null,
+      shortPositionPct:null, bias:'unavailable', observedAt:null, reasonCode:'TOP_TRADER_NOT_OBSERVED',
+    }];
+    return [venueSymbol, normalizeBinanceTopTraderPositions(venueSymbol, [row], nowMs)];
+  }));
+}
+
+async function fetchBinanceTopTraderPositionRows(baseUrl, venueSymbols, nowMs) {
+  const payload = await fetchSameOrigin(
+    baseUrl,
+    '/api/binance-public?endpoint=top-trader-snapshot',
+    BINANCE_POSITIONING_TIMEOUT_MS,
+  );
+  return normalizeBinanceTopTraderProxySnapshot(payload, venueSymbols, nowMs);
 }
 
 function gateListings(payload) {
@@ -234,9 +368,14 @@ function gateListings(payload) {
     const identity = normalizeSignalIdentity(venueBase, admittedCategory, { venue:'gate' });
     if (!identity || !/^[A-Z0-9]{1,30}_USDT$/.test(venueSymbol)) continue;
     const ticker = tickerMap.get(venueSymbol) || {};
-    const price = firstNumber(ticker.mark_price, contract.mark_price, ticker.last, contract.last_price);
-    const quantity = firstNumber(ticker.total_size, contract.position_size);
-    const multiplier = firstNumber(contract.quanto_multiplier) ?? 1;
+    const markPrice = firstNumber(ticker.mark_price, contract.mark_price);
+    const lastPrice = firstNumber(ticker.last, contract.last_price);
+    const price = markPrice ?? lastPrice;
+    const valuationPriceMethod = markPrice !== null ? 'mark-price' : 'last-price';
+    // Gate documents position_size as aggregate long positions rather than
+    // total OI. Only the ticker's total_size is valid for this OI estimate.
+    const quantity = finiteOrNull(ticker.total_size);
+    const multiplier = finiteOrNull(contract.quanto_multiplier);
     const quoteVolume = firstNumber(ticker.volume_24h_quote, ticker.volume_24h_usd);
     rows.push({
       symbol: identity.symbol,
@@ -246,7 +385,12 @@ function gateListings(payload) {
       instrumentType: 'perpetual',
       priceUsd: price,
       ...reportedVolumeFields(quoteVolume, 'official-quote-volume'),
-      openInterestUsd: quantity !== null && price !== null ? quantity * multiplier * price : null,
+      ...reportedOpenInterestFields(
+        quantity !== null && quantity >= 0 && multiplier > 0 && price > 0
+          ? quantity * multiplier * price
+          : null,
+        `total-size-x-quanto-x-${valuationPriceMethod}`,
+      ),
       fundingRate: firstNumber(ticker.funding_rate, contract.funding_rate),
       fundingIntervalHours: (finiteOrNull(contract.funding_interval) || 28_800) / 3_600,
       change24hPct: finiteOrNull(ticker.change_percentage),
@@ -257,33 +401,40 @@ function gateListings(payload) {
 
 async function collectGate(baseUrl) {
   const payload = await fetchSameOrigin(baseUrl, '/api/gate-bulk?type=perp-snapshot');
+  const catalogContracts = Array.isArray(payload?.contracts) ? payload.contracts : [];
   const listings = gateListings(payload);
   if (!listings.length) throw new Error('trusted Gate RWA catalog is empty');
   const tickerContracts = new Set((payload?.tickers || []).map(ticker => ticker?.contract));
-  const tickersComplete = (payload?.contracts || []).every(contract => tickerContracts.has(contract?.name));
+  const tickersComplete = catalogContracts.every(contract => tickerContracts.has(contract?.name));
+  const identityCoverageComplete = listings.length === catalogContracts.length;
+  const warnings = [];
+  if (!tickersComplete) warnings.push('TICKERS_INCOMPLETE');
+  if (!identityCoverageComplete) warnings.push('IDENTITY_COVERAGE_INCOMPLETE');
   return {
     listings,
-    completeness: tickersComplete ? 'full' : 'partial',
-    warnings: tickersComplete ? [] : ['TICKERS_INCOMPLETE'],
+    completeness: warnings.length ? 'partial' : 'full',
+    warnings,
   };
 }
 
 async function collectBinance(baseUrl) {
   const requests = await Promise.allSettled([
-    fetchSameOrigin(baseUrl, '/api/binance-public?endpoint=exchangeInfo'),
-    fetchSameOrigin(baseUrl, '/api/binance-public?endpoint=premiumIndex'),
-    fetchSameOrigin(baseUrl, '/api/binance-public?endpoint=ticker24hr'),
-    fetchSameOrigin(baseUrl, '/api/binance-public?endpoint=fundingInfo'),
+    fetchSameOrigin(baseUrl, '/api/binance-public?endpoint=exchangeInfo', BINANCE_CORE_TIMEOUT_MS),
+    fetchSameOrigin(baseUrl, '/api/binance-public?endpoint=premiumIndex', BINANCE_CORE_TIMEOUT_MS),
+    fetchSameOrigin(baseUrl, '/api/binance-public?endpoint=ticker24hr', BINANCE_CORE_TIMEOUT_MS),
+    fetchSameOrigin(baseUrl, '/api/binance-public?endpoint=fundingInfo', BINANCE_CORE_TIMEOUT_MS),
+    fetchSameOrigin(baseUrl, '/api/binance-public?endpoint=oi-snapshot', BINANCE_POSITIONING_TIMEOUT_MS),
   ]);
   if (requests[0].status !== 'fulfilled' || !Array.isArray(requests[0].value?.symbols)) {
     throw new Error('trusted Binance exchangeInfo unavailable');
   }
   const info = requests[0].value;
-  const optionalAvailable = requests.slice(1).map((result, index) => result.status === 'fulfilled' &&
+  const optionalAvailable = requests.slice(1, 4).map((result, index) => result.status === 'fulfilled' &&
     Array.isArray(result.value) && (index === 2 || result.value.length > 0));
   const premiums = optionalAvailable[0] ? requests[1].value : [];
   const tickers = optionalAvailable[1] ? requests[2].value : [];
   const fundingInfo = optionalAvailable[2] ? requests[3].value : [];
+  const oiSnapshot = requests[4].status === 'fulfilled' ? requests[4].value : null;
   const premiumMap = new Map(premiums.map(row => [row.symbol, row]));
   const tickerMap = new Map(tickers.map(row => [row.symbol, row]));
   const intervalMap = new Map(fundingInfo.map(row => [row.symbol, finiteOrNull(row.fundingIntervalHours)]));
@@ -303,21 +454,36 @@ async function collectBinance(baseUrl) {
     const premium = premiumMap.get(venueSymbol) || {};
     const ticker = tickerMap.get(venueSymbol) || {};
     const quoteVolume = finiteOrNull(ticker.quoteVolume);
+    const markPrice = finiteOrNull(premium.markPrice);
+    const lastPrice = finiteOrNull(ticker.lastPrice);
+    const price = markPrice ?? lastPrice;
     listings.push({
       symbol: identity.symbol,
       category: identity.category,
       venue: 'binance',
       venueSymbol,
       instrumentType: 'perpetual',
-      priceUsd: firstNumber(premium.markPrice, ticker.lastPrice),
+      priceUsd:price,
+      oiValuationPriceMethod:markPrice !== null ? 'mark-price' : 'last-price',
       ...reportedVolumeFields(quoteVolume, 'official-quote-volume'),
-      openInterestUsd: null,
+      ...reportedOpenInterestFields(null, 'open-interest-x-mark-price'),
       fundingRate: finiteOrNull(premium.lastFundingRate),
       fundingIntervalHours: intervalMap.get(venueSymbol) || 8,
       change24hPct: finiteOrNull(ticker.priceChangePercent),
     });
   }
   if (!listings.length) throw new Error('trusted Binance TradFi catalog is empty');
+  let openInterestBySymbol = new Map();
+  try {
+    if (oiSnapshot) openInterestBySymbol = normalizeBinanceOiProxySnapshot(oiSnapshot, listings);
+  } catch (error) {
+    console.error('[signal-snapshot] Binance fixed OI proxy invalid', error);
+  }
+  for (const listing of listings) {
+    const fields = openInterestBySymbol.get(listing.venueSymbol);
+    if (fields) Object.assign(listing, fields);
+  }
+  const openInterestFieldCount = listings.filter(listing => Number.isFinite(listing.openInterestUsd)).length;
   const missing = optionalAvailable.filter(available => !available).length;
   const identityCoverageComplete = listings.length === admittedCatalogListings;
   const warnings = [];
@@ -326,7 +492,10 @@ async function collectBinance(baseUrl) {
   return {
     listings,
     completeness: missing || !identityCoverageComplete ? 'partial' : 'full',
-    warnings,
+    warnings:openInterestFieldCount === listings.length
+      ? warnings
+      : [...warnings, 'OPEN_INTEREST_INCOMPLETE'],
+    openInterestFieldCount,
   };
 }
 
@@ -354,18 +523,27 @@ async function collectBitget() {
   const tickerMap = new Map(tickers.map(row => [row.symbol, row]));
   const fundingMap = new Map(fundingRows.map(row => [row.symbol, row]));
   const listings = [];
+  let admittedCatalogListings = 0;
   for (const contract of contracts) {
     const venueBase = String(contract.baseCoin || '').toUpperCase();
     const venueSymbol = String(contract.symbol || '').toUpperCase();
     const officialType = String(contract.symbolType || '').toLowerCase();
     const exactKuaishouException = venueBase === 'KUAISHOU' && officialType === 'crypto';
     const category = exactKuaishouException ? 'equity' : categoryFromOfficialSignalType(officialType);
-    const identity = normalizeSignalIdentity(venueBase, category);
-    if (String(contract.isRwa || '').toLowerCase() !== 'yes' || contract.status !== 'online' || !identity) continue;
+    if (String(contract.isRwa || '').toLowerCase() !== 'yes' || contract.status !== 'online') continue;
+    // Explicit Crypto rows are correctly rejected, not unresolved RWA
+    // identities. Only the official RWA product classes (plus the exact dated
+    // KUAISHOU exception) belong in the admission-coverage denominator.
     if (!['stock', 'metal', 'commodity'].includes(officialType) && !exactKuaishouException) continue;
+    admittedCatalogListings += 1;
+    const identity = normalizeSignalIdentity(venueBase, category);
+    if (!identity) continue;
     const ticker = tickerMap.get(venueSymbol) || {};
     const funding = fundingMap.get(venueSymbol) || {};
-    const price = firstNumber(ticker.markPrice, ticker.lastPr);
+    const markPrice = finiteOrNull(ticker.markPrice);
+    const lastPrice = finiteOrNull(ticker.lastPr);
+    const price = markPrice ?? lastPrice;
+    const valuationPriceMethod = markPrice !== null ? 'mark-price' : 'last-price';
     const holdingAmount = finiteOrNull(ticker.holdingAmount);
     const changeFraction = finiteOrNull(ticker.change24h);
     const quoteVolume = firstNumber(ticker.quoteVolume, ticker.usdtVolume);
@@ -377,7 +555,10 @@ async function collectBitget() {
       instrumentType: 'perpetual',
       priceUsd: price,
       ...reportedVolumeFields(quoteVolume, 'official-quote-volume'),
-      openInterestUsd: holdingAmount !== null && price !== null ? holdingAmount * price : null,
+      ...reportedOpenInterestFields(
+        holdingAmount !== null && holdingAmount >= 0 && price > 0 ? holdingAmount * price : null,
+        `holding-amount-x-${valuationPriceMethod}`,
+      ),
       fundingRate: firstNumber(funding.fundingRate, ticker.fundingRate),
       fundingIntervalHours: firstNumber(funding.fundingRateInterval, contract.fundInterval) || 8,
       change24hPct: changeFraction === null ? null : changeFraction * 100,
@@ -385,10 +566,14 @@ async function collectBitget() {
   }
   if (!listings.length) throw new Error('trusted Bitget RWA catalog is empty');
   const missing = Number(!tickers.length) + Number(!fundingRows.length);
+  const identityCoverageComplete = listings.length === admittedCatalogListings;
+  const warnings = [];
+  if (missing) warnings.push('OPTIONAL_MARKET_FIELDS_UNAVAILABLE');
+  if (!identityCoverageComplete) warnings.push('IDENTITY_COVERAGE_INCOMPLETE');
   return {
     listings,
-    completeness: missing ? 'partial' : 'full',
-    warnings: missing ? ['OPTIONAL_MARKET_FIELDS_UNAVAILABLE'] : [],
+    completeness: warnings.length ? 'partial' : 'full',
+    warnings,
   };
 }
 
@@ -434,7 +619,10 @@ async function collectTradeXyz(baseUrl) {
       instrumentType: 'perpetual',
       priceUsd: price,
       ...reportedVolumeFields(dayNotionalVolume, 'official-day-notional'),
-      openInterestUsd: openInterest !== null && price !== null ? openInterest * price : null,
+      ...reportedOpenInterestFields(
+        openInterest !== null && openInterest >= 0 && price > 0 ? openInterest * price : null,
+        'open-interest-x-mark-price',
+      ),
       fundingRate: finiteOrNull(context.funding),
       fundingIntervalHours: 1,
       change24hPct: previousPrice > 0 && price !== null ? ((price - previousPrice) / previousPrice) * 100 : null,
@@ -583,6 +771,41 @@ async function updateSpotAnomalyHistory(listings, nowMs, {
   }
 }
 
+async function updateOiLiquidationHistory(assets, nowMs, {
+  writeRequested = false,
+  writeAllowed = false,
+} = {}) {
+  try {
+    const cache = getCache({ namespace:OI_LIQUIDATION_HISTORY_NAMESPACE });
+    const storedValue = await cache.get(OI_LIQUIDATION_HISTORY_KEY);
+    const stored = normalizeOiHourlyHistory(storedValue, nowMs);
+    if (!writeRequested || !writeAllowed) {
+      return {
+        status:'partial',
+        stored,
+        writeStatus:writeRequested ? 'skipped-incomplete-sources' : 'read-only',
+        error:null,
+      };
+    }
+    const current = compactOiHourlySnapshot(assets, nowMs);
+    const merged = mergeOiHourlyHistory(stored, current, nowMs);
+    await cache.set(OI_LIQUIDATION_HISTORY_KEY, merged, {
+      ttl:OI_LIQUIDATION_HISTORY_TTL_SECONDS,
+      tags:['rwa-signal-oi-liquidation-hourly-v1'],
+      name:'RWA perpetual OI and liquidation-proxy hourly history',
+    });
+    return { status:'partial', stored:merged, writeStatus:'stored', error:null };
+  } catch (error) {
+    console.error('[signal-snapshot] OI liquidation-proxy history unavailable', error);
+    return {
+      status:'unavailable',
+      stored:{ v:1, i:[], c:[], h:[] },
+      writeStatus:'unavailable',
+      error:error?.message || 'runtime cache unavailable',
+    };
+  }
+}
+
 function historyCoverageStatus(snapshotCount) {
   if (snapshotCount >= 168) return 'full';
   if (snapshotCount >= 24) return 'partial';
@@ -608,9 +831,9 @@ export function isSignalSnapshotComparable(sources, expectedSourceNames = null) 
   return names.length > 0 && names.every(name => sources?.[name]?.status === 'full');
 }
 
-export function signalHistoryWriteSucceeded(runtimeHistory, dailyVolumeHistory, spotAnomalyHistory) {
+export function signalHistoryWriteSucceeded(runtimeHistory, dailyVolumeHistory, spotAnomalyHistory, oiLiquidationHistory) {
   return runtimeHistory?.writeStatus === 'stored' && dailyVolumeHistory?.writeStatus === 'stored' &&
-    spotAnomalyHistory?.writeStatus === 'stored';
+    spotAnomalyHistory?.writeStatus === 'stored' && oiLiquidationHistory?.writeStatus === 'stored';
 }
 
 export async function serveSignalSnapshot(req, res, {
@@ -652,18 +875,43 @@ export async function serveSignalSnapshot(req, res, {
   };
   const settled = await Promise.allSettled(SIGNAL_SOURCE_NAMES.map(name => collectors[name]()));
   const sources = {};
+  const oiSources = {};
   const listings = [];
   settled.forEach((result, index) => {
     const name = SIGNAL_SOURCE_NAMES[index];
     if (result.status === 'fulfilled') {
       listings.push(...result.value.listings);
+      const sourceListings = result.value.listings;
+      const volumeFieldCount = sourceListings.filter(row => Number.isFinite(row?.volume24hUsd)).length;
+      const openInterestFieldCount = sourceListings.filter(row => Number.isFinite(row?.openInterestUsd)).length;
+      const catalogIdentityComplete = !hasCatalogIdentityWarning(result.value.warnings);
+      const oiStatus = sourceListings.length && catalogIdentityComplete &&
+        volumeFieldCount === sourceListings.length &&
+        openInterestFieldCount === sourceListings.length
+        ? 'full'
+        : sourceListings.length && (volumeFieldCount > 0 || openInterestFieldCount > 0) ? 'partial' : 'unavailable';
       sources[name] = {
         status: result.value.completeness,
         listingCount: result.value.listings.length,
         warnings: result.value.warnings,
       };
+      oiSources[name] = {
+        status:oiStatus,
+        listingCount:sourceListings.length,
+        volumeFieldCount,
+        openInterestFieldCount,
+        warnings:[...new Set([
+          ...(result.value.warnings || []),
+          ...(volumeFieldCount < sourceListings.length ? ['VOLUME_INCOMPLETE'] : []),
+          ...(openInterestFieldCount < sourceListings.length ? ['OPEN_INTEREST_INCOMPLETE'] : []),
+        ])],
+      };
     } else {
       sources[name] = { status: 'unavailable', listingCount: 0, warnings: ['SOURCE_UNAVAILABLE'] };
+      oiSources[name] = {
+        status:'unavailable', listingCount:0, volumeFieldCount:0, openInterestFieldCount:0,
+        warnings:['SOURCE_UNAVAILABLE'],
+      };
       console.error(`[signal-snapshot] ${name} unavailable`, result.reason);
     }
   });
@@ -685,9 +933,16 @@ export async function serveSignalSnapshot(req, res, {
   const compact = compactSignalSnapshot(normalized.assets, capturedAtMs, SIGNAL_ASSET_LIMIT);
   const snapshotComparable = isSignalSnapshotComparable(sources, SIGNAL_SOURCE_NAMES);
   const analysisComparable = snapshotComparable && normalized.conflicts.length === 0;
+  const oiCatalogComplete = result =>
+    result.status === 'fulfilled' &&
+    result.value.listings.length > 0 &&
+    !hasCatalogIdentityWarning(result.value.warnings);
+  const oiCatalogComparable = settled.every(oiCatalogComplete) && normalized.conflicts.length === 0;
+  const oiHistoryComparable = oiCatalogComparable && Object.values(oiSources).every(source =>
+    source.listingCount > 0 && source.volumeFieldCount > 0 && source.openInterestFieldCount > 0);
   const spotHistoryComparable = spotSnapshot.listings.length > 0 &&
     isSpotAnomalyHistoryComparable(spotSnapshot.sources, spotSnapshot.conflicts);
-  const [runtimeHistory, dailyVolumeHistory, spotAnomalyHistory] = await Promise.all([
+  const [runtimeHistory, dailyVolumeHistory, spotAnomalyHistory, oiLiquidationHistory] = await Promise.all([
     updateRuntimeHistory(compact, capturedAtMs, {
       writeRequested:writeHistory,
       writeAllowed:analysisComparable,
@@ -699,6 +954,10 @@ export async function serveSignalSnapshot(req, res, {
     updateSpotAnomalyHistory(spotSnapshot.listings, capturedAtMs, {
       writeRequested:writeHistory,
       writeAllowed:spotHistoryComparable,
+    }),
+    updateOiLiquidationHistory(normalized.allAssets, capturedAtMs, {
+      writeRequested:writeHistory,
+      writeAllowed:oiHistoryComparable,
     }),
   ]);
   const assets = attachSignalAnalysis(normalized.assets, runtimeHistory.previous, capturedAtMs, {
@@ -742,6 +1001,73 @@ export async function serveSignalSnapshot(req, res, {
       },
     },
   );
+  const oiCoverage = {
+    expectedSources:SIGNAL_SOURCE_NAMES.length,
+    availableSources:Object.values(oiSources).filter(source => source.status !== 'unavailable').length,
+    fullCatalogSources:settled.filter(oiCatalogComplete).length,
+  };
+  const oiPersistence = {
+    mode:'vercel-runtime-cache',
+    status:oiLiquidationHistory.status,
+    namespace:OI_LIQUIDATION_HISTORY_NAMESPACE,
+    writer:{
+      requested:writeHistory,
+      succeeded:writeHistory ? oiLiquidationHistory.writeStatus === 'stored' : null,
+    },
+    writeStatus:oiLiquidationHistory.writeStatus,
+    error:oiLiquidationHistory.error ? 'OI hourly history runtime cache unavailable' : null,
+  };
+  const oiBaseOptions = {
+    sources:oiSources,
+    coverage:oiCoverage,
+    conflicts:normalized.conflicts,
+    snapshotComparable:oiCatalogComparable,
+    historyAvailable:oiLiquidationHistory.status !== 'unavailable',
+    persistence:oiPersistence,
+  };
+  let preliminaryOiLiquidation;
+  try {
+    preliminaryOiLiquidation = buildOiLiquidationAnomalies(
+      normalized.allAssets,
+      oiLiquidationHistory.stored,
+      capturedAtMs,
+      oiBaseOptions,
+    );
+  } catch (error) {
+    // The additive OI child must never take down the existing Signal Radar.
+    // A safe fallback keeps the child explicitly Unavailable and row-empty.
+    console.error('[signal-snapshot] OI liquidation-proxy analysis unavailable', error);
+    preliminaryOiLiquidation = buildOiLiquidationAnomalies(
+      normalized.allAssets,
+      null,
+      capturedAtMs,
+      { ...oiBaseOptions, snapshotComparable:false, historyAvailable:false },
+    );
+  }
+  const triggeredBinanceSymbols = preliminaryOiLiquidation.rows.flatMap(row =>
+    (Array.isArray(row?.listings) ? row.listings : [])
+      .filter(listing => listing?.venue === 'binance')
+      .map(listing => listing.venueSymbol));
+  let oiLiquidationAnomalies = preliminaryOiLiquidation;
+  if (triggeredBinanceSymbols.length) {
+    try {
+      const topTraderPositions = await fetchBinanceTopTraderPositionRows(
+        baseUrl,
+        triggeredBinanceSymbols,
+        capturedAtMs,
+      );
+      oiLiquidationAnomalies = buildOiLiquidationAnomalies(
+        normalized.allAssets,
+        oiLiquidationHistory.stored,
+        capturedAtMs,
+        { ...oiBaseOptions, topTraderPositions },
+      );
+    } catch (error) {
+      // Alerts remain valid without optional Binance positioning. The first
+      // pass already represents every exact Binance contract as Unavailable.
+      console.error('[signal-snapshot] Binance top-trader enrichment unavailable', error);
+    }
+  }
   const volumeValues = normalized.assets.map(asset => asset.volume24hUsd).filter(Number.isFinite);
   const oiValues = normalized.assets.map(asset => asset.openInterestUsd).filter(Number.isFinite);
   const responseStatus = analysisComparable
@@ -750,7 +1076,12 @@ export async function serveSignalSnapshot(req, res, {
   const historyStatus = runtimeHistory.status === 'unavailable'
     ? 'unavailable'
     : historyCoverageStatus(runtimeHistory.stored.length);
-  const writerSucceeded = signalHistoryWriteSucceeded(runtimeHistory, dailyVolumeHistory, spotAnomalyHistory);
+  const writerSucceeded = signalHistoryWriteSucceeded(
+    runtimeHistory,
+    dailyVolumeHistory,
+    spotAnomalyHistory,
+    oiLiquidationHistory,
+  );
 
   if (publicCache) {
     setPublicCache(res, 300, 600);
@@ -815,6 +1146,14 @@ export async function serveSignalSnapshot(req, res, {
         writeStatus:spotAnomalyHistory.writeStatus,
         error:spotAnomalyHistory.error ? 'spot daily history runtime cache unavailable' : null,
       },
+      oiLiquidation: {
+        namespace:OI_LIQUIDATION_HISTORY_NAMESPACE,
+        status:oiLiquidationHistory.status,
+        retentionHours:OI_LIQUIDATION_HISTORY_HOURS,
+        storedHours:Array.isArray(oiLiquidationHistory.stored?.h) ? oiLiquidationHistory.stored.h.length : 0,
+        writeStatus:oiLiquidationHistory.writeStatus,
+        error:oiLiquidationHistory.error ? 'OI hourly history runtime cache unavailable' : null,
+      },
     },
     history: {
       status: historyStatus,
@@ -829,6 +1168,7 @@ export async function serveSignalSnapshot(req, res, {
     aggregateHistory: aggregateHistoryPoints(runtimeHistory.stored),
     perpVolumeAnomalies,
     spotVolumePriceAnomalies,
+    oiLiquidationAnomalies,
     assets,
   });
 }

@@ -410,7 +410,7 @@ test('signal snapshot cron is authenticated and never CDN cached', async () => {
   }
 });
 
-test('public Signal Radar is read-only while the authenticated cron writes all three histories', async () => {
+test('public Signal Radar is read-only while the authenticated cron writes all four histories', async () => {
   const [source, cronSource] = await Promise.all([
     readFile(new URL('../api/signal-snapshot.js', import.meta.url), 'utf8'),
     readFile(new URL('../api/signal-snapshot-cron.js', import.meta.url), 'utf8'),
@@ -419,14 +419,19 @@ test('public Signal Radar is read-only while the authenticated cron writes all t
   assert.match(source, /const DAILY_VOLUME_HISTORY_KEY = 'daily-volume-history-v1'/);
   assert.match(source, /SPOT_ANOMALY_HISTORY_NAMESPACE/);
   assert.match(source, /const SPOT_ANOMALY_HISTORY_KEY = 'spot-volume-price-daily-v1'/);
+  assert.match(source, /OI_LIQUIDATION_HISTORY_NAMESPACE/);
+  assert.match(source, /const OI_LIQUIDATION_HISTORY_KEY = 'oi-liquidation-hourly-v1'/);
   assert.match(source, /return serveSignalSnapshot\(req, res, \{ publicCache:true, writeHistory:false \}\)/);
   assert.match(cronSource, /serveSignalSnapshot\(req, res, \{ publicCache:false, writeHistory:true \}\)/);
   assert.match(source, /updateDailyVolumeHistory\(normalized\.allAssets/,
     'daily volume history must use the complete verified universe, not response Top 100');
+  assert.match(source, /updateOiLiquidationHistory\(normalized\.allAssets/,
+    'OI history must use the complete verified universe, not response Top 100');
   assert.match(source, /writeRequested:writeHistory[\s\S]*?writeAllowed:analysisComparable/);
   assert.match(source, /res\.status\(writeHistory && !writerSucceeded \? 503 : 200\)/,
     'an authenticated history writer must not report HTTP 200 when either cache write fails or is skipped');
   assert.equal(signalHistoryWriteSucceeded(
+    { writeStatus:'stored' },
     { writeStatus:'stored' },
     { writeStatus:'stored' },
     { writeStatus:'stored' },
@@ -436,15 +441,70 @@ test('public Signal Radar is read-only while the authenticated cron writes all t
     { writeStatus:'stored' },
     { writeStatus:'skipped-incomplete-sources' },
     { writeStatus:'stored' },
+    { writeStatus:'stored' },
   ), false);
   assert.equal(signalHistoryWriteSucceeded(
+    { writeStatus:'stored' },
+    { writeStatus:'stored' },
+    { writeStatus:'unavailable' },
+    { writeStatus:'stored' },
+  ), false);
+  assert.equal(signalHistoryWriteSucceeded(
+    { writeStatus:'stored' },
     { writeStatus:'stored' },
     { writeStatus:'stored' },
     { writeStatus:'unavailable' },
   ), false);
 });
 
-test('Signal health allows the bounded Spot cold-start budget without retrying the snapshot', async () => {
+test('Gate OI uses total_size and never treats long-only position_size as total open interest', async () => {
+  const source = await readFile(new URL('../api/signal-snapshot.js', import.meta.url), 'utf8');
+  const numericHelpers = sourceBetween(source, 'function finiteOrNull(value)', 'function hasCatalogIdentityWarning(warnings)');
+  const explicitBooleanHelper = sourceBetween(source, 'function isExplicitTrue(value)', 'export function tradeXyzSignalCategory');
+  const gateCollector = sourceBetween(source, 'function gateListings(payload)', 'async function collectGate(baseUrl)');
+  assert.match(gateCollector, /finiteOrNull\(ticker\.total_size\)/);
+  assert.match(gateCollector, /const valuationPriceMethod = markPrice !== null \? 'mark-price' : 'last-price'/);
+  assert.match(gateCollector, /`total-size-x-quanto-x-\$\{valuationPriceMethod\}`/,
+    'Gate OI must disclose whether the estimate used mark or last price');
+  assert.doesNotMatch(gateCollector, /finiteOrNull\([^\n]*position_size/,
+    'Gate position_size is aggregate long positions and must not populate OI');
+
+  const gateContext = {
+    categoryFromOfficialSignalType,
+    normalizeSignalIdentity,
+    payload:{
+      contracts:[
+        { name:'AAPL_USDT', contract_type:'stocks', quanto_multiplier:'0.5' },
+        { name:'MSFT_USDT', contract_type:'stocks', quanto_multiplier:'0.5' },
+        { name:'TSLA_USDT', contract_type:'stocks' },
+        { name:'NVDA_USDT', contract_type:'stocks', quanto_multiplier:'0' },
+        { name:'META_USDT', contract_type:'stocks', quanto_multiplier:'1' },
+      ],
+      tickers:[
+        { contract:'AAPL_USDT', total_size:'10', mark_price:'200', last:'190', position_size:'999999' },
+        { contract:'MSFT_USDT', total_size:'10', last:'300', position_size:'999999' },
+        { contract:'TSLA_USDT', total_size:'10', mark_price:'250' },
+        { contract:'NVDA_USDT', total_size:'10', mark_price:'250' },
+        { contract:'META_USDT', total_size:'10', mark_price:'0', last:'500' },
+      ],
+    },
+  };
+  runInNewContext(`${numericHelpers}\n${explicitBooleanHelper}\n${gateCollector}\n` +
+    'globalThis.rows = gateListings(payload);', gateContext);
+  const gateRows = Object.fromEntries(gateContext.rows.map(row => [row.symbol,row]));
+  assert.equal(gateRows.AAPL.openInterestUsd, 1_000);
+  assert.equal(gateRows.AAPL.openInterestMethod, 'total-size-x-quanto-x-mark-price');
+  assert.equal(gateRows.MSFT.openInterestUsd, 1_500);
+  assert.equal(gateRows.MSFT.openInterestMethod, 'total-size-x-quanto-x-last-price');
+  for (const symbol of ['TSLA','NVDA','META']) {
+    assert.equal(gateRows[symbol].openInterestUsd, null,
+      `${symbol} must fail closed when multiplier or valuation price is not positive`);
+    assert.equal(gateRows[symbol].openInterestMethod, null);
+    assert.equal(gateRows[symbol].openInterestStatus, 'unavailable');
+  }
+});
+
+test('Signal health allows the bounded Spot/OI cold-start budget without retrying the snapshot', async () => {
   const [health, spotAnomaly] = await Promise.all([
     readFile(new URL('../api/health.js', import.meta.url), 'utf8'),
     readFile(new URL('../api/_lib/spot-volume-price-anomaly.js', import.meta.url), 'utf8'),
@@ -454,6 +514,8 @@ test('Signal health allows the bounded Spot cold-start budget without retrying t
   const timeout = Number(probe.match(/timeoutMs:(\d[\d_]*)/)?.[1]?.replaceAll('_',''));
   assert.ok(Number.isFinite(budget) && Number.isFinite(timeout));
   assert.ok(timeout >= budget + 5_000, 'health must outwait a valid cold Spot collection with safety margin');
+  assert.equal(timeout, 50_000);
+  assert.ok(timeout < 60_000, 'health probe must finish below the Vercel Function ceiling');
   assert.match(probe, /retries:0/);
 });
 
@@ -488,10 +550,11 @@ test('Signal Radar and Asset Intelligence use server history and one canonical d
   assert.match(html, /data-p="cross"[\s\S]*?RWA Signal Radar/);
   assert.match(html, /id="page-cross"[\s\S]*?id="radarTableRegion"/);
   const radarPage = sourceBetween(html, '<div class="page-container" id="page-cross">', '</div><!-- END page-cross -->');
-  assert.match(radarPage, /id="radarKpis"[\s\S]*?id="perpVolumeAnomalySection"[\s\S]*?id="spotVolumePriceAnomalySection"[\s\S]*?id="competitorListingsSection"/,
-    'Perp and Spot anomaly monitors must sit ahead of competitor listings in Signal Radar');
+  assert.match(radarPage, /id="radarKpis"[\s\S]*?id="perpVolumeAnomalySection"[\s\S]*?id="spotVolumePriceAnomalySection"[\s\S]*?id="oiLiquidationAnomalySection"[\s\S]*?id="competitorListingsSection"/,
+    'Perp, Spot and OI anomaly monitors must sit ahead of competitor listings in Signal Radar');
   assert.equal((html.match(/id="perpVolumeAnomalySection"/g) || []).length, 1);
   assert.equal((html.match(/id="spotVolumePriceAnomalySection"/g) || []).length, 1);
+  assert.equal((html.match(/id="oiLiquidationAnomalySection"/g) || []).length, 1);
   assert.match(radarPage, /Perpetual Volume Anomalies[\s\S]*?HIGH[\s\S]*?MEDIUM[\s\S]*?DOWN/);
   assert.match(radarPage, /id="perpVolumeAnomalyLevelFilter"[\s\S]*?id="perpVolumeAnomalyCategoryFilter"[\s\S]*?id="perpVolumeAnomalyVenueFilter"[\s\S]*?id="perpVolumeAnomalyStatusFilter"/);
   assert.match(radarPage, /id="perpVolumeAnomalyMore"[\s\S]*?More · 50 \/ 100/);
@@ -536,6 +599,92 @@ test('Signal Radar and Asset Intelligence use server history and one canonical d
     'the five Spot source chips and contract must expose price-field completeness separately from volume');
   assert.match(html, /sectionStatus !== 'full'[\s\S]*?coverage\.volumeComparableListings[\s\S]*?coverage\.priceComparableListings/,
     'only complete five-source/current/history coverage may support a Full no-alert conclusion');
+  assert.match(radarPage, /OI Positioning (?:&|&amp;) Large-Liquidation Proxy[\s\S]*?not a trade-by-trade liquidation feed/);
+  assert.match(radarPage, /id="oiLiquidationAnomalyTypeFilter"[\s\S]*?id="oiLiquidationAnomalyCategoryFilter"[\s\S]*?id="oiLiquidationAnomalyVenueFilter"[\s\S]*?id="oiLiquidationAnomalyBiasFilter"[\s\S]*?id="oiLiquidationAnomalyStatusFilter"/);
+  assert.match(radarPage, /id="oiLiquidationAnomalyMore"[\s\S]*?More · 50 \/ 100/);
+  assert.match(html, /section\?\.sources\?\.\[name\][\s\S]*?openInterestFieldCount|source\.openInterestFieldCount/,
+    'OI child and source chips must expose OI field completeness separately from volume');
+  assert.match(html, /if \(!oiLiquidationAnomalyContractValid\(payload\)\) \{[\s\S]*?payload\.oiLiquidationAnomalies = unavailableOiLiquidationAnomalySection\(payload\)/,
+    'an invalid additive OI child must fail closed without taking down established Radar panels');
+  assert.doesNotMatch(html, /!oiLiquidationAnomalyContractValid\(payload\)\) throw new Error\('Invalid signal snapshot'\)/);
+  const oiTriggerReader = sourceBetween(html, 'function oiLiquidationAnomalyTrigger(row)', 'function oiLiquidationAnomalyTrend(row)');
+  assert.match(oiTriggerReader, /row\?\.trigger/);
+  assert.doesNotMatch(oiTriggerReader, /currentVolume|currentOpenInterest|completedDaily|peak24h|drawdown|>=|<=/,
+    'the browser must display the server OI trigger rather than classifying market values');
+  const oiContractGate = sourceBetween(html, 'function oiLiquidationAnomalyContractValid(payload)', 'function unavailableOiLiquidationAnomalySection(payload)');
+  assert.match(oiContractGate, /const expectedAssetKey = `\$\{category\}:\$\{symbol\}`;/);
+  assert.doesNotMatch(oiContractGate, /expectedAssetKey = `\$\{category\}:\$\{symbol\}`\.toLowerCase\(\)/,
+    'OI category:canonical identity must preserve the producer canonical symbol case');
+  assert.match(oiContractGate, /const expectedTrigger = oiLiquidationExpectedTrigger\(row, thresholds\);[\s\S]*?expectedTrigger !== null && trigger === expectedTrigger/,
+    'the browser validator must reject a server trigger that contradicts the published threshold fields');
+  const oiExpectedTriggerSource = sourceBetween(
+    html,
+    'function oiLiquidationExpectedTrigger(row, thresholds)',
+    'function oiLiquidationAnomalyContractValid(payload)',
+  );
+  const oiTriggerContext = {
+    numberOrNull(value) {
+      if (value === null || value === undefined || value === '') return null;
+      const number = Number(value);
+      return Number.isFinite(number) ? number : null;
+    },
+  };
+  runInNewContext(`${oiExpectedTriggerSource}
+    const thresholds = {
+      minVolume24hUsdExclusive:1000000,
+      liquidationProxyDropUsdExclusive:2000000,
+      risingCompletedDays:3,
+    };
+    const rising = [
+      {openInterestUsd:1000000},
+      {openInterestUsd:2000000},
+      {openInterestUsd:3000000},
+    ];
+    const falling = [
+      {openInterestUsd:3000000},
+      {openInterestUsd:2000000},
+      {openInterestUsd:1000000},
+    ];
+    globalThis.validBoth = oiLiquidationExpectedTrigger({currentVolume24hUsd:1000000.01,completedDailyCloses:rising,drawdown24hUsd:2000000.01},thresholds);
+    globalThis.exactVolumeBoundary = oiLiquidationExpectedTrigger({currentVolume24hUsd:1000000,completedDailyCloses:rising,drawdown24hUsd:2000000.01},thresholds);
+    globalThis.fallingCloses = oiLiquidationExpectedTrigger({currentVolume24hUsd:1000000.01,completedDailyCloses:falling,drawdown24hUsd:2000000.01},thresholds);
+    globalThis.smallDrawdown = oiLiquidationExpectedTrigger({currentVolume24hUsd:1000000.01,completedDailyCloses:falling,drawdown24hUsd:1999999.99},thresholds);
+    globalThis.exactDrawdownBoundary = oiLiquidationExpectedTrigger({currentVolume24hUsd:1000000.01,completedDailyCloses:falling,drawdown24hUsd:2000000},thresholds);`, oiTriggerContext);
+  assert.equal(oiTriggerContext.validBoth, 'both');
+  assert.equal(oiTriggerContext.exactVolumeBoundary, null,
+    'exactly $1m is ineligible, so a declared OI trigger must be rejected');
+  assert.equal(oiTriggerContext.fallingCloses, 'liquidation_proxy');
+  assert.notEqual(oiTriggerContext.fallingCloses, 'oi_rising',
+    'falling completed-day closes cannot support a declared oi_rising trigger');
+  assert.equal(oiTriggerContext.smallDrawdown, null,
+    'a drawdown below $2m cannot support liquidation_proxy');
+  assert.equal(oiTriggerContext.exactDrawdownBoundary, null,
+    'exactly $2m cannot support liquidation_proxy');
+  const oiPanelStatus = sourceBetween(html, 'function oiLiquidationAnomalyPanelStatus(section)', 'function oiLiquidationAnomalyRows(section)');
+  assert.match(oiPanelStatus, /signalSnapshotError[\s\S]*?'partial'/,
+    'a failed refresh must downgrade a cached Full OI section to Partial');
+  const oiStatusRenderer = sourceBetween(html, 'function renderOiLiquidationAnomalyStatus(section)', 'function renderOiLiquidationAnomalySources(section)');
+  assert.match(oiStatusRenderer, /panelStatus === 'full' && historyReady/,
+    'only Full coverage plus ready history may make an OI no-anomaly conclusion');
+  const oiPositionReaders = sourceBetween(html, 'function oiLiquidationTopTraderPositions(row)', 'function oiLiquidationTraderBiasLabel(bias)');
+  const oiPositionContext = {
+    radarSafeStatus(value) {
+      const normalized = String(value || '').toLowerCase();
+      return ['full','partial','estimated','unavailable'].includes(normalized) ? normalized : 'unavailable';
+    },
+    numberOrNull(value) {
+      if (value === null || value === undefined || value === '') return null;
+      const number = Number(value);
+      return Number.isFinite(number) ? number : null;
+    },
+  };
+  runInNewContext(`${oiPositionReaders}\n` +
+    `globalThis.missingOiBias = oiLiquidationOverallTraderBias({overallTraderBias:'neutral',topTraderPositions:[{venueSymbol:'AAPLUSDT',status:'unavailable',longShortRatio:null,bias:'unavailable'}]});\n` +
+    `globalThis.exactNeutralOiBias = oiLiquidationOverallTraderBias({overallTraderBias:'neutral',topTraderPositions:[{venueSymbol:'AAPLUSDT',status:'full',longShortRatio:1.05,longPositionPct:51.22,shortPositionPct:48.78,bias:'neutral'}]});`,
+  oiPositionContext);
+  assert.equal(oiPositionContext.missingOiBias, 'unavailable');
+  assert.equal(oiPositionContext.exactNeutralOiBias, 'neutral');
+  assert.match(html, /rows\.slice\(0, oiLiquidationAnomalyExpanded \? 100 : 50\)/);
   const volumeLevelReader = sourceBetween(html, 'function perpVolumeAnomalyLevel(row)', 'function perpVolumeAnomalyRowStatus(row)');
   assert.match(volumeLevelReader, /\['high','medium','down'\]\.includes\(level\)/);
   assert.doesNotMatch(volumeLevelReader, /ratio7d|currentVolume|average7d|>=|<=/,
@@ -664,6 +813,8 @@ test('bilingual UI is accessible, persisted under one preference key, and switch
     assert.ok(html.includes(english), `missing rendered English sentinel: ${english}`);
     assert.ok(i18n.includes(`'${english}':'${chinese}'`), `missing Chinese translation sentinel: ${english}`);
   });
+  assert.match(html, /OI Positioning (?:&|&amp;) Large-Liquidation Proxy/);
+  assert.ok(i18n.includes("'OI Positioning & Large-Liquidation Proxy':'OI 持仓与大额清算代理'"));
   assert.match(i18n, /Perpetual volume anomaly refresh failed[\s\S]*?合约成交量异动刷新失败/);
 });
 
@@ -725,6 +876,10 @@ test('bilingual runtime translates singular coverage and locale fragments withou
   assert.equal(window.translateUi('VOLUME ≥ 3×', 'zh-CN'), '成交量 ≥ 3×');
   assert.equal(window.translateUi('PRICE ≥ 15%', 'zh-CN'), '价格 ≥ 15%');
   assert.equal(window.translateUi('BOTH', 'zh-CN'), '两项同时触发');
+  assert.equal(window.translateUi('OI Positioning & Large-Liquidation Proxy', 'zh-CN'), 'OI 持仓与大额清算代理');
+  assert.equal(window.translateUi('OI 1/2 · Vol 2/2', 'zh-CN'), 'OI 1/2 · 成交量 2/2');
+  assert.equal(window.translateUi('Large-liquidation proxy', 'zh-CN'), '大额清算代理');
+  assert.equal(window.translateUi('Unavailable', 'zh-CN'), '不可用');
 
   window.setUiLanguage('zh-CN');
   assert.equal(treeWalks, 1);
@@ -759,11 +914,13 @@ test('English Spot source stays canonical while dynamic Traditional, Spot, and H
     Traditional: sourceBetween(html, 'function renderTraditionalActivity()', '// ═══════════════════════════════════════════════════\n// VENUE TABLES'),
     Spot: dynamicSpotRenderers,
     Heatmap: sourceBetween(html, 'function renderHeatmap()', '// ═══════════════════════════════════════════════\n// RWA SIGNAL RADAR'),
+    OI: sourceBetween(html, 'function renderOiLiquidationAnomalySummary(section)', 'function renderRadarStatus(payload, indexedRows)'),
   };
   const sentinels = {
     Traditional: ['Trad Volume', 'Options Volume', 'Est. Total Notional', 'Need Trad + Crypto prices'],
     Spot: ['24h Volume', 'Loading spot venue catalogs…', 'Spot venue data unavailable. Refresh to retry.', 'Loading comparable Spot and Perpetual routes…', 'No combos match the current filters.'],
     Heatmap: ['Short receives', 'Long receives', 'Data coverage', 'Venue spread', 'Need 2 venues'],
+    OI: ['Large-liquidation proxy', 'OI sources not loaded.', 'Binance Top Trader Position Ratio / Bias'],
   };
 
   const escapeRegExp = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -840,6 +997,10 @@ test('320px layout keeps navigation scrollable and alert/language controls usabl
   assert.match(mobile, /\.language-tab\s*\{[^}]*min-width:34px;/);
   assert.match(mobile, /\.nav-tabs, \.sub-tabs, \.spot-sub-nav\s*\{[^}]*overflow-x:auto;/);
   assert.match(mobile, /\.nav-tab, \.sub-tab, \.spot-sub-tab\s*\{[^}]*flex:0 0 auto;/);
+  assert.match(styles, /\.oi-liquidation-table\s*\{\s*min-width:1780px;/,
+    'the OI table must scroll instead of collapsing at 320px');
+  assert.match(styles, /\.volume-anomaly-table thead th:first-child, \.volume-anomaly-table tbody td:first-child\s*\{[^}]*position:sticky;[^}]*left:0;/,
+    'the OI table inherits a sticky asset column while horizontally scrolling');
   assert.doesNotMatch(mobile, /\.(?:language-tabs|alert-badge)\s*\{[^}]*display\s*:\s*none/);
 });
 

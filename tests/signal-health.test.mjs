@@ -44,6 +44,14 @@ function basePayload(volumeStatus = 'warming') {
         writeStatus:'read-only',
         error:null,
       },
+      oiLiquidation:{
+        namespace:'rwa-signal-oi-liquidation-hourly-v1',
+        status:'partial',
+        retentionHours:96,
+        storedHours:full ? 96 : 0,
+        writeStatus:'read-only',
+        error:null,
+      },
     },
     perpVolumeAnomalies:{
       formulaVersion:'rwa-perp-volume-anomaly-1.0',
@@ -73,6 +81,7 @@ function basePayload(volumeStatus = 'warming') {
       rows,
     },
     spotVolumePriceAnomalies:validSpotSection(volumeStatus === 'full' ? 'full' : 'warming', generatedAt),
+    oiLiquidationAnomalies:validOiLiquidationSection(volumeStatus === 'full' ? 'full' : 'warming', generatedAt),
   };
 }
 
@@ -206,6 +215,158 @@ function validHighRow() {
       consecutiveExpansionDays:2, highFrequency:true,
     },
     flags:['CONSECUTIVE_EXPANSION', 'HIGH_FREQUENCY_ANOMALY'],
+  };
+}
+
+function validOiListing(venue, venueSymbol) {
+  return {
+    venue,
+    venueSymbol,
+    instrumentType:'perpetual',
+    volume24hUsd:400_001,
+    volumeMethod:'official-quote-volume',
+    volumeStatus:'full',
+    openInterestUsd:1_200_000,
+    openInterestMethod:'official-open-interest-usd',
+    openInterestStatus:'full',
+  };
+}
+
+function validOiLiquidationSection(status, generatedAt) {
+  const full = status === 'full';
+  const sources = Object.fromEntries(SOURCE_KEYS.map(key => [key, {
+    status:'full',
+    listingCount:1,
+    volumeFieldCount:1,
+    openInterestFieldCount:1,
+    warnings:[],
+  }]));
+  const listings = [
+    validOiListing('gate', 'AAPLX_USDT'),
+    validOiListing('binance', 'AAPLUSDT'),
+    validOiListing('bitget', 'AAPLUSDT'),
+    validOiListing('tradexyz', 'XYZ:AAPL'),
+    validOiListing('okx', 'AAPL-USDT-SWAP'),
+  ];
+  const row = {
+    rank:1,
+    assetKey:'equity:AAPL',
+    symbol:'AAPL',
+    category:'equity',
+    venues:['gate', 'binance', 'bitget', 'tradexyz', 'okx'],
+    listingCount:5,
+    cohortFingerprint:'abcdefgh1234',
+    listings,
+    currentVolume24hUsd:2_000_005,
+    currentOpenInterestUsd:6_000_000,
+    completedDailyCloses:[
+      { day:'2026-08-11T00:00:00.000Z', openInterestUsd:5_000_000 },
+      { day:'2026-08-12T00:00:00.000Z', openInterestUsd:6_000_000 },
+      { day:'2026-08-13T00:00:00.000Z', openInterestUsd:7_000_000 },
+    ],
+    completedDailyTrend:'rising',
+    peak24hOpenInterestUsd:8_000_001,
+    peak24hAt:'2026-08-14T06:00:00.000Z',
+    drawdown24hUsd:2_000_001,
+    trigger:'both',
+    topTraderPositions:[{
+      venueSymbol:'AAPLUSDT',
+      status:'full',
+      longShortRatio:1.05,
+      longPositionPct:51.22,
+      shortPositionPct:48.78,
+      bias:'neutral',
+      observedAt:'2026-08-14T11:00:00.000Z',
+      reasonCode:null,
+    }],
+    overallTraderBias:'neutral',
+    fieldStatus:{
+      currentVolume24hUsd:'estimated',
+      currentOpenInterestUsd:'estimated',
+      completedDailyCloses:'estimated',
+      completedDailyTrend:'estimated',
+      peak24hOpenInterestUsd:'estimated',
+      drawdown24hUsd:'estimated',
+      topTraderPositions:'full',
+    },
+    status:'estimated',
+    reasonCodes:[],
+  };
+  return {
+    formulaVersion:'rwa-oi-liquidation-proxy-1.0',
+    generatedAt,
+    status,
+    rowLimit:100,
+    scope:'All identity-verified RWA perpetual canonical assets from the current five-source snapshot',
+    thresholds:{
+      minVolume24hUsdExclusive:1_000_000,
+      liquidationProxyDropUsdExclusive:2_000_000,
+      risingCompletedDays:3,
+      peakLookbackHours:24,
+      topTraderBullishAbove:1.05,
+      topTraderBearishBelow:0.95,
+      logic:'or',
+    },
+    methodology:{
+      universe:'all verified canonical RWA perpetual assets',
+      eligibility:'rolling 24h USD volume strictly above threshold',
+      openInterest:'complete exact-listing USD OI aggregate',
+      threeDayTrend:'three sealed completed UTC-day closes',
+      liquidationProxy:'24h comparable OI peak minus current OI',
+      logic:'OI rising OR liquidation proxy',
+      topTraderPositions:'optional exact Binance contract enrichment',
+      limitations:'proxy is not trade-by-trade liquidation data',
+    },
+    sources,
+    coverage:{
+      expectedSources:5,
+      availableSources:5,
+      fullCatalogSources:5,
+      acceptedListings:5,
+      verifiedAssets:1,
+      identityConflicts:0,
+      volumeEligibleAssets:1,
+      completeEligibleAssets:1,
+      missingEligibleAssets:0,
+      filterUnknownAssets:0,
+    },
+    counts:{
+      verifiedAssets:1,
+      filteredLowVolume:0,
+      filterUnknown:0,
+      volumeEligibleAssets:1,
+      completeEligibleAssets:1,
+      missingEligibleAssets:0,
+      alerts:full ? 1 : 0,
+      oiRising:full ? 1 : 0,
+      liquidationProxy:full ? 1 : 0,
+      both:full ? 1 : 0,
+      perpListings:5,
+      topTraderAvailable:full ? 1 : 0,
+    },
+    history:{
+      status:full ? 'full' : 'warming',
+      ready:full,
+      cadence:'utc-hourly-idempotent',
+      storedHourlyBuckets:full ? 96 : 0,
+      retentionHours:96,
+      requiredHourlyBuckets:24,
+      requiredCompletedDays:3,
+      readyAssets:full ? 1 : 0,
+      trendReadyAssets:full ? 1 : 0,
+      drawdownReadyAssets:full ? 1 : 0,
+      oldestAt:full ? '2026-08-10T12:00:00.000Z' : null,
+      latestAt:full ? '2026-08-14T11:00:00.000Z' : null,
+    },
+    persistence:{
+      mode:'vercel-runtime-cache',
+      status:'partial',
+      namespace:'rwa-signal-oi-liquidation-hourly-v1',
+      writer:{ requested:false, succeeded:null },
+      writeStatus:'read-only',
+      error:null,
+    },
+    rows:full ? [row] : [],
   };
 }
 
@@ -465,4 +626,164 @@ test('Signal health requires the additive Spot child even though the browser iso
   assert.equal(result.spotVolumePrice.contractValid, false);
   assert.equal(result.status, 'fail');
   assert.match(result.reason, /Spot volume\/price anomaly contract/);
+});
+
+test('OI health enforces strict $1m eligibility and strict $2m drawdown semantics', () => {
+  const volumeBoundary = basePayload('full');
+  const boundaryRow = volumeBoundary.oiLiquidationAnomalies.rows[0];
+  boundaryRow.listings.forEach(row => { row.volume24hUsd = 200_000; });
+  boundaryRow.currentVolume24hUsd = 1_000_000;
+  const boundaryResult = validateSignalRadarSnapshot(volumeBoundary, NOW);
+  assert.equal(boundaryResult.oiLiquidation.invalidRows, 1);
+  assert.equal(boundaryResult.status, 'fail');
+
+  const drawdownBoundary = basePayload('full');
+  const drawdownRow = drawdownBoundary.oiLiquidationAnomalies.rows[0];
+  drawdownRow.peak24hOpenInterestUsd = 8_000_000;
+  drawdownRow.drawdown24hUsd = 2_000_000;
+  assert.equal(validateSignalRadarSnapshot(drawdownBoundary, NOW).oiLiquidation.invalidRows, 1,
+    'an exact $2m decline cannot be declared liquidation_proxy');
+
+  drawdownRow.trigger = 'oi_rising';
+  Object.assign(drawdownBoundary.oiLiquidationAnomalies.counts, {
+    alerts:1, oiRising:1, liquidationProxy:0, both:0,
+  });
+  const strictBoundaryValid = validateSignalRadarSnapshot(drawdownBoundary, NOW);
+  assert.equal(strictBoundaryValid.oiLiquidation.contractValid, true);
+  assert.equal(strictBoundaryValid.status, 'pass');
+});
+
+test('OI health validates three exact completed UTC days and row aggregate arithmetic', () => {
+  const nonRising = basePayload('full');
+  nonRising.oiLiquidationAnomalies.rows[0].completedDailyCloses[1].openInterestUsd = 5_000_000;
+  assert.equal(validateSignalRadarSnapshot(nonRising, NOW).oiLiquidation.invalidRows, 1);
+
+  const currentDayLeak = basePayload('full');
+  currentDayLeak.oiLiquidationAnomalies.rows[0].completedDailyCloses[2].day = '2026-08-14';
+  assert.equal(validateSignalRadarSnapshot(currentDayLeak, NOW).oiLiquidation.invalidRows, 1);
+
+  const volumeMismatch = basePayload('full');
+  volumeMismatch.oiLiquidationAnomalies.rows[0].listings[0].volume24hUsd += 0.01;
+  assert.equal(validateSignalRadarSnapshot(volumeMismatch, NOW).oiLiquidation.invalidRows, 1);
+
+  const oiMismatch = basePayload('full');
+  oiMismatch.oiLiquidationAnomalies.rows[0].listings[0].openInterestUsd += 0.01;
+  assert.equal(validateSignalRadarSnapshot(oiMismatch, NOW).oiLiquidation.invalidRows, 1);
+
+  const falsePrecision = basePayload('full');
+  falsePrecision.oiLiquidationAnomalies.rows[0].status = 'full';
+  assert.equal(validateSignalRadarSnapshot(falsePrecision, NOW).oiLiquidation.invalidRows, 1,
+    'complete coverage must not relabel an OI/liquidation estimate as Full');
+});
+
+test('OI health requires exact five-source coverage and coherent history maturity', () => {
+  const catalogOnly = basePayload('warming');
+  Object.assign(catalogOnly.oiLiquidationAnomalies.sources.gate, {
+    status:'unavailable', listingCount:1, volumeFieldCount:0, openInterestFieldCount:0,
+    warnings:['VOLUME_INCOMPLETE', 'OPEN_INTEREST_INCOMPLETE'],
+  });
+  catalogOnly.oiLiquidationAnomalies.coverage.availableSources = 4;
+  const catalogOnlyResult = validateSignalRadarSnapshot(catalogOnly, NOW);
+  assert.equal(catalogOnlyResult.oiLiquidation.sourcesValid, true);
+  assert.equal(catalogOnlyResult.oiLiquidation.coverageValid, true,
+    'a non-empty official catalog remains catalog-complete when all market fields are unavailable');
+  assert.equal(catalogOnlyResult.oiLiquidation.contractValid, true);
+
+  const catalogBlockedWithCompleteFields = basePayload('full');
+  Object.assign(catalogBlockedWithCompleteFields.oiLiquidationAnomalies.sources.gate, {
+    status:'partial',
+    warnings:['IDENTITY_COVERAGE_INCOMPLETE'],
+  });
+  catalogBlockedWithCompleteFields.oiLiquidationAnomalies.status = 'partial';
+  catalogBlockedWithCompleteFields.oiLiquidationAnomalies.coverage.fullCatalogSources = 4;
+  const catalogBlockedResult = validateSignalRadarSnapshot(catalogBlockedWithCompleteFields, NOW);
+  assert.equal(catalogBlockedResult.oiLiquidation.sourcesValid, true,
+    'complete market fields remain Partial when official catalog identity coverage is blocked');
+  assert.equal(catalogBlockedResult.oiLiquidation.coverageValid, true);
+  assert.equal(catalogBlockedResult.oiLiquidation.contractValid, true);
+  assert.equal(catalogBlockedResult.status, 'warn');
+
+  const missingField = basePayload('full');
+  delete missingField.oiLiquidationAnomalies.sources.gate.openInterestFieldCount;
+  assert.equal(validateSignalRadarSnapshot(missingField, NOW).oiLiquidation.sourcesValid, false);
+
+  const catalogShrink = basePayload('full');
+  catalogShrink.oiLiquidationAnomalies.sources.okx.warnings.push('IDENTITY_COVERAGE_INCOMPLETE');
+  assert.equal(validateSignalRadarSnapshot(catalogShrink, NOW).oiLiquidation.coverageValid, false);
+  catalogShrink.oiLiquidationAnomalies.coverage.fullCatalogSources = 4;
+  assert.equal(validateSignalRadarSnapshot(catalogShrink, NOW).oiLiquidation.statusCoherent, false);
+
+  const invertedReadiness = basePayload('full');
+  invertedReadiness.oiLiquidationAnomalies.history.trendReadyAssets = 0;
+  assert.equal(validateSignalRadarSnapshot(invertedReadiness, NOW).oiLiquidation.historyValid, false);
+
+  const wrongCadence = basePayload('full');
+  wrongCadence.oiLiquidationAnomalies.history.cadence = 'hourly';
+  assert.equal(validateSignalRadarSnapshot(wrongCadence, NOW).oiLiquidation.historyValid, false);
+});
+
+test('OI health treats Binance Top Trader as exact optional evidence, never default Neutral', () => {
+  const unavailable = basePayload('full');
+  const row = unavailable.oiLiquidationAnomalies.rows[0];
+  row.topTraderPositions = [{
+    venueSymbol:'AAPLUSDT', status:'unavailable', longShortRatio:null,
+    longPositionPct:null, shortPositionPct:null, bias:'unavailable', observedAt:null,
+    reasonCode:'TOP_TRADER_UPSTREAM_UNAVAILABLE',
+  }];
+  row.overallTraderBias = 'unavailable';
+  row.fieldStatus.topTraderPositions = 'unavailable';
+  unavailable.oiLiquidationAnomalies.counts.topTraderAvailable = 0;
+  const unavailableResult = validateSignalRadarSnapshot(unavailable, NOW);
+  assert.equal(unavailableResult.oiLiquidation.contractValid, true);
+  assert.equal(unavailableResult.status, 'pass');
+
+  const omitted = basePayload('full');
+  omitted.oiLiquidationAnomalies.rows[0].topTraderPositions = [];
+  omitted.oiLiquidationAnomalies.rows[0].overallTraderBias = 'unavailable';
+  omitted.oiLiquidationAnomalies.rows[0].fieldStatus.topTraderPositions = 'unavailable';
+  omitted.oiLiquidationAnomalies.counts.topTraderAvailable = 0;
+  assert.equal(validateSignalRadarSnapshot(omitted, NOW).oiLiquidation.invalidRows, 1,
+    'every exact Binance alert contract needs an explicit Full or Unavailable position row');
+
+  const boundaryContradiction = basePayload('full');
+  boundaryContradiction.oiLiquidationAnomalies.rows[0].topTraderPositions[0].longShortRatio = 1.0501;
+  assert.equal(validateSignalRadarSnapshot(boundaryContradiction, NOW).oiLiquidation.invalidRows, 1);
+  boundaryContradiction.oiLiquidationAnomalies.rows[0].topTraderPositions[0].bias = 'bullish';
+  boundaryContradiction.oiLiquidationAnomalies.rows[0].overallTraderBias = 'bullish';
+  assert.equal(validateSignalRadarSnapshot(boundaryContradiction, NOW).oiLiquidation.contractValid, true);
+
+  const stale = basePayload('full');
+  stale.oiLiquidationAnomalies.rows[0].topTraderPositions[0].observedAt = '2026-08-14T08:54:59.999Z';
+  assert.equal(validateSignalRadarSnapshot(stale, NOW).oiLiquidation.invalidRows, 1);
+
+  const wrongSymbol = basePayload('full');
+  wrongSymbol.oiLiquidationAnomalies.rows[0].topTraderPositions[0].venueSymbol = 'MSFTUSDT';
+  assert.equal(validateSignalRadarSnapshot(wrongSymbol, NOW).oiLiquidation.invalidRows, 1);
+});
+
+test('OI health rejects writable public state, persistence mismatch, identity conflicts, and Crypto rows', () => {
+  const writable = basePayload('full');
+  Object.assign(writable.oiLiquidationAnomalies.persistence, {
+    writer:{ requested:true, succeeded:true }, writeStatus:'stored',
+  });
+  assert.equal(validateSignalRadarSnapshot(writable, NOW).oiLiquidation.persistenceValid, false);
+
+  const mismatch = basePayload('full');
+  mismatch.persistence.oiLiquidation.storedHours = 95;
+  assert.equal(validateSignalRadarSnapshot(mismatch, NOW).oiTopPersistenceValid, false);
+
+  const conflict = basePayload('full');
+  conflict.oiLiquidationAnomalies.status = 'partial';
+  conflict.oiLiquidationAnomalies.coverage.identityConflicts = 1;
+  const conflictResult = validateSignalRadarSnapshot(conflict, NOW);
+  assert.equal(conflictResult.oiLiquidation.identityConflict, true);
+  assert.equal(conflictResult.status, 'fail');
+
+  const crypto = basePayload('full');
+  Object.assign(crypto.oiLiquidationAnomalies.rows[0], {
+    category:'crypto', assetKey:'crypto:AAPL',
+  });
+  const cryptoResult = validateSignalRadarSnapshot(crypto, NOW);
+  assert.equal(cryptoResult.oiLiquidation.cryptoCategoryCount, 1);
+  assert.equal(cryptoResult.status, 'fail');
 });

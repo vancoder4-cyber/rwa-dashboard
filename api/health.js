@@ -31,6 +31,12 @@ import {
   SPOT_ANOMALY_SOURCE_NAMES,
   SPOT_ANOMALY_THRESHOLDS,
 } from './_lib/spot-volume-price-anomaly.js';
+import {
+  OI_LIQUIDATION_FORMULA_VERSION,
+  OI_LIQUIDATION_HISTORY_HOURS,
+  OI_LIQUIDATION_HISTORY_NAMESPACE,
+  OI_LIQUIDATION_THRESHOLDS,
+} from './_lib/oi-liquidation-anomaly.js';
 import { fetchJsonWithPolicy, fetchWithPolicy, mapWithConcurrency } from './_lib/upstream.js';
 
 export const config = { regions: ['sin1'], maxDuration: 60 };
@@ -66,10 +72,22 @@ const SPOT_ANOMALY_WRITE_STATUSES = new Set([
   'unavailable',
 ]);
 const SPOT_ANOMALY_USD_QUOTES = new Set(['USD', 'USDT']);
+const OI_LIQUIDATION_SECTION_STATUSES = new Set(['full', 'partial', 'warming', 'unavailable']);
+const OI_LIQUIDATION_FIELD_STATUSES = new Set(['full', 'partial', 'estimated', 'unavailable']);
+const OI_LIQUIDATION_SOURCE_STATUSES = new Set(['full', 'partial', 'unavailable']);
+const OI_LIQUIDATION_PERSISTENCE_STATUSES = new Set(['partial', 'unavailable']);
+const OI_LIQUIDATION_WRITE_STATUSES = new Set([
+  'stored',
+  'read-only',
+  'skipped-incomplete-sources',
+  'unavailable',
+]);
+const OI_CATALOG_BLOCKER = /(?:IDENTITY|INSTRUMENTS_UNAVAILABLE|CATALOG|UPSTREAM_COVERAGE)/;
 const SIGNAL_SNAPSHOT_MAX_AGE_MS = 2 * 60 * 60 * 1_000;
 const SIGNAL_SNAPSHOT_FUTURE_TOLERANCE_MS = 5 * 60 * 1_000;
 const SIGNAL_VOLUME_DAILY_NAMESPACE = 'rwa-signal-volume-daily-v1';
 const UTC_DAY_MS = 24 * 60 * 60 * 1_000;
+const UTC_HOUR_MS = 60 * 60 * 1_000;
 
 function deploymentBaseUrl(req) {
   const forwarded = String(req.headers?.['x-forwarded-host'] || req.headers?.host || '').toLowerCase();
@@ -610,6 +628,394 @@ function validateSpotVolumePriceAnomalies(section, generatedAtMs) {
   };
 }
 
+function exactOiLiquidationSources(section) {
+  const sources = section?.sources;
+  if (!sources || typeof sources !== 'object' || Array.isArray(sources)) return false;
+  const keys = Object.keys(sources);
+  if (keys.length !== SIGNAL_SOURCE_KEYS.length || new Set(keys).size !== keys.length ||
+      !SIGNAL_SOURCE_KEYS.every(key => keys.includes(key))) return false;
+  return SIGNAL_SOURCE_KEYS.every(key => {
+    const source = sources[key];
+    const status = String(source?.status || '').toLowerCase();
+    const listingCount = source?.listingCount;
+    const oiCount = source?.openInterestFieldCount;
+    const volumeCount = source?.volumeFieldCount;
+    const warnings = Array.isArray(source?.warnings) ? source.warnings : null;
+    const hasCatalogBlocker = warnings?.some(warning =>
+      OI_CATALOG_BLOCKER.test(String(warning).toUpperCase())) === true;
+    const fullFields = listingCount > 0 && oiCount === listingCount && volumeCount === listingCount;
+    // Complete observed fields do not make a source Full when its official
+    // catalog or identity coverage is blocked. Those are separate claims.
+    const partialFields = listingCount > 0 && (oiCount > 0 || volumeCount > 0) &&
+      (!fullFields || hasCatalogBlocker);
+    const unavailableFields = oiCount === 0 && volumeCount === 0;
+    const baseValid = source && typeof source === 'object' && !Array.isArray(source) &&
+      OI_LIQUIDATION_SOURCE_STATUSES.has(status) &&
+      Number.isInteger(listingCount) && listingCount >= 0 &&
+      Number.isInteger(oiCount) && oiCount >= 0 && oiCount <= listingCount &&
+      Number.isInteger(volumeCount) && volumeCount >= 0 && volumeCount <= listingCount &&
+      warnings !== null && warnings.every(warning => typeof warning === 'string') &&
+      ((status === 'full' && fullFields && !hasCatalogBlocker) ||
+        (status === 'partial' && partialFields) ||
+        (status === 'unavailable' && unavailableFields));
+    return baseValid;
+  });
+}
+
+function rounded(value, digits = 2) {
+  if (!Number.isFinite(value)) return null;
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+function oiTopTraderPositionValid(position, generatedAtMs) {
+  const status = String(position?.status || '').toLowerCase();
+  const venueSymbol = String(position?.venueSymbol || '').trim().toUpperCase();
+  const ratio = position?.longShortRatio;
+  const longPct = position?.longPositionPct;
+  const shortPct = position?.shortPositionPct;
+  const bias = String(position?.bias || '').toLowerCase();
+  const observedAtMs = Date.parse(position?.observedAt);
+  if (!/^[A-Z0-9][A-Z0-9._:/-]{0,79}$/.test(venueSymbol) ||
+      !['full', 'unavailable'].includes(status)) return false;
+  if (status === 'unavailable') {
+    return ratio === null && longPct === null && shortPct === null &&
+      position?.observedAt === null && bias === 'unavailable' &&
+      typeof position?.reasonCode === 'string' && position.reasonCode.length > 0;
+  }
+  if (!Number.isFinite(ratio) || ratio < 0 || rounded(ratio, 4) !== ratio ||
+      !Number.isFinite(longPct) || longPct < 0 || longPct > 100 || rounded(longPct, 2) !== longPct ||
+      !Number.isFinite(shortPct) || shortPct <= 0 || shortPct > 100 ||
+      rounded(shortPct, 2) !== shortPct ||
+      !Number.isFinite(observedAtMs) || !Number.isFinite(generatedAtMs) ||
+      observedAtMs > generatedAtMs || generatedAtMs - observedAtMs > 3 * UTC_HOUR_MS ||
+      Math.abs(longPct + shortPct - 100) > 0.0101) return false;
+  // Published percentages are rounded to two decimals while the ratio keeps
+  // four. Validate that the ratio is possible within both rounding intervals
+  // instead of comparing it to a lower-precision quotient as exact truth.
+  const ratioMinimum = Math.max(0, longPct - 0.005) / (shortPct + 0.005);
+  const ratioMaximum = (longPct + 0.005) / Math.max(0.000001, shortPct - 0.005);
+  if (ratio < ratioMinimum - 0.0001 || ratio > ratioMaximum + 0.0001) return false;
+  const expectedBias = ratio < OI_LIQUIDATION_THRESHOLDS.topTraderBearishBelow
+    ? 'bearish'
+    : ratio > OI_LIQUIDATION_THRESHOLDS.topTraderBullishAbove ? 'bullish' : 'neutral';
+  return bias === expectedBias && position?.reasonCode === null;
+}
+
+function oiLiquidationRowValid(row, section, generatedAtMs) {
+  const category = signalCategory(row?.category);
+  const symbol = String(row?.symbol || '').trim().toUpperCase();
+  const venues = Array.isArray(row?.venues)
+    ? row.venues.map(venue => String(venue || '').trim().toLowerCase())
+    : [];
+  const currentVolume = row?.currentVolume24hUsd;
+  const currentOi = row?.currentOpenInterestUsd;
+  const listings = Array.isArray(row?.listings) ? row.listings : null;
+  const listingKeys = [];
+  let listingVolume = 0;
+  let listingOi = 0;
+  let listingFieldsValid = listings !== null && listings.length > 0;
+  for (const listing of listings || []) {
+    const venue = String(listing?.venue || '').trim().toLowerCase();
+    const venueSymbol = String(listing?.venueSymbol || '').trim().toUpperCase();
+    const instrumentType = String(listing?.instrumentType || '').trim();
+    const volume = listing?.volume24hUsd;
+    const oi = listing?.openInterestUsd;
+    const volumeStatus = String(listing?.volumeStatus || '').toLowerCase();
+    const oiStatus = String(listing?.openInterestStatus || '').toLowerCase();
+    if (!SIGNAL_VENUES.has(venue) || !/^[A-Z0-9][A-Z0-9._:/-]{0,79}$/.test(venueSymbol) ||
+        !/^[A-Za-z0-9][A-Za-z0-9 ._:/-]{0,39}$/.test(instrumentType) ||
+        !Number.isFinite(volume) || volume < 0 || rounded(volume, 2) !== volume ||
+        !['full', 'estimated'].includes(volumeStatus) ||
+        typeof listing?.volumeMethod !== 'string' || !listing.volumeMethod.trim() ||
+        !Number.isFinite(oi) || oi < 0 || rounded(oi, 2) !== oi ||
+        !['full', 'estimated'].includes(oiStatus) ||
+        typeof listing?.openInterestMethod !== 'string' || !listing.openInterestMethod.trim()) {
+      listingFieldsValid = false;
+      continue;
+    }
+    listingKeys.push(`${venue}:${venueSymbol}`);
+    listingVolume += volume;
+    listingOi += oi;
+  }
+  listingFieldsValid = listingFieldsValid && new Set(listingKeys).size === listingKeys.length &&
+    row?.listingCount === listings.length && rounded(listingVolume, 2) === currentVolume &&
+    rounded(listingOi, 2) === currentOi;
+  const listingVenueSet = new Set((listings || []).map(listing => String(listing?.venue || '').toLowerCase()));
+  const closes = Array.isArray(row?.completedDailyCloses) ? row.completedDailyCloses : null;
+  const generatedDay = Number.isFinite(generatedAtMs)
+    ? Math.floor(generatedAtMs / UTC_DAY_MS) * UTC_DAY_MS
+    : null;
+  const closeRows = closes?.map(close => ({
+    day:exactUtcDayMs(close?.day),
+    openInterestUsd:close?.openInterestUsd,
+  })) || [];
+  const closeDaysValid = closeRows.every((close, index) => close.day !== null &&
+    Number.isFinite(close.openInterestUsd) && close.openInterestUsd >= 0 &&
+    close.day === generatedDay - (closeRows.length - index) * UTC_DAY_MS);
+  const completeCloses = closeRows.length === OI_LIQUIDATION_THRESHOLDS.risingCompletedDays && closeDaysValid;
+  const closesRising = completeCloses && closeRows.every((close, index) =>
+    index === 0 || close.openInterestUsd > closeRows[index - 1].openInterestUsd);
+  const historyStatus = String(section?.history?.status || '').toLowerCase();
+  const expectedTrend = completeCloses
+    ? closesRising ? 'rising' : 'not-rising'
+    : null;
+  const trendValid = expectedTrend === null
+    ? ['warming', 'unavailable'].includes(row?.completedDailyTrend) &&
+      (historyStatus !== 'unavailable' || row?.completedDailyTrend === 'unavailable')
+    : row?.completedDailyTrend === expectedTrend;
+  const peak = row?.peak24hOpenInterestUsd;
+  const peakAtMs = row?.peak24hAt === null ? null : Date.parse(row?.peak24hAt);
+  const peakValid = Number.isFinite(peak) && peak >= 0 && Number.isFinite(peakAtMs) &&
+    Number.isFinite(generatedAtMs) && peakAtMs <= generatedAtMs &&
+    peakAtMs >= generatedAtMs - OI_LIQUIDATION_THRESHOLDS.peakLookbackHours * UTC_HOUR_MS;
+  const expectedDrawdown = peakValid && Number.isFinite(currentOi)
+    ? rounded(Math.max(0, peak - currentOi), 2)
+    : null;
+  const drawdown = row?.drawdown24hUsd;
+  const drawdownCoherent = expectedDrawdown === null
+    ? drawdown === null
+    : Number.isFinite(drawdown) && drawdown === expectedDrawdown;
+  const oiTriggered = row?.completedDailyTrend === 'rising' && expectedTrend === 'rising';
+  const liquidationTriggered = Number.isFinite(drawdown) &&
+    drawdown > OI_LIQUIDATION_THRESHOLDS.liquidationProxyDropUsdExclusive;
+  const expectedTrigger = oiTriggered && liquidationTriggered
+    ? 'both'
+    : oiTriggered ? 'oi_rising' : liquidationTriggered ? 'liquidation_proxy' : null;
+  const positions = Array.isArray(row?.topTraderPositions) ? row.topTraderPositions : null;
+  const positionKeys = positions?.map(position => String(position?.venueSymbol || '').trim().toUpperCase()) || [];
+  const binanceListingSymbols = new Set((listings || [])
+    .filter(listing => String(listing?.venue || '').toLowerCase() === 'binance')
+    .map(listing => String(listing?.venueSymbol || '').toUpperCase()));
+  const positionsValid = positions !== null && new Set(positionKeys).size === positionKeys.length &&
+    positions.length === binanceListingSymbols.size &&
+    positionKeys.every(venueSymbol => binanceListingSymbols.has(venueSymbol)) &&
+    [...binanceListingSymbols].every(venueSymbol => positionKeys.includes(venueSymbol)) &&
+    positions.every(position => oiTopTraderPositionValid(position, generatedAtMs)) &&
+    (!positions.length || venues.includes('binance'));
+  const availableBiases = positionsValid
+    ? positions.filter(position => position.status === 'full').map(position => position.bias)
+    : [];
+  const expectedOverallBias = availableBiases.length === 0
+    ? 'unavailable'
+    : new Set(availableBiases).size === 1 ? availableBiases[0] : 'mixed';
+  const fieldStatus = row?.fieldStatus;
+  const topTraderFieldStatus = availableBiases.length === 0
+    ? 'unavailable'
+    : availableBiases.length === positions.length ? 'full' : 'partial';
+  const expectedClosesStatus = completeCloses ? 'estimated' : closeRows.length ? 'partial' : 'unavailable';
+  const fieldStatusKeys = [
+    'currentVolume24hUsd', 'currentOpenInterestUsd', 'completedDailyCloses', 'completedDailyTrend',
+    'peak24hOpenInterestUsd', 'drawdown24hUsd', 'topTraderPositions',
+  ];
+  const estimatedFieldsValid = fieldStatus && typeof fieldStatus === 'object' && !Array.isArray(fieldStatus) &&
+    Object.keys(fieldStatus).length === fieldStatusKeys.length &&
+    fieldStatusKeys.every(key => Object.prototype.hasOwnProperty.call(fieldStatus, key)) &&
+    String(fieldStatus.currentVolume24hUsd || '').toLowerCase() === 'estimated' &&
+    String(fieldStatus.currentOpenInterestUsd || '').toLowerCase() === 'estimated' &&
+    String(fieldStatus.completedDailyCloses || '').toLowerCase() === expectedClosesStatus &&
+    String(fieldStatus.completedDailyTrend || '').toLowerCase() === expectedClosesStatus &&
+    String(fieldStatus.peak24hOpenInterestUsd || '').toLowerCase() === (peakValid ? 'estimated' : 'unavailable') &&
+    String(fieldStatus.drawdown24hUsd || '').toLowerCase() === (expectedDrawdown === null ? 'unavailable' : 'estimated') &&
+    String(fieldStatus.topTraderPositions || '').toLowerCase() === topTraderFieldStatus &&
+    Object.values(fieldStatus).every(value => OI_LIQUIDATION_FIELD_STATUSES.has(String(value || '').toLowerCase()));
+  const reasonCodesValid = Array.isArray(row?.reasonCodes) &&
+    row.reasonCodes.every(reason => typeof reason === 'string' && reason.length > 0) &&
+    new Set(row.reasonCodes).size === row.reasonCodes.length;
+
+  return Number.isInteger(row?.rank) && row.rank > 0 &&
+    RWA_SIGNAL_CATEGORIES.has(category) && /^[A-Z0-9][A-Z0-9.-]{0,39}$/.test(symbol) &&
+    row?.assetKey === `${category}:${symbol}` && /^[A-Za-z0-9_-]{8,64}$/.test(String(row?.cohortFingerprint || '')) &&
+    venues.length > 0 && new Set(venues).size === venues.length && venues.every(venue => SIGNAL_VENUES.has(venue)) &&
+    listingFieldsValid && venues.length === listingVenueSet.size && venues.every(venue => listingVenueSet.has(venue)) &&
+    Number.isInteger(row?.listingCount) && row.listingCount >= venues.length &&
+    Number.isFinite(currentVolume) && currentVolume > OI_LIQUIDATION_THRESHOLDS.minVolume24hUsdExclusive &&
+    rounded(currentVolume, 2) === currentVolume && Number.isFinite(currentOi) && currentOi >= 0 &&
+    rounded(currentOi, 2) === currentOi && closes !== null && closeDaysValid &&
+    trendValid && drawdownCoherent &&
+    (peakValid || (peak === null && row?.peak24hAt === null)) &&
+    row?.trigger === expectedTrigger && expectedTrigger !== null && positionsValid &&
+    row?.overallTraderBias === expectedOverallBias && row?.status === 'estimated' &&
+    estimatedFieldsValid && reasonCodesValid;
+}
+
+function validateOiLiquidationAnomalies(section, generatedAtMs) {
+  const status = String(section?.status || '').toLowerCase();
+  const formulaValid = section?.formulaVersion === OI_LIQUIDATION_FORMULA_VERSION;
+  const sectionGeneratedAtMs = Date.parse(section?.generatedAt);
+  const timestampValid = Number.isFinite(sectionGeneratedAtMs) && Number.isFinite(generatedAtMs) &&
+    Math.abs(sectionGeneratedAtMs - generatedAtMs) <= 1_000;
+  const thresholds = section?.thresholds;
+  const thresholdsValid = Object.entries(OI_LIQUIDATION_THRESHOLDS)
+    .every(([key, value]) => thresholds?.[key] === value) &&
+    Object.keys(thresholds || {}).length === Object.keys(OI_LIQUIDATION_THRESHOLDS).length &&
+    String(thresholds?.logic || '').toLowerCase() === 'or';
+  const methodology = section?.methodology;
+  const methodologyValid = methodology && typeof methodology === 'object' && !Array.isArray(methodology) &&
+    ['universe', 'eligibility', 'openInterest', 'threeDayTrend', 'liquidationProxy', 'logic',
+      'topTraderPositions', 'limitations']
+      .every(key => typeof methodology[key] === 'string' && methodology[key].length > 0);
+  const sourcesValid = exactOiLiquidationSources(section);
+  const sourceValues = sourcesValid ? SIGNAL_SOURCE_KEYS.map(key => section.sources[key]) : [];
+  const observedAvailableSources = sourceValues.filter(source => source.status !== 'unavailable').length;
+  const observedFullCatalogSources = sourceValues.filter(source =>
+    source.listingCount > 0 &&
+    !source.warnings.some(warning => OI_CATALOG_BLOCKER.test(String(warning).toUpperCase()))).length;
+  const observedAcceptedListings = sourceValues.reduce((sum, source) => sum + source.listingCount, 0);
+  const coverage = section?.coverage;
+  const coverageKeys = [
+    'acceptedListings', 'verifiedAssets', 'identityConflicts', 'volumeEligibleAssets',
+    'completeEligibleAssets', 'missingEligibleAssets', 'filterUnknownAssets',
+  ];
+  const coverageNumbersValid = coverageKeys.every(key => Number.isInteger(coverage?.[key]) && coverage[key] >= 0);
+  const coverageValid = coverageNumbersValid && coverage?.expectedSources === SIGNAL_SOURCE_KEYS.length &&
+    coverage?.availableSources === observedAvailableSources &&
+    coverage?.fullCatalogSources === observedFullCatalogSources &&
+    coverage.acceptedListings === observedAcceptedListings &&
+    coverage.volumeEligibleAssets <= coverage.verifiedAssets &&
+    coverage.completeEligibleAssets <= coverage.volumeEligibleAssets &&
+    coverage.missingEligibleAssets === coverage.volumeEligibleAssets - coverage.completeEligibleAssets &&
+    coverage.filterUnknownAssets <= coverage.verifiedAssets;
+  const identityConflict = Number.isInteger(coverage?.identityConflicts) && coverage.identityConflicts > 0;
+
+  const rows = Array.isArray(section?.rows) ? section.rows : null;
+  const invalidRows = rows ? rows.filter(row => !oiLiquidationRowValid(row, section, generatedAtMs)) : [];
+  const ranks = rows?.map(row => row?.rank) || [];
+  const identityKeys = rows?.map(row => `${signalCategory(row?.category)}:${String(row?.symbol || '').toUpperCase()}`) || [];
+  const responseListings = rows?.flatMap(row => Array.isArray(row?.listings) ? row.listings : []) || [];
+  const responseListingKeys = responseListings.map(listing =>
+    `${String(listing?.venue || '').toLowerCase()}:${String(listing?.venueSymbol || '').toUpperCase()}`);
+  const responseSourceCountsValid = sourcesValid && SIGNAL_SOURCE_KEYS.every(venue => {
+    const observed = responseListings.filter(listing => String(listing?.venue || '').toLowerCase() === venue).length;
+    const source = section.sources[venue];
+    return observed <= source.listingCount && observed <= source.volumeFieldCount &&
+      observed <= source.openInterestFieldCount;
+  });
+  const rowsValid = rows !== null && rows.length <= 100 && invalidRows.length === 0 &&
+    new Set(identityKeys).size === identityKeys.length && new Set(ranks).size === ranks.length &&
+    new Set(responseListingKeys).size === responseListingKeys.length && responseSourceCountsValid &&
+    ranks.every((rank, index) => rank === index + 1);
+  const observedCounts = rows ? {
+    oiRising:rows.filter(row => ['oi_rising', 'both'].includes(row.trigger)).length,
+    liquidationProxy:rows.filter(row => ['liquidation_proxy', 'both'].includes(row.trigger)).length,
+    both:rows.filter(row => row.trigger === 'both').length,
+    topTraderAvailable:rows.filter(row => row.topTraderPositions
+      .some(position => position.status === 'full')).length,
+  } : null;
+  const counts = section?.counts;
+  const declaredCountKeys = [
+    'verifiedAssets', 'filteredLowVolume', 'filterUnknown', 'volumeEligibleAssets',
+    'completeEligibleAssets', 'missingEligibleAssets', 'alerts', 'oiRising',
+    'liquidationProxy', 'both', 'perpListings', 'topTraderAvailable',
+  ];
+  const declaredCountsValid = declaredCountKeys.every(key => Number.isInteger(counts?.[key]) && counts[key] >= 0) &&
+    counts.alerts === counts.oiRising + counts.liquidationProxy - counts.both &&
+    counts.both <= Math.min(counts.oiRising, counts.liquidationProxy) &&
+    counts.verifiedAssets === coverage?.verifiedAssets &&
+    counts.filterUnknown === coverage?.filterUnknownAssets &&
+    counts.volumeEligibleAssets === coverage?.volumeEligibleAssets &&
+    counts.completeEligibleAssets === coverage?.completeEligibleAssets &&
+    counts.missingEligibleAssets === coverage?.missingEligibleAssets &&
+    counts.perpListings === coverage?.acceptedListings &&
+    counts.topTraderAvailable <= counts.alerts;
+  const rowsCountsValid = observedCounts !== null && rows.length === Math.min(counts?.alerts ?? -1, 100) &&
+    ['oiRising', 'liquidationProxy', 'both', 'topTraderAvailable'].every(key =>
+      observedCounts[key] <= counts[key] && (counts.alerts > 100 || observedCounts[key] === counts[key]));
+  const countsValid = declaredCountsValid && rowsCountsValid && coverageValid &&
+    counts.filteredLowVolume + counts.filterUnknown + coverage.volumeEligibleAssets === coverage.verifiedAssets &&
+    counts.completeEligibleAssets + counts.missingEligibleAssets === counts.volumeEligibleAssets &&
+    counts.alerts <= coverage.completeEligibleAssets;
+
+  const history = section?.history;
+  const historyStatus = String(history?.status || '').toLowerCase();
+  const storedHours = history?.storedHourlyBuckets;
+  const oldestAtMs = history?.oldestAt === null ? null : Date.parse(history?.oldestAt);
+  const newestAtMs = history?.latestAt === null ? null : Date.parse(history?.latestAt);
+  const generatedHour = Number.isFinite(generatedAtMs)
+    ? Math.floor(generatedAtMs / UTC_HOUR_MS) * UTC_HOUR_MS
+    : null;
+  const emptyHistory = storedHours === 0 && history?.oldestAt === null && history?.latestAt === null;
+  const populatedHistory = Number.isInteger(storedHours) && storedHours > 0 &&
+    Number.isFinite(oldestAtMs) && Number.isFinite(newestAtMs) &&
+    oldestAtMs % UTC_HOUR_MS === 0 && newestAtMs % UTC_HOUR_MS === 0 &&
+    oldestAtMs <= newestAtMs && newestAtMs <= generatedHour &&
+    oldestAtMs >= generatedHour - (OI_LIQUIDATION_HISTORY_HOURS - 1) * UTC_HOUR_MS &&
+    newestAtMs - oldestAtMs >= (storedHours - 1) * UTC_HOUR_MS;
+  const historyValid = history && OI_LIQUIDATION_SECTION_STATUSES.has(historyStatus) &&
+    history.cadence === 'utc-hourly-idempotent' &&
+    history.retentionHours === OI_LIQUIDATION_HISTORY_HOURS &&
+    history.requiredHourlyBuckets === OI_LIQUIDATION_THRESHOLDS.peakLookbackHours &&
+    history.requiredCompletedDays === OI_LIQUIDATION_THRESHOLDS.risingCompletedDays &&
+    typeof history.ready === 'boolean' &&
+    Number.isInteger(history.readyAssets) && history.readyAssets >= 0 &&
+    Number.isInteger(history.trendReadyAssets) && history.trendReadyAssets >= 0 &&
+    history.readyAssets <= history.trendReadyAssets &&
+    Number.isInteger(history.drawdownReadyAssets) && history.drawdownReadyAssets >= 0 &&
+    history.readyAssets <= history.drawdownReadyAssets &&
+    history.trendReadyAssets <= coverage?.completeEligibleAssets &&
+    history.drawdownReadyAssets <= coverage?.completeEligibleAssets &&
+    history.readyAssets <= coverage?.completeEligibleAssets &&
+    history.ready === (coverage?.completeEligibleAssets > 0 &&
+      history.readyAssets === coverage?.completeEligibleAssets &&
+      history.trendReadyAssets === coverage?.completeEligibleAssets &&
+      history.drawdownReadyAssets === coverage?.completeEligibleAssets) &&
+    Number.isInteger(storedHours) && storedHours >= 0 && storedHours <= OI_LIQUIDATION_HISTORY_HOURS &&
+    (emptyHistory || populatedHistory) &&
+    (historyStatus !== 'full' || history.ready === true) &&
+    (historyStatus !== 'warming' || history.ready === false);
+
+  const persistence = section?.persistence;
+  const persistenceStatus = String(persistence?.status || '').toLowerCase();
+  const writeStatus = String(persistence?.writeStatus || '').toLowerCase();
+  const readStateValid =
+    (persistenceStatus === 'partial' && writeStatus === 'read-only' && persistence?.error === null) ||
+    (persistenceStatus === 'unavailable' && writeStatus === 'unavailable' &&
+      typeof persistence?.error === 'string' && persistence.error.length > 0);
+  const persistenceValid = persistence?.mode === 'vercel-runtime-cache' &&
+    OI_LIQUIDATION_PERSISTENCE_STATUSES.has(persistenceStatus) &&
+    persistence?.namespace === OI_LIQUIDATION_HISTORY_NAMESPACE &&
+    persistence?.writer?.requested === false && persistence?.writer?.succeeded === null &&
+    OI_LIQUIDATION_WRITE_STATUSES.has(writeStatus) && readStateValid;
+
+  const allSourcesFull = sourcesValid && sourceValues.every(source => source.status === 'full');
+  const statusValid = OI_LIQUIDATION_SECTION_STATUSES.has(status);
+  const statusCoherent = statusValid &&
+    (status !== 'full' || (allSourcesFull && !identityConflict && historyStatus === 'full' &&
+      coverage.fullCatalogSources === SIGNAL_SOURCE_KEYS.length &&
+      counts?.filterUnknown === 0 && coverage.completeEligibleAssets === coverage.volumeEligibleAssets &&
+      coverage.missingEligibleAssets === 0 && history?.ready === true)) &&
+    (status !== 'warming' || historyStatus === 'warming') &&
+    (status !== 'unavailable' || rows?.length === 0);
+  const cryptoCategoryCount = rows
+    ? rows.filter(row => !RWA_SIGNAL_CATEGORIES.has(signalCategory(row?.category))).length
+    : 0;
+  const metadataValid = section?.rowLimit === 100 && typeof section?.scope === 'string' && section.scope.length > 0;
+  const contractValid = Boolean(section) && metadataValid && formulaValid && timestampValid && thresholdsValid &&
+    methodologyValid && sourcesValid && coverageValid && countsValid && rowsValid && historyValid &&
+    persistenceValid && statusCoherent && cryptoCategoryCount === 0;
+  return {
+    contractValid,
+    status,
+    formulaValid,
+    timestampValid,
+    thresholdsValid,
+    methodologyValid,
+    sourcesValid,
+    allSourcesFull,
+    coverageValid,
+    countsValid,
+    rowsValid,
+    historyValid,
+    persistenceValid,
+    statusCoherent,
+    identityConflicts:Number.isInteger(coverage?.identityConflicts) ? coverage.identityConflicts : null,
+    identityConflict,
+    rows:rows?.length ?? null,
+    invalidRows:invalidRows.length,
+    cryptoCategoryCount,
+  };
+}
+
 export function validateSignalRadarSnapshot(payload, now = Date.now()) {
   const generatedAtMs = Date.parse(payload?.generatedAt);
   const ageMs = Number.isFinite(generatedAtMs) ? now - generatedAtMs : null;
@@ -731,8 +1137,26 @@ export function validateSignalRadarSnapshot(payload, now = Date.now()) {
     SPOT_ANOMALY_WRITE_STATUSES.has(spotTopWriteStatus) && spotTopReadStateValid &&
     spotTopPersistence.status === payload?.spotVolumePriceAnomalies?.persistence?.status &&
     spotTopPersistence.writeStatus === payload?.spotVolumePriceAnomalies?.persistence?.writeStatus;
+  const oiLiquidation = validateOiLiquidationAnomalies(payload?.oiLiquidationAnomalies, generatedAtMs);
+  const oiTopPersistence = persistence?.oiLiquidation;
+  const oiTopPersistenceStatus = String(oiTopPersistence?.status || '').toLowerCase();
+  const oiTopWriteStatus = String(oiTopPersistence?.writeStatus || '').toLowerCase();
+  const oiTopReadStateValid =
+    (oiTopPersistenceStatus === 'partial' && oiTopWriteStatus === 'read-only' &&
+      oiTopPersistence?.error === null) ||
+    (oiTopPersistenceStatus === 'unavailable' && oiTopWriteStatus === 'unavailable' &&
+      typeof oiTopPersistence?.error === 'string' && oiTopPersistence.error.length > 0);
+  const oiTopPersistenceValid = oiTopPersistence?.namespace === OI_LIQUIDATION_HISTORY_NAMESPACE &&
+    OI_LIQUIDATION_PERSISTENCE_STATUSES.has(oiTopPersistenceStatus) &&
+    oiTopPersistence?.retentionHours === OI_LIQUIDATION_HISTORY_HOURS &&
+    Number.isInteger(oiTopPersistence?.storedHours) && oiTopPersistence.storedHours >= 0 &&
+    oiTopPersistence.storedHours <= OI_LIQUIDATION_HISTORY_HOURS &&
+    oiTopPersistence.storedHours === payload?.oiLiquidationAnomalies?.history?.storedHourlyBuckets &&
+    OI_LIQUIDATION_WRITE_STATUSES.has(oiTopWriteStatus) && oiTopReadStateValid &&
+    oiTopPersistence.status === payload?.oiLiquidationAnomalies?.persistence?.status &&
+    oiTopPersistence.writeStatus === payload?.oiLiquidationAnomalies?.persistence?.writeStatus;
   const cryptoCategoryCount = invalidAssetCategories.length + invalidVolumeCategories.length +
-    spotVolumePrice.cryptoCategoryCount;
+    spotVolumePrice.cryptoCategoryCount + oiLiquidation.cryptoCategoryCount;
   const rowsValid = volumeRows !== null && invalidVolumeRows.length === 0 && uniqueVolumeRanks &&
     volumeRows.length <= readyAssets &&
     (volumeStatus !== 'unavailable' || volumeRows.length === 0);
@@ -760,11 +1184,12 @@ export function validateSignalRadarSnapshot(payload, now = Date.now()) {
     historyStateValid && persistenceContractValid && volumeStatusCoherent && rowsValid;
   const contractValid = schemaValid && sourcesValid && coverageValid && responseStatusValid &&
     responseStatusCoherent && assetsValid && volumeContractValid && spotVolumePrice.contractValid &&
-    spotTopPersistenceValid;
+    spotTopPersistenceValid && oiLiquidation.contractValid && oiTopPersistenceValid;
   const hardFailure = !contractValid || !fresh || identityConflict || spotVolumePrice.identityConflict ||
-    spotVolumePrice.status === 'unavailable';
+    oiLiquidation.identityConflict || spotVolumePrice.status === 'unavailable' ||
+    oiLiquidation.status === 'unavailable';
   const warmingOrDegraded = responseStatus !== 'full' || volumeStatus !== 'full' ||
-    spotVolumePrice.status !== 'full' || availableSources < expectedSources ||
+    spotVolumePrice.status !== 'full' || oiLiquidation.status !== 'full' || availableSources < expectedSources ||
     persistence?.status === 'unavailable';
   const status = hardFailure ? 'fail' : warmingOrDegraded ? 'warn' : 'pass';
 
@@ -772,6 +1197,9 @@ export function validateSignalRadarSnapshot(payload, now = Date.now()) {
   if (identityConflict) reason = `${identityConflicts} cross-category identity conflict(s) detected by Signal Radar`;
   else if (spotVolumePrice.identityConflict) {
     reason = `${spotVolumePrice.identityConflicts} Spot cross-category identity conflict(s) detected by Signal Radar`;
+  }
+  else if (oiLiquidation.identityConflict) {
+    reason = `${oiLiquidation.identityConflicts} OI cross-category identity conflict(s) detected by Signal Radar`;
   }
   else if (!schemaValid) reason = 'Signal Radar schema version is invalid';
   else if (!sourcesValid || !coverageValid || !responseStatusCoherent) {
@@ -782,7 +1210,11 @@ export function validateSignalRadarSnapshot(payload, now = Date.now()) {
   else if (!spotVolumePrice.contractValid || !spotTopPersistenceValid) {
     reason = 'Spot volume/price anomaly contract, persistence, or row semantics are invalid';
   }
+  else if (!oiLiquidation.contractValid || !oiTopPersistenceValid) {
+    reason = 'OI and liquidation proxy contract, persistence, or row semantics are invalid';
+  }
   else if (spotVolumePrice.status === 'unavailable') reason = 'Spot volume/price anomaly coverage is unavailable';
+  else if (oiLiquidation.status === 'unavailable') reason = 'OI and liquidation proxy coverage is unavailable';
   else if (!assetsValid) reason = 'Signal Radar contains a non-RWA or Crypto category';
   else if (warmingOrDegraded) reason = 'Signal Radar or perpetual volume history is Warming, Partial, or Unavailable';
 
@@ -817,6 +1249,8 @@ export function validateSignalRadarSnapshot(payload, now = Date.now()) {
     invalidVolumeRows:invalidVolumeRows.length,
     spotVolumePrice,
     spotTopPersistenceValid,
+    oiLiquidation,
+    oiTopPersistenceValid,
     cryptoCategoryCount,
     reason,
   };
@@ -830,10 +1264,11 @@ async function probeSignalRadar(baseUrl) {
     const payload = await fetchJsonWithPolicy(
       `${baseUrl}/api/signal-snapshot`,
       { headers:{ Accept:'application/json' } },
-      // A cold Signal snapshot gives the isolated Spot collector a 23-second
-      // absolute budget. Keep the read-only health probe above that valid
-      // ceiling so a slow-but-successful cold snapshot is not a false outage.
-      { timeoutMs:30_000, retries:0 },
+      // A cold Signal snapshot also performs bounded OI and triggered Binance
+      // positioning enrichment after the five-source core collection. Keep the
+      // read-only probe below the 60-second Function ceiling but above the
+      // server's cold core + optional Top Trader enrichment budget.
+      { timeoutMs:50_000, retries:0 },
     );
     const validation = validateSignalRadarSnapshot(payload);
     return checkResult('signal-radar-volume', validation.status, {

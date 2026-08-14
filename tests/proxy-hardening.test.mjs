@@ -4,9 +4,16 @@ import { readFile } from 'node:fs/promises';
 
 import binancePublicHandler, {
   completedUtcDayWindow,
+  normalizeBinanceOpenInterestRow,
   normalizeBinanceDailyCandles,
+  normalizeBinanceTopTraderPositionRow,
+  selectBinanceRwaContractCatalog,
   selectBinanceKlineSymbols,
 } from '../api/binance-public.js';
+import {
+  normalizeBinanceOiProxySnapshot,
+  normalizeBinanceTopTraderProxySnapshot,
+} from '../api/signal-snapshot.js';
 import {
   normalizeBinanceSpotTickerCoverage,
   selectBinanceSpotRwaCatalog,
@@ -65,6 +72,44 @@ function binanceContract(symbol, baseAsset, overrides = {}) {
 
 function binanceTicker(symbol, quoteVolume) {
   return { symbol, quoteVolume:String(quoteVolume) };
+}
+
+function binancePositioningCatalog() {
+  return { symbols:[
+    binanceContract('AAPLUSDT', 'AAPL', { underlyingType:'EQUITY' }),
+    binanceContract('QQQUSDT', 'QQQ', { underlyingType:'EQUITY' }),
+    binanceContract('PAXGUSDT', 'PAXG', { contractType:'PERPETUAL', underlyingType:'COIN' }),
+    binanceContract('XAUTUSDT', 'XAUT', { contractType:'PERPETUAL', underlyingType:'COIN' }),
+    binanceContract('BTCUSDT', 'BTC', { contractType:'PERPETUAL', underlyingType:'COIN' }),
+    binanceContract('QNTUSDT', 'QNT', { contractType:'PERPETUAL', underlyingType:'COIN' }),
+    binanceContract('OLDUSDT', 'OLD', { status:'BREAK', underlyingType:'EQUITY' }),
+  ] };
+}
+
+function positioningProxyPayload(snapshotType, {
+  instruments = selectBinanceRwaContractCatalog(binancePositioningCatalog()),
+  rows,
+  generatedAt = new Date(FIXED_NOW).toISOString(),
+  status = null,
+  upstreamFailures = null,
+} = {}) {
+  const observedRows = rows || [];
+  const missing = instruments.length - observedRows.length;
+  return {
+    schemaVersion:1,
+    snapshotType,
+    generatedAt,
+    catalogStatus:'full',
+    status:status || (missing ? 'partial' : 'full'),
+    coverage:{
+      expected:instruments.length,
+      observed:observedRows.length,
+      missing,
+      upstreamFailures:upstreamFailures ?? missing,
+    },
+    instruments,
+    rows:observedRows,
+  };
 }
 
 function binanceSpotInstrument(symbol, baseAsset, quoteAsset = 'USDT', overrides = {}) {
@@ -144,6 +189,58 @@ test('Binance fixed selection uses only active official RWA contracts and ranks 
     { symbols:[binanceContract('BAD_SYMBOL', 'BAD')] },
     [binanceTicker('BAD_SYMBOL', 1)],
   ), /identity/);
+});
+
+test('Binance positioning catalog admits only active official TradFi contracts and exact metal exceptions', () => {
+  const catalog = selectBinanceRwaContractCatalog(binancePositioningCatalog());
+  assert.deepEqual(catalog.map(row => row.symbol), [
+    'AAPLUSDT', 'PAXGUSDT', 'QQQUSDT', 'XAUTUSDT',
+  ]);
+  assert.equal(catalog.find(row => row.symbol === 'AAPLUSDT').contractType, 'TRADIFI_PERPETUAL');
+  assert.equal(catalog.find(row => row.symbol === 'PAXGUSDT').contractType, 'PERPETUAL');
+  assert.ok(!catalog.some(row => ['BTCUSDT','QNTUSDT','OLDUSDT'].includes(row.symbol)));
+  assert.throws(() => selectBinanceRwaContractCatalog({ symbols:[
+    binanceContract('AAPLUSDT', 'AAPL'),
+    binanceContract('AAPLUSDT', 'AAPL'),
+  ] }), /duplicate/i);
+  assert.throws(() => selectBinanceRwaContractCatalog({ symbols:[
+    binanceContract('BTCUSDT', 'BTC', { contractType:'PERPETUAL', underlyingType:'COIN' }),
+  ] }), /empty/i);
+});
+
+test('Binance positioning rows require exact identity, coherent values, and fresh official timestamps', () => {
+  assert.deepEqual(
+    normalizeBinanceOpenInterestRow('AAPLUSDT', {
+      symbol:'AAPLUSDT', openInterest:'123.45', time:FIXED_NOW,
+    }, FIXED_NOW),
+    { symbol:'AAPLUSDT', openInterest:123.45, observedAt:new Date(FIXED_NOW).toISOString() },
+  );
+  assert.equal(normalizeBinanceOpenInterestRow('AAPLUSDT', {
+    symbol:'BTCUSDT', openInterest:'123.45', time:FIXED_NOW,
+  }, FIXED_NOW), null);
+  assert.equal(normalizeBinanceOpenInterestRow('AAPLUSDT', {
+    symbol:'AAPLUSDT', openInterest:'123.45', time:FIXED_NOW - 10 * 60_000 - 1,
+  }, FIXED_NOW), null);
+  assert.equal(normalizeBinanceOpenInterestRow('AAPLUSDT', {
+    symbol:'AAPLUSDT', openInterest:'123.45', time:FIXED_NOW + 5 * 60_000 + 1,
+  }, FIXED_NOW), null);
+
+  const topTrader = normalizeBinanceTopTraderPositionRow('AAPLUSDT', [{
+    symbol:'AAPLUSDT', longShortRatio:'1.5', longAccount:'0.6', shortAccount:'0.4', timestamp:FIXED_NOW,
+  }], FIXED_NOW);
+  assert.deepEqual(topTrader, {
+    symbol:'AAPLUSDT', longShortRatio:1.5, longAccount:0.6, shortAccount:0.4, timestamp:FIXED_NOW,
+  });
+  assert.equal(normalizeBinanceTopTraderPositionRow('AAPLUSDT', [{
+    symbol:'BTCUSDT', longShortRatio:'1.5', longAccount:'0.6', shortAccount:'0.4', timestamp:FIXED_NOW,
+  }], FIXED_NOW), null);
+  assert.equal(normalizeBinanceTopTraderPositionRow('AAPLUSDT', [{
+    symbol:'AAPLUSDT', longShortRatio:'9', longAccount:'0.6', shortAccount:'0.4', timestamp:FIXED_NOW,
+  }], FIXED_NOW), null);
+  assert.equal(normalizeBinanceTopTraderPositionRow('AAPLUSDT', [{
+    symbol:'AAPLUSDT', longShortRatio:'1.5', longAccount:'0.6', shortAccount:'0.4',
+    timestamp:FIXED_NOW - 3 * 60 * 60_000 - 1,
+  }], FIXED_NOW), null);
 });
 
 test('Binance fixed spot catalog cross-checks B candidates against active TradFi identity and keeps only exact metal exceptions', () => {
@@ -299,6 +396,10 @@ test('fixed snapshot routes are GET-only and reject every caller-selected symbol
     [binancePublicHandler, { method:'GET', query:{ endpoint:'exchangeInfo', symbols:'AAPLUSDT' } }, 400],
     [binancePublicHandler, { method:'GET', query:{ endpoint:'spot-snapshot', symbols:'AAPLBUSDT' } }, 400],
     [binancePublicHandler, { method:'GET', query:{ endpoint:'spot-snapshot', path:'/ticker/24hr' } }, 400],
+    [binancePublicHandler, { method:'POST', query:{ endpoint:'oi-snapshot' } }, 405],
+    [binancePublicHandler, { method:'GET', query:{ endpoint:'oi-snapshot', symbol:'AAPLUSDT' } }, 400],
+    [binancePublicHandler, { method:'GET', query:{ endpoint:'top-trader-snapshot', symbols:'AAPLUSDT' } }, 400],
+    [binancePublicHandler, { method:'GET', query:{ endpoint:'top-trader-snapshot', path:'/futures/data/topLongShortPositionRatio' } }, 400],
     [hyperliquidKlinesHandler, { method:'POST', query:{} }, 405],
     [hyperliquidKlinesHandler, { method:'GET', query:{ symbols:'xyz:AAPL' } }, 400],
     [hyperliquidKlinesHandler, { method:'GET', query:{ startTime:'1' } }, 400],
@@ -316,6 +417,216 @@ test('fixed snapshot routes are GET-only and reject every caller-selected symbol
     }
   });
   assert.equal(fetches, 0);
+});
+
+test('Binance fixed OI and Top Trader snapshots expose exact full coverage with bounded shared caching', async () => {
+  const calls = [];
+  const observedAt = Date.now() - 1_000;
+  const originalApiKey = process.env.BINANCE_MARKET_DATA_API_KEY;
+  delete process.env.BINANCE_MARKET_DATA_API_KEY;
+  try {
+    await withFetchStub(async (url, options = {}) => {
+      const parsed = new URL(String(url));
+      calls.push({ parsed, options });
+      if (parsed.pathname.endsWith('/exchangeInfo')) return jsonResponse(binancePositioningCatalog());
+      const symbol = parsed.searchParams.get('symbol');
+      if (parsed.pathname.endsWith('/openInterest')) {
+        return jsonResponse({ symbol, openInterest:'123.45', time:observedAt });
+      }
+      if (parsed.pathname.endsWith('/topLongShortPositionRatio')) {
+        assert.equal(options.headers['X-MBX-APIKEY'], undefined,
+          'the live public endpoint must work without requiring a Preview API key');
+        return jsonResponse([{
+          symbol, longShortRatio:'1.5', longAccount:'0.6', shortAccount:'0.4', timestamp:observedAt,
+        }]);
+      }
+      throw new Error(`unexpected ${parsed.href}`);
+    }, async () => {
+      for (const [endpoint, snapshotType, fresh, swr] of [
+        ['oi-snapshot', 'open-interest', 240, 60],
+        ['top-trader-snapshot', 'top-trader-position-ratio', 3_300, 300],
+      ]) {
+        const response = responseRecorder();
+        await binancePublicHandler({ method:'GET', query:{ endpoint } }, response);
+        assert.equal(response.statusCode, 200);
+        assert.equal(response.payload.schemaVersion, 1);
+        assert.equal(response.payload.snapshotType, snapshotType);
+        assert.equal(response.payload.catalogStatus, 'full');
+        assert.equal(response.payload.status, 'full');
+        assert.deepEqual(response.payload.coverage, {
+          expected:4, observed:4, missing:0, upstreamFailures:0,
+        });
+        assert.deepEqual(response.payload.instruments.map(row => row.symbol), [
+          'AAPLUSDT', 'PAXGUSDT', 'QQQUSDT', 'XAUTUSDT',
+        ]);
+        assert.deepEqual(response.payload.rows.map(row => row.symbol), [
+          'AAPLUSDT', 'PAXGUSDT', 'QQQUSDT', 'XAUTUSDT',
+        ]);
+        assert.match(response.headers['Vercel-CDN-Cache-Control'], new RegExp(`max-age=${fresh}`));
+        assert.match(response.headers['Vercel-CDN-Cache-Control'], new RegExp(`stale-while-revalidate=${swr}`));
+      }
+    });
+  } finally {
+    if (originalApiKey === undefined) delete process.env.BINANCE_MARKET_DATA_API_KEY;
+    else process.env.BINANCE_MARKET_DATA_API_KEY = originalApiKey;
+  }
+  const marketCalls = calls.filter(({ parsed }) => !parsed.pathname.endsWith('/exchangeInfo'));
+  assert.equal(marketCalls.length, 8);
+  assert.ok(marketCalls.every(({ parsed }) =>
+    ['AAPLUSDT','PAXGUSDT','QQQUSDT','XAUTUSDT'].includes(parsed.searchParams.get('symbol'))));
+  assert.ok(marketCalls.every(({ parsed }) => !['BTCUSDT','QNTUSDT'].includes(parsed.searchParams.get('symbol'))));
+});
+
+test('Binance positioning snapshots conserve Partial coverage and fail no-store when every row fails', async () => {
+  const observedAt = Date.now() - 1_000;
+  const exchangeInfo = { symbols:[
+    binanceContract('AAPLUSDT', 'AAPL', { underlyingType:'EQUITY' }),
+    binanceContract('PAXGUSDT', 'PAXG', { contractType:'PERPETUAL', underlyingType:'COIN' }),
+  ] };
+  const run = async ({ endpoint, allFail = false }) => withFetchStub(async url => {
+    const parsed = new URL(String(url));
+    if (parsed.pathname.endsWith('/exchangeInfo')) return jsonResponse(exchangeInfo);
+    const symbol = parsed.searchParams.get('symbol');
+    if (allFail || symbol === 'PAXGUSDT') return jsonResponse({ error:'unavailable' }, 503);
+    if (parsed.pathname.endsWith('/openInterest')) {
+      return jsonResponse({ symbol, openInterest:'10', time:observedAt });
+    }
+    return jsonResponse([{
+      symbol, longShortRatio:'1', longAccount:'0.5', shortAccount:'0.5', timestamp:observedAt,
+    }]);
+  }, async () => {
+    const response = responseRecorder();
+    await binancePublicHandler({ method:'GET', query:{ endpoint } }, response);
+    return response;
+  });
+
+  const partial = await run({ endpoint:'oi-snapshot' });
+  assert.equal(partial.statusCode, 200);
+  assert.equal(partial.payload.status, 'partial');
+  assert.deepEqual(partial.payload.coverage, {
+    expected:2, observed:1, missing:1, upstreamFailures:1,
+  });
+  assert.deepEqual(partial.payload.rows.map(row => row.symbol), ['AAPLUSDT']);
+  assert.match(partial.headers['Vercel-CDN-Cache-Control'], /max-age=60/);
+  assert.match(partial.headers['Vercel-CDN-Cache-Control'], /stale-while-revalidate=60/);
+
+  const topPartial = await run({ endpoint:'top-trader-snapshot' });
+  assert.equal(topPartial.statusCode, 200);
+  assert.equal(topPartial.payload.status, 'partial');
+  assert.deepEqual(topPartial.payload.coverage, {
+    expected:2, observed:1, missing:1, upstreamFailures:1,
+  });
+  assert.match(topPartial.headers['Vercel-CDN-Cache-Control'], /max-age=300/);
+  assert.match(topPartial.headers['Vercel-CDN-Cache-Control'], /stale-while-revalidate=300/);
+
+  for (const endpoint of ['oi-snapshot','top-trader-snapshot']) {
+    const unavailable = await run({ endpoint, allFail:true });
+    assert.equal(unavailable.statusCode, 502,
+      'an all-row upstream failure must remain explicitly unavailable');
+    assert.equal(unavailable.headers['Vercel-CDN-Cache-Control'], 'no-store');
+  }
+});
+
+test('Signal consumes Binance positioning proxies by exact current-catalog identity and keeps missing rows Unavailable', () => {
+  const instruments = selectBinanceRwaContractCatalog({ symbols:[
+    binanceContract('AAPLUSDT', 'AAPL', { underlyingType:'EQUITY' }),
+    binanceContract('PAXGUSDT', 'PAXG', { contractType:'PERPETUAL', underlyingType:'COIN' }),
+  ] });
+  const oiPayload = positioningProxyPayload('open-interest', {
+    instruments,
+    rows:[
+      { symbol:'AAPLUSDT', openInterest:10, observedAt:new Date(FIXED_NOW).toISOString() },
+      { symbol:'PAXGUSDT', openInterest:20, observedAt:new Date(FIXED_NOW).toISOString() },
+    ],
+  });
+  const oi = normalizeBinanceOiProxySnapshot(oiPayload, [
+    { venueSymbol:'AAPLUSDT', priceUsd:200, oiValuationPriceMethod:'mark-price' },
+    { venueSymbol:'PAXGUSDT', priceUsd:2_500, oiValuationPriceMethod:'last-price' },
+    { venueSymbol:'BTCUSDT', priceUsd:60_000, oiValuationPriceMethod:'mark-price' },
+  ], FIXED_NOW);
+  assert.deepEqual(oi.get('AAPLUSDT'), {
+    openInterestUsd:2_000,
+    openInterestMethod:'open-interest-x-mark-price',
+    openInterestStatus:'estimated',
+  });
+  assert.deepEqual(oi.get('PAXGUSDT'), {
+    openInterestUsd:50_000,
+    openInterestMethod:'open-interest-x-last-price',
+    openInterestStatus:'estimated',
+  });
+  assert.equal(oi.get('BTCUSDT'), null,
+    'a listing outside the exact official proxy catalog must never inherit OI');
+
+  const topPayload = positioningProxyPayload('top-trader-position-ratio', {
+    instruments,
+    rows:[{
+      symbol:'AAPLUSDT', longShortRatio:1.5, longAccount:0.6, shortAccount:0.4, timestamp:FIXED_NOW,
+    }],
+  });
+  const positions = normalizeBinanceTopTraderProxySnapshot(
+    topPayload,
+    ['AAPLUSDT','PAXGUSDT'],
+    FIXED_NOW,
+  );
+  assert.equal(positions.get('AAPLUSDT').status, 'full');
+  assert.equal(positions.get('AAPLUSDT').bias, 'bullish');
+  assert.equal(positions.get('PAXGUSDT').status, 'unavailable');
+  assert.equal(positions.get('PAXGUSDT').reasonCode, 'TOP_TRADER_NOT_OBSERVED');
+
+  const oiAtFreshnessBoundary = structuredClone(oiPayload);
+  oiAtFreshnessBoundary.generatedAt = new Date(FIXED_NOW - 15 * 60_000).toISOString();
+  oiAtFreshnessBoundary.rows.forEach(row => { row.observedAt = oiAtFreshnessBoundary.generatedAt; });
+  assert.equal(normalizeBinanceOiProxySnapshot(
+    oiAtFreshnessBoundary,
+    [{ venueSymbol:'AAPLUSDT', priceUsd:200, oiValuationPriceMethod:'mark-price' }],
+    FIXED_NOW,
+  ).get('AAPLUSDT').openInterestUsd, 2_000);
+  const staleOiProxy = structuredClone(oiAtFreshnessBoundary);
+  staleOiProxy.generatedAt = new Date(FIXED_NOW - 15 * 60_000 - 1).toISOString();
+  assert.throws(() => normalizeBinanceOiProxySnapshot(staleOiProxy, [], FIXED_NOW), /proxy/i);
+
+  const topAtFreshnessBoundary = structuredClone(topPayload);
+  topAtFreshnessBoundary.generatedAt = new Date(FIXED_NOW - 70 * 60_000).toISOString();
+  topAtFreshnessBoundary.rows[0].timestamp = FIXED_NOW - 70 * 60_000;
+  assert.equal(normalizeBinanceTopTraderProxySnapshot(
+    topAtFreshnessBoundary,
+    ['AAPLUSDT'],
+    FIXED_NOW,
+  ).get('AAPLUSDT').status, 'full');
+  const staleTopProxy = structuredClone(topAtFreshnessBoundary);
+  staleTopProxy.generatedAt = new Date(FIXED_NOW - 70 * 60_000 - 1).toISOString();
+  assert.throws(() => normalizeBinanceTopTraderProxySnapshot(staleTopProxy, [], FIXED_NOW), /proxy/i);
+
+  const duplicateRows = structuredClone(oiPayload);
+  duplicateRows.rows.push({ ...duplicateRows.rows[0] });
+  duplicateRows.coverage.observed += 1;
+  duplicateRows.coverage.missing -= 1;
+  assert.throws(() => normalizeBinanceOiProxySnapshot(duplicateRows, [], FIXED_NOW), /coverage|proxy/i);
+
+  const wrongIdentity = structuredClone(oiPayload);
+  wrongIdentity.rows[0].symbol = 'BTCUSDT';
+  assert.throws(() => normalizeBinanceOiProxySnapshot(wrongIdentity, [], FIXED_NOW), /coverage|proxy/i);
+
+  const cryptoCatalog = structuredClone(oiPayload);
+  cryptoCatalog.instruments[0] = {
+    symbol:'BTCUSDT', baseAsset:'BTC', contractType:'PERPETUAL', underlyingType:'COIN',
+  };
+  cryptoCatalog.rows[0].symbol = 'BTCUSDT';
+  assert.throws(() => normalizeBinanceOiProxySnapshot(cryptoCatalog, [], FIXED_NOW), /catalog/i);
+});
+
+test('Signal uses fixed same-origin Binance positioning snapshots and never calls fapi directly', async () => {
+  const source = await readFile(new URL('../api/signal-snapshot.js', import.meta.url), 'utf8');
+  assert.match(source, /fetchSameOrigin\(baseUrl, '\/api\/binance-public\?endpoint=oi-snapshot'/);
+  assert.match(source, /fetchSameOrigin\([\s\S]*?'\/api\/binance-public\?endpoint=top-trader-snapshot'/);
+  assert.doesNotMatch(source, /https:\/\/fapi\.binance\.com|BINANCE_(?:FUTURES|DATA)_BASE/,
+    'iad1 Signal code must not reconnect directly to Binance fapi');
+  assert.doesNotMatch(source, /binance-public\?endpoint=(?:oi|top-trader)-snapshot[^'"\n]*symbols?=/,
+    'the Signal caller cannot select proxy symbols through query parameters');
+  assert.match(source, /const triggeredBinanceSymbols = preliminaryOiLiquidation\.rows[\s\S]*?if \(triggeredBinanceSymbols\.length\) \{[\s\S]*?fetchBinanceTopTraderPositionRows/,
+    'Top Trader proxy work must run only after preliminary server-side alerts identify exact Binance contracts');
+  assert.match(source, /catch \(error\) \{[\s\S]*?Alerts remain valid without optional Binance positioning[\s\S]*?console\.error/,
+    'an unavailable Top Trader proxy must preserve alerts with positioning Unavailable');
 });
 
 test('browser uses fixed snapshot URLs without caller-selected symbol query parameters', async () => {

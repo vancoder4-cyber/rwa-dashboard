@@ -59,6 +59,29 @@ function fullOkxPayload() {
   };
 }
 
+function singleOkxOiPayload({ openInterest, markPx = '200', last = '190', ctVal = '2', ctMult } = {}) {
+  const instrument = {
+    instId:AAPL_SWAP,
+    instType:'SWAP',
+    ruleType:'normal',
+    state:'live',
+    instCategory:'3',
+    ctValCcy:'AAPL',
+    ctVal,
+  };
+  if (ctMult !== undefined) instrument.ctMult = ctMult;
+  return {
+    instruments:[instrument],
+    tickers:[marketRow(AAPL_SWAP, { last, open24h:'180', volCcy24h:'1' })],
+    marks:[marketRow(AAPL_SWAP, { markPx })],
+    openInterest:[marketRow(AAPL_SWAP, openInterest || {})],
+    funding:[marketRow(AAPL_SWAP, {
+      fundingRate:'0', fundingTime:'1800000000000', nextFundingTime:'1800028800000',
+    })],
+    coverage:{ status:'full' },
+  };
+}
+
 test('OKX Radar admits only official RWA perpetual classes and preserves both AAPL contracts', () => {
   const normalized = normalizeOkxSignalSnapshot(fullOkxPayload());
   assert.equal(normalized.completeness, 'full');
@@ -83,6 +106,49 @@ test('OKX Radar admits only official RWA perpetual classes and preserves both AA
   assert.deepEqual(new Set(aggregatedAapl.listings.map(row => row.venueSymbol)), new Set([AAPL_SWAP, AAPL_XPERP]));
 });
 
+test('OKX OI uses the documented USD, currency, then contract conversion hierarchy and fails closed', () => {
+  const listingFor = options => normalizeOkxSignalSnapshot(singleOkxOiPayload(options)).listings[0];
+
+  const directUsd = listingFor({
+    openInterest:{ oiUsd:'1234', oiCcy:'99', oi:'88' },
+    ctMult:'3',
+  });
+  assert.equal(directUsd.openInterestUsd, 1_234,
+    'official oiUsd must win even when lower-priority fields are also present');
+  assert.equal(directUsd.openInterestMethod, 'official-oi-usd');
+  assert.equal(directUsd.openInterestStatus, 'full');
+
+  const currencyFallback = listingFor({
+    openInterest:{ oiCcy:'10', oi:'88' },
+    ctMult:'3',
+  });
+  assert.equal(currencyFallback.openInterestUsd, 2_000,
+    'oiCcy × positive valuation price must precede contract-count conversion');
+  assert.equal(currencyFallback.openInterestMethod, 'oi-ccy-x-mark-price');
+  assert.equal(currencyFallback.openInterestStatus, 'estimated');
+
+  const contractFallback = listingFor({
+    openInterest:{ oi:'10' },
+    ctVal:'2',
+    ctMult:'3',
+  });
+  assert.equal(contractFallback.openInterestUsd, 12_000);
+  assert.equal(contractFallback.openInterestMethod, 'contract-count-x-ctval-x-ctmult-x-mark-price');
+  assert.equal(contractFallback.openInterestStatus, 'estimated');
+
+  const invalidCases = [
+    ['missing ctMult', { openInterest:{ oi:'10' }, ctVal:'2' }],
+    ['zero ctMult', { openInterest:{ oi:'10' }, ctVal:'2', ctMult:'0' }],
+    ['zero price', { openInterest:{ oi:'10' }, ctVal:'2', ctMult:'3', markPx:'0', last:'500' }],
+  ];
+  for (const [label, options] of invalidCases) {
+    const row = listingFor(options);
+    assert.equal(row.openInterestUsd, null, `${label} must not produce an OI estimate`);
+    assert.equal(row.openInterestMethod, null);
+    assert.equal(row.openInterestStatus, 'unavailable');
+  }
+});
+
 test('OKX optional funding gaps downgrade the source without dropping identity-verified listings', () => {
   const payload = fullOkxPayload();
   payload.funding = payload.funding.filter(row => row.instId !== AAPL_XPERP);
@@ -93,6 +159,18 @@ test('OKX optional funding gaps downgrade the source without dropping identity-v
   const xperp = normalized.listings.find(row => row.venueSymbol === AAPL_XPERP);
   assert.equal(xperp.fundingRate, null);
   assert.equal(xperp.fundingIntervalHours, null);
+});
+
+test('OKX official catalog rows that cannot resolve identity downgrade coverage and never shrink silently', () => {
+  const payload = fullOkxPayload();
+  payload.instruments.push({
+    instId:'NEW-USDT-SWAP', instType:'SWAP', ruleType:'normal', state:'live',
+    instCategory:'3', ctValCcy:'!!!', ctVal:'1',
+  });
+  const normalized = normalizeOkxSignalSnapshot(payload);
+  assert.equal(normalized.listings.some(row => row.venueSymbol === 'NEW-USDT-SWAP'), false);
+  assert.equal(normalized.completeness, 'partial');
+  assert.ok(normalized.warnings.includes('IDENTITY_COVERAGE_INCOMPLETE'));
 });
 
 test('OKX bond identity and five-source history comparability are explicit', () => {
