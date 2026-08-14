@@ -28,6 +28,7 @@ import gateBulkHandler from '../api/gate-bulk.js';
 import signalSnapshotHandler, {
   isSignalSnapshotComparable,
   mergeSignalHistory,
+  signalHistoryWriteSucceeded,
 } from '../api/signal-snapshot.js';
 import signalSnapshotCronHandler from '../api/signal-snapshot-cron.js';
 import tradfiActivityHandler, {
@@ -134,7 +135,7 @@ test('health assessment distinguishes degraded from unhealthy', () => {
   assert.equal(assessChecks([{ status: 'fail' }, { status: 'fail' }]).status, 'unhealthy');
 });
 
-test('signal identity gate rejects crypto types, separates category collisions, and preserves real zero funding', () => {
+test('signal identity gate rejects crypto types, quarantines category collisions, and preserves real zero funding', () => {
   assert.equal(canonicalSignalSymbol('QNT', 'crypto'), null);
   assert.equal(canonicalSignalSymbol('OPENAI', 'preipo'), 'OPENAI');
   assert.equal(canonicalSignalSymbol('CL', 'equity'), 'CL');
@@ -159,9 +160,13 @@ test('signal identity gate rejects crypto types, separates category collisions, 
       priceUsd:1_000, volume24hUsd:1, openInterestUsd:1, fundingRate:0, fundingIntervalHours:8,
     },
   ]);
-  assert.deepEqual(result.assets.map(asset => `${asset.category}:${asset.symbol}`), ['equity:QNT', 'equity:DUAL', 'index:DUAL']);
+  assert.deepEqual(result.assets.map(asset => `${asset.category}:${asset.symbol}`), ['equity:QNT']);
   assert.equal(result.rejected.length, 1);
-  assert.equal(result.conflicts.length, 0);
+  assert.deepEqual(result.conflicts, [{
+    symbol:'DUAL',
+    categories:['equity', 'index'],
+    venues:['one', 'two'],
+  }]);
   assert.equal(result.assets[0].listings[0].fundingAnnualizedPct, 0);
   assert.equal(result.assets[0].fieldStatus.funding, 'full');
   assert.equal(result.assets[0].openInterestUsd, null);
@@ -405,6 +410,31 @@ test('signal snapshot cron is authenticated and never CDN cached', async () => {
   }
 });
 
+test('public Signal Radar is read-only while the authenticated cron writes both histories', async () => {
+  const [source, cronSource] = await Promise.all([
+    readFile(new URL('../api/signal-snapshot.js', import.meta.url), 'utf8'),
+    readFile(new URL('../api/signal-snapshot-cron.js', import.meta.url), 'utf8'),
+  ]);
+  assert.match(source, /const DAILY_VOLUME_HISTORY_NAMESPACE = 'rwa-signal-volume-daily-v1'/);
+  assert.match(source, /const DAILY_VOLUME_HISTORY_KEY = 'daily-volume-history-v1'/);
+  assert.match(source, /return serveSignalSnapshot\(req, res, \{ publicCache:true, writeHistory:false \}\)/);
+  assert.match(cronSource, /serveSignalSnapshot\(req, res, \{ publicCache:false, writeHistory:true \}\)/);
+  assert.match(source, /updateDailyVolumeHistory\(normalized\.allAssets/,
+    'daily volume history must use the complete verified universe, not response Top 100');
+  assert.match(source, /writeRequested:writeHistory[\s\S]*?writeAllowed:analysisComparable/);
+  assert.match(source, /res\.status\(writeHistory && !writerSucceeded \? 503 : 200\)/,
+    'an authenticated history writer must not report HTTP 200 when either cache write fails or is skipped');
+  assert.equal(signalHistoryWriteSucceeded({ writeStatus:'stored' }, { writeStatus:'stored' }), true);
+  assert.equal(signalHistoryWriteSucceeded(
+    { writeStatus:'stored' },
+    { writeStatus:'skipped-incomplete-sources' },
+  ), false);
+  assert.equal(signalHistoryWriteSucceeded(
+    { writeStatus:'unavailable' },
+    { writeStatus:'stored' },
+  ), false);
+});
+
 test('traditional activity is a standalone top-level page', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   assert.match(html, /data-p="traditional" onclick="switchTopPage\('traditional'\)"/);
@@ -436,6 +466,12 @@ test('Signal Radar and Asset Intelligence use server history and one canonical d
   assert.match(html, /data-p="cross"[\s\S]*?RWA Signal Radar/);
   assert.match(html, /id="page-cross"[\s\S]*?id="radarTableRegion"/);
   const radarPage = sourceBetween(html, '<div class="page-container" id="page-cross">', '</div><!-- END page-cross -->');
+  assert.match(radarPage, /id="radarKpis"[\s\S]*?id="perpVolumeAnomalySection"[\s\S]*?id="competitorListingsSection"/,
+    'contract-volume anomalies must sit ahead of competitor listings in Signal Radar');
+  assert.equal((html.match(/id="perpVolumeAnomalySection"/g) || []).length, 1);
+  assert.match(radarPage, /Perpetual Volume Anomalies[\s\S]*?HIGH[\s\S]*?MEDIUM[\s\S]*?DOWN/);
+  assert.match(radarPage, /id="perpVolumeAnomalyLevelFilter"[\s\S]*?id="perpVolumeAnomalyCategoryFilter"[\s\S]*?id="perpVolumeAnomalyVenueFilter"[\s\S]*?id="perpVolumeAnomalyStatusFilter"/);
+  assert.match(radarPage, /id="perpVolumeAnomalyMore"[\s\S]*?More · 50 \/ 100/);
   assert.match(radarPage, /id="competitorListingsSection"[\s\S]*?Competitor New Listings/);
   assert.match(radarPage, /id="listingWindowFilter"[\s\S]*?Rolling 7 days[\s\S]*?Rolling 30 days/);
   assert.match(radarPage, /id="listingMarketFilter"[\s\S]*?Perpetuals[\s\S]*?Spot/);
@@ -446,6 +482,27 @@ test('Signal Radar and Asset Intelligence use server history and one canonical d
   assert.match(html, /const SIGNAL_SNAPSHOT_TTL = 5 \* 60 \* 1000/);
   assert.match(html, /const LISTING_CHANGES_TTL = 5 \* 60 \* 1000/);
   assert.match(html, /rows\.slice\(0, radarExpanded \? 100 : 50\)/);
+  assert.match(html, /rows\.slice\(0, perpVolumeAnomalyExpanded \? 100 : 50\)/);
+  assert.match(html, /const section = payload\?\.perpVolumeAnomalies/);
+  assert.match(html, /assetIntelligenceTriggerAttrs\(symbol, category, 'perpetual volume anomalies'\)/);
+  assert.match(html, /section\.formulaVersion !== PERP_VOLUME_ANOMALY_FORMULA_VERSION/);
+  assert.match(html, /if \(!perpVolumeAnomalyContractValid\(payload\)\) \{[\s\S]*?payload\.perpVolumeAnomalies = unavailablePerpVolumeAnomalySection\(payload\)/,
+    'an invalid additive volume section must fail closed without taking down the existing Radar payload');
+  assert.doesNotMatch(html, /!perpVolumeAnomalyContractValid\(payload\)\) throw new Error\('Invalid signal snapshot'\)/);
+  const volumeLevelReader = sourceBetween(html, 'function perpVolumeAnomalyLevel(row)', 'function perpVolumeAnomalyRowStatus(row)');
+  assert.match(volumeLevelReader, /\['high','medium','down'\]\.includes\(level\)/);
+  assert.doesNotMatch(volumeLevelReader, /ratio7d|currentVolume|average7d|>=|<=/,
+    'the browser must display, not derive, the server anomaly level');
+  const volumeStatusRenderer = sourceBetween(html, 'function renderPerpVolumeAnomalyStatus(section)', 'function renderPerpVolumeAnomalyTable(section)');
+  assert.match(volumeStatusRenderer, /panelStatus === 'partial'[\s\S]*?else if \(!rows\.length\)[\s\S]*?No perpetual volume anomalies/,
+    'only a Full server section may make a no-anomaly conclusion');
+  const panelStatusSource = sourceBetween(html, 'function perpVolumeAnomalyPanelStatus(section)', 'function perpVolumeAnomalyLevel(row)');
+  const panelContext = { signalSnapshotError:'HTTP 502' };
+  runInNewContext(`${panelStatusSource}\nglobalThis.cachedFullStatus = perpVolumeAnomalyPanelStatus({status:'full'});`, panelContext);
+  assert.equal(panelContext.cachedFullStatus, 'partial',
+    'a failed refresh must downgrade cached Full before the volume panel can infer no anomalies');
+  assert.match(html, /\.volume-anomaly-table \{ min-width:1040px; \}/);
+  assert.match(html, /\.volume-anomaly-table thead th:first-child, \.volume-anomaly-table tbody td:first-child \{[\s\S]*?position:sticky/);
   assert.match(html, /if \(activePage === 'cross'\) \{[\s\S]*?await Promise\.allSettled\(\[[\s\S]*?ensureSignalSnapshot\(false\)[\s\S]*?ensureListingChanges\(false\)[\s\S]*?\]\);[\s\S]*?return;/);
   assert.match(html, /if \(activePage === 'spot' \|\| activePage === 'traditional'\) \{[\s\S]*?refreshSpotArbData\(\)/);
   assert.match(html, /Baseline warming/);
@@ -551,6 +608,7 @@ test('bilingual UI is accessible, persisted under one preference key, and switch
 
   const sentinels = [
     ['RWA Signal Radar', 'RWA 信号雷达'],
+    ['Perpetual Volume Anomalies', '合约成交量异动'],
     ['Competitor New Listings', '竞品新上线资产'],
     ['Traditional Market Activity Monitor · Top 100', '传统市场活跃度监控 · Top 100'],
     ['Asset Intelligence · canonical underlying', '资产情报 · 标准底层资产'],
@@ -559,6 +617,7 @@ test('bilingual UI is accessible, persisted under one preference key, and switch
     assert.ok(html.includes(english), `missing rendered English sentinel: ${english}`);
     assert.ok(i18n.includes(`'${english}':'${chinese}'`), `missing Chinese translation sentinel: ${english}`);
   });
+  assert.match(i18n, /Perpetual volume anomaly refresh failed[\s\S]*?合约成交量异动刷新失败/);
 });
 
 test('bilingual runtime translates singular coverage and locale fragments without repeating same-language work', async () => {

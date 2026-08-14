@@ -76,8 +76,8 @@ function annualizedFundingPct(listing) {
 }
 
 export function aggregateSignalListings(listings, limit = SIGNAL_ASSET_LIMIT) {
-  const groups = new Map();
   const rejected = [];
+  const normalizedListings = [];
 
   for (const listing of Array.isArray(listings) ? listings : []) {
     const identity = normalizeSignalIdentity(listing?.symbol, listing?.category);
@@ -89,20 +89,43 @@ export function aggregateSignalListings(listings, limit = SIGNAL_ASSET_LIMIT) {
       rejected.push({ venue: venue || null, venueSymbol: venueSymbol || null, reason: 'invalid-normalized-listing' });
       continue;
     }
-    const identityKey = `${category}:${symbol}`;
-    if (!groups.has(identityKey)) groups.set(identityKey, []);
-    groups.get(identityKey).push({ ...listing, symbol, category, venue, venueSymbol });
+    normalizedListings.push({ ...listing, symbol, category, venue, venueSymbol });
   }
 
+  // Category is part of identity, but a venue ticker collision must be
+  // quarantined before category-qualified aggregation. Grouping by
+  // `category:symbol` first would make this conflict check unreachable and
+  // could let an Equity/Index (or Commodity) ticker collision into Radar.
+  const categoriesBySymbol = new Map();
+  for (const row of normalizedListings) {
+    if (!categoriesBySymbol.has(row.symbol)) categoriesBySymbol.set(row.symbol, new Set());
+    categoriesBySymbol.get(row.symbol).add(row.category);
+  }
+  const conflictingSymbols = new Set([...categoriesBySymbol]
+    .filter(([, categories]) => categories.size > 1)
+    .map(([symbol]) => symbol));
   const conflicts = [];
+  for (const symbol of [...conflictingSymbols].sort()) {
+    const rows = normalizedListings.filter(row => row.symbol === symbol);
+    conflicts.push({
+      symbol,
+      categories:[...categoriesBySymbol.get(symbol)].sort(),
+      venues:[...new Set(rows.map(row => row.venue))].sort(),
+    });
+  }
+
+  const groups = new Map();
+  for (const row of normalizedListings) {
+    if (conflictingSymbols.has(row.symbol)) continue;
+    const key = `${row.category}:${row.symbol}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+
   const assets = [];
   for (const [, rows] of groups) {
     const symbol = rows[0].symbol;
     const categories = [...new Set(rows.map(row => row.category))];
-    if (categories.length !== 1) {
-      conflicts.push({ symbol, categories, venues: [...new Set(rows.map(row => row.venue))].sort() });
-      continue;
-    }
 
     const prices = rows.map(row => positiveOrNull(row.priceUsd)).filter(Number.isFinite);
     const volumes = rows.map(row => finiteOrNull(row.volume24hUsd));
@@ -149,6 +172,8 @@ export function aggregateSignalListings(listings, limit = SIGNAL_ASSET_LIMIT) {
         venueSymbol: row.venueSymbol,
         priceUsd: positiveOrNull(row.priceUsd),
         volume24hUsd: finiteOrNull(row.volume24hUsd),
+        volumeMethod: String(row.volumeMethod || '').trim().toLowerCase() || null,
+        volumeStatus: String(row.volumeStatus || '').trim().toLowerCase() || 'unavailable',
         openInterestUsd: finiteOrNull(row.openInterestUsd),
         fundingAnnualizedPct: annualizedFundingPct(row),
         change24hPct: finiteOrNull(row.change24hPct),
@@ -161,7 +186,16 @@ export function aggregateSignalListings(listings, limit = SIGNAL_ASSET_LIMIT) {
     const rightActivity = (right.volume24hUsd ?? 0) + (right.openInterestUsd ?? 0);
     return rightActivity - leftActivity || left.symbol.localeCompare(right.symbol);
   });
-  return { assets: assets.slice(0, limit), totalAssetCount: assets.length, conflicts, rejected };
+  return {
+    assets: assets.slice(0, limit),
+    // Daily contract-volume monitoring must cover the complete verified
+    // canonical universe. Keeping it server-only avoids widening the existing
+    // activity-ranked Top 100 response/history contract.
+    allAssets: assets,
+    totalAssetCount: assets.length,
+    conflicts,
+    rejected,
+  };
 }
 
 export function compactSignalSnapshot(assets, capturedAtMs, limit = SIGNAL_ASSET_LIMIT) {

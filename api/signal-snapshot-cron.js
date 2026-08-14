@@ -29,5 +29,5 @@ export default function handler(req, res) {
   // This route is intentionally never CDN cached. If the hourly scheduler hit
   // the public read endpoint, a fresh CDN response could prevent the Function
   // from executing and leave a gap in Runtime Cache history.
-  return serveSignalSnapshot(req, res, { publicCache: false });
+  return serveSignalSnapshot(req, res, { publicCache:false, writeHistory:true });
 }

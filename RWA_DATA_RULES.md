@@ -1,7 +1,7 @@
 # RWA Asset Identity & Data Rules
 
 > 本文记录 RWA Dashboard 的资产准入、ticker 归一、类别/地区标签及上线校验规则。  
-> 最近审计：2026-08-08。生产站点：<https://avenir-rwa-analyst.vercel.app/>
+> 最近审计：2026-08-14。生产站点：<https://avenir-rwa-analyst.vercel.app/>
 
 ## 1. 核心原则
 
@@ -345,18 +345,27 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 
 ### 服务端信号快照
 
-- `GET /api/signal-snapshot` 是固定来源、GET-only、无 query 的服务端分析接口。来源只能是 Gate、Binance、Bitget、trade.xyz 与 OKX 的官方 catalog/market snapshot；官方 identity/category 缺失的 listing 必须 fail closed。OKX 的 SWAP/X-Perp 保留为 listing 后再按 canonical 聚合，`instCategory=1` 直接拒绝。监控 universe 是在身份 quarantine 后按 `24h USD volume + USD OI` 排序的 Top 100，响应与历史使用同一 universe，不能返回永远没有历史资格的后排资产。
+- `GET /api/signal-snapshot` 是固定来源、GET-only、无 query 的服务端分析接口。来源只能是 Gate、Binance、Bitget、trade.xyz 与 OKX 的官方 catalog/market snapshot；官方 identity/category 缺失的 listing 必须 fail closed。OKX 的 SWAP/X-Perp 保留为 listing 后再按 canonical 聚合，`instCategory=1` 直接拒绝。通用小时信号 universe 是在身份 quarantine 后按 `24h USD volume + USD OI` 排序的 Top 100，响应与该小时历史使用同一 universe，不能返回永远没有小时历史资格的后排资产；独立的合约成交量日历史按下述规则覆盖全量 verified RWA perpetual universe，不受 Top 100 截断。
 - 普通 `crypto/coin/token/meme` category 在服务端直接拒绝。相同 canonical symbol 出现互斥 category 时，该 symbol 整体 quarantine 并计入 `identityConflicts`，不得选择价格更像股票的一侧。
 - 服务端证券生命周期、ETF underlying、显式 wrapper alias、精确官方类型和 Binance bStock 映射集中在 `api/_lib/security-identity.js`。结尾 `B` 不能通用剥离；只有审计过的 bStock wrapper 表可以映射 underlying。客户端 `SECURITY_LISTING_REGISTRY` / `ETF_SYMBOLS` / `TOKENIZED_ETF_WRAPPERS` 与服务端 registry 必须由 contract test 校验一致，避免场所笼统的 `stock` 类型把 QQQ、SPY、SOXL、MUU 等 ETF 错标 Equity。
 - Funding 年化必须使用每个合约实际 interval：`rate × (24 / intervalHours) × 365`。真实零费率保留为 0；缺失保持 null。
-- 绝对阈值首版版本为 `rwa-radar-1.0`：Funding Watch 50% APR / High 100%；跨场所 Perp 价格 dispersion Watch 1% / High 3%；24h price move Watch 5% / High 10%。Volume/OI 只有至少 24 个小时样本后才使用 robust history score。
+- 绝对阈值首版版本为 `rwa-radar-1.0`：Funding Watch 50% APR / High 100%；跨场所 Perp 价格 dispersion Watch 1% / High 3%；24h price move Watch 5% / High 10%。通用小时信号中的 Volume/OI 只有至少 24 个小时样本后才使用 robust history score；专用合约成交量异动使用独立日历史与下述比例阈值，两套成熟度不能混用。
 - 综合分数取最强 component，并对额外触发项小幅加分；不得把 APR、美元成交量和百分比直接相加。每行披露 primary type、component、formula version、baseline status、reason codes 和 confidence。
 - 小于 24 个小时样本必须显示 `Baseline warming`，24–167 为 Partial，168 个小时样本才是 Full baseline；无历史时仍可显示越过绝对阈值的 Partial 信号，但不得显示 `All Normal`。
 
+### 合约成交量异动
+
+- 该机制维护一份独立于通用 Top 100 小时信号的日历史，范围是本轮五个官方合约场所中通过身份门控的**全量 verified RWA perpetual canonical assets**。聚合与历史主键固定为 `category:canonical`；venue ticker 只进入该 canonical asset 的 exact `venue:venueSymbol` listing cohort，不能以裸 ticker 合并。
+- 当前值使用本轮完整场所快照聚合得到的 rolling 24h USD contract volume，并与同一 `category:canonical`、同一 exact listing cohort 的前 7 个已封存 UTC 日期 rolling-24h 锚点均值比较。该锚点是监控代理值，不是精确 UTC 自然日成交量；当前值、7 日均值、比例、阈值级别以及由它们派生的频率结论全部标 **Estimated**。即使覆盖和历史成熟度为 Full，也不能把比例描述为官方结算值或可执行信号。
+- 比例阈值固定为：`HIGH >= 2.0`、`MEDIUM >= 1.5 且 < 2.0`、`DOWN <= 0.4`；`0.4 < ratio < 1.5` 才属于 Normal。连续放量指最近连续至少 2 个 eligible 日均为 HIGH 或 MEDIUM。
+- 30 日频率窗口统计最近 30 个可评估日。High-frequency 只有在至少 21 个 eligible days 且其中至少 6 个 anomaly days（HIGH、MEDIUM 或 DOWN）时成立；完整 30 日频率需要连续 37 个可比日桶，才能同时覆盖 30 个评估日及每个评估日之前的 7 日基线。
+- 身份或数据不完整一律 fail closed：当前 volume 缺失、任一应有 listing 缺值、五源覆盖不完整、日锚点不足，或 exact listing cohort fingerprint 发生变化时，不计算可比比例，不生成 DOWN/Normal 结论，也不能沿用旧 cohort 的基线。fingerprint 变化后的资产必须以新 cohort 重新累计 7 日基线。
+- 日历史按 UTC day bucket 幂等更新并保留 45 日；同一日重试只能替换该日快照，不能增加一个伪造观察日。只有受 `CRON_SECRET` 保护且 `no-store` 的 `/api/signal-snapshot-cron` 可以写入，公开 `/api/signal-snapshot` 与浏览器均为只读。首次 7 个可比日保持 Warming；第 8 个日桶才可形成首个 7 日比例，连续 37 个可比日桶后 30 日频率才成熟。Runtime Cache 逐出或历史不可用时重新 Warming/Unavailable，绝不能显示为无异动。
+
 ### 历史连续性
 
-- 当前五源版本通过受 `CRON_SECRET` 保护且 `no-store` 的 `/api/signal-snapshot-cron`，按 UTC 小时桶幂等写入 Vercel Runtime Cache namespace `rwa-signal-radar-v2`；公开的 `/api/signal-snapshot` 是 CDN 缓存读接口，不能直接作为 Cron target。最多保留 168 个服务端快照、每个资产最多返回 48 点；浏览器 `localStorage` 不再是 KPI 或 Radar 历史的数据源。
-- 只有 Gate、Binance、Bitget、trade.xyz、OKX 五份 source snapshot 都为 Full 时才把当前桶写进历史。来源不完整时允许返回当前 Partial 监控结果，但不写基线，且没有越过绝对阈值的资产不能显示为 Normal。新增 OKX 改变 Volume/OI 分布时必须启用新的历史 namespace/version，不能把五源数据与旧四源基线直接比较。
+- 当前五源版本通过受 `CRON_SECRET` 保护且 `no-store` 的 `/api/signal-snapshot-cron`，按 UTC 小时桶幂等写入 Vercel Runtime Cache namespace `rwa-signal-radar-v2`；全量合约成交量日锚点单独写入 `rwa-signal-volume-daily-v1`，不能与 Top 100 小时历史混存。只有两份历史都确认写入时 writer 才能返回 HTTP 200；五源不完整而跳过、任一缓存写失败或容量校验失败都必须返回非 2xx，不能让 Cron 把历史缺口记录为成功。公开的 `/api/signal-snapshot` 是 CDN 缓存读接口，不能直接作为 Cron target。通用信号最多保留 168 个小时快照、每个资产最多返回 48 点；独立合约成交量日历史保留 45 日。浏览器 `localStorage` 不再是 KPI、Radar 或成交量异动历史的数据源。
+- 只有 Gate、Binance、Bitget、trade.xyz、OKX 五份 source snapshot 都为 Full 时才把当前桶写进通用小时历史或独立成交量日历史。来源不完整时允许返回当前 Partial 监控结果，但不写基线，不产生成交量比例/频率，且没有越过绝对阈值的资产不能显示为 Normal。新增或移除场所、改变聚合字段定义时必须启用新的历史 namespace/version，不能把不同 source/cohort 分布直接比较。
 - Runtime Cache 跨部署保留但属于区域 best-effort cache，可能被逐出，不是永久数据库。因此 API 的 persistence 主状态最多为 Partial，并明确返回 continuity、region、storedSnapshots 和 baseline coverage。
 - 如需 30 日以上、跨 region 严格连续、可审计的历史，应迁移到 Neon/Postgres（run 表 + observation 表 + signal/fingerprint 表）；在迁移前不得把本缓存描述为永久数据库。
 

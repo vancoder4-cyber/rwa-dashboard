@@ -8,6 +8,13 @@ import {
   compactSignalSnapshot,
 } from './_lib/signal-analysis.js';
 import {
+  PERP_VOLUME_HISTORY_DAYS,
+  buildPerpVolumeAnomalies,
+  compactDailyVolumeSnapshot,
+  mergeDailyVolumeHistory,
+  normalizeDailyVolumeHistory,
+} from './_lib/volume-anomaly.js';
+import {
   categoryFromOfficialSignalType,
   normalizeSignalIdentity,
 } from './_lib/security-identity.js';
@@ -26,6 +33,9 @@ const HISTORY_KEY = 'hourly-history-v2';
 const HISTORY_TTL_SECONDS = 7 * 24 * 60 * 60;
 const HISTORY_MAX_SNAPSHOTS = 168;
 const HISTORY_MAX_BYTES = 1_750_000;
+const DAILY_VOLUME_HISTORY_NAMESPACE = 'rwa-signal-volume-daily-v1';
+const DAILY_VOLUME_HISTORY_KEY = 'daily-volume-history-v1';
+const DAILY_VOLUME_HISTORY_TTL_SECONDS = 60 * 24 * 60 * 60;
 const SOURCE_TIMEOUT_MS = 20_000;
 const BITGET_BASE = 'https://api.bitget.com';
 const SIGNAL_SOURCE_NAMES = Object.freeze(['gate', 'binance', 'bitget', 'tradexyz', 'okx']);
@@ -56,6 +66,16 @@ function firstNumber(...values) {
     if (numeric !== null) return numeric;
   }
   return null;
+}
+
+function reportedVolumeFields(value, method, { estimated = false } = {}) {
+  const numeric = finiteOrNull(value);
+  const volume24hUsd = numeric !== null && numeric >= 0 ? numeric : null;
+  return {
+    volume24hUsd,
+    volumeMethod:volume24hUsd === null ? null : method,
+    volumeStatus:volume24hUsd === null ? 'unavailable' : estimated ? 'estimated' : 'full',
+  };
 }
 
 function positiveDeltaHours(later, earlier) {
@@ -113,6 +133,9 @@ export function normalizeOkxSignalSnapshot(payload) {
     const last = finiteOrNull(ticker.last);
     const baseVolume = finiteOrNull(ticker.volCcy24h);
     const directQuoteVolume = firstNumber(ticker.volCcyQuote24h, ticker.quoteVolume);
+    const derivedQuoteVolume = directQuoteVolume === null && baseVolume !== null && price > 0
+      ? baseVolume * price
+      : null;
     const oiBase = firstNumber(openInterest.oiCcy,
       finiteOrNull(openInterest.oi) !== null && finiteOrNull(instrument.ctVal) !== null
         ? Number(openInterest.oi) * Number(instrument.ctVal)
@@ -124,7 +147,11 @@ export function normalizeOkxSignalSnapshot(payload) {
       venue: 'okx',
       venueSymbol,
       priceUsd: price,
-      volume24hUsd: directQuoteVolume ?? (baseVolume !== null && price !== null ? baseVolume * price : null),
+      ...reportedVolumeFields(
+        directQuoteVolume ?? derivedQuoteVolume,
+        directQuoteVolume !== null ? 'official-quote-volume' : 'base-volume-x-price',
+        { estimated:directQuoteVolume === null && derivedQuoteVolume !== null },
+      ),
       openInterestUsd: firstNumber(openInterest.oiUsd,
         oiBase !== null && price !== null ? oiBase * price : null),
       fundingRate: firstNumber(funding.fundingRate, funding.settFundingRate),
@@ -196,13 +223,14 @@ function gateListings(payload) {
     const price = firstNumber(ticker.mark_price, contract.mark_price, ticker.last, contract.last_price);
     const quantity = firstNumber(ticker.total_size, contract.position_size);
     const multiplier = firstNumber(contract.quanto_multiplier) ?? 1;
+    const quoteVolume = firstNumber(ticker.volume_24h_quote, ticker.volume_24h_usd);
     rows.push({
       symbol: identity.symbol,
       category: identity.category,
       venue: 'gate',
       venueSymbol,
       priceUsd: price,
-      volume24hUsd: firstNumber(ticker.volume_24h_quote, ticker.volume_24h_usd),
+      ...reportedVolumeFields(quoteVolume, 'official-quote-volume'),
       openInterestUsd: quantity !== null && price !== null ? quantity * multiplier * price : null,
       fundingRate: firstNumber(ticker.funding_rate, contract.funding_rate),
       fundingIntervalHours: (finiteOrNull(contract.funding_interval) || 28_800) / 3_600,
@@ -259,13 +287,14 @@ async function collectBinance(baseUrl) {
     if (!identity || !venueSymbol || !venueBase) continue;
     const premium = premiumMap.get(venueSymbol) || {};
     const ticker = tickerMap.get(venueSymbol) || {};
+    const quoteVolume = finiteOrNull(ticker.quoteVolume);
     listings.push({
       symbol: identity.symbol,
       category: identity.category,
       venue: 'binance',
       venueSymbol,
       priceUsd: firstNumber(premium.markPrice, ticker.lastPrice),
-      volume24hUsd: finiteOrNull(ticker.quoteVolume),
+      ...reportedVolumeFields(quoteVolume, 'official-quote-volume'),
       openInterestUsd: null,
       fundingRate: finiteOrNull(premium.lastFundingRate),
       fundingIntervalHours: intervalMap.get(venueSymbol) || 8,
@@ -323,13 +352,14 @@ async function collectBitget() {
     const price = firstNumber(ticker.markPrice, ticker.lastPr);
     const holdingAmount = finiteOrNull(ticker.holdingAmount);
     const changeFraction = finiteOrNull(ticker.change24h);
+    const quoteVolume = firstNumber(ticker.quoteVolume, ticker.usdtVolume);
     listings.push({
       symbol: identity.symbol,
       category: identity.category,
       venue: 'bitget',
       venueSymbol,
       priceUsd: price,
-      volume24hUsd: firstNumber(ticker.quoteVolume, ticker.usdtVolume),
+      ...reportedVolumeFields(quoteVolume, 'official-quote-volume'),
       openInterestUsd: holdingAmount !== null && price !== null ? holdingAmount * price : null,
       fundingRate: firstNumber(funding.fundingRate, ticker.fundingRate),
       fundingIntervalHours: firstNumber(funding.fundingRateInterval, contract.fundInterval) || 8,
@@ -378,13 +408,14 @@ async function collectTradeXyz(baseUrl) {
     const price = finiteOrNull(context.markPx);
     const previousPrice = finiteOrNull(context.prevDayPx);
     const openInterest = finiteOrNull(context.openInterest);
+    const dayNotionalVolume = finiteOrNull(context.dayNtlVlm);
     listings.push({
       symbol: identity.symbol,
       category: identity.category,
       venue: 'tradexyz',
       venueSymbol,
       priceUsd: price,
-      volume24hUsd: finiteOrNull(context.dayNtlVlm),
+      ...reportedVolumeFields(dayNotionalVolume, 'official-day-notional'),
       openInterestUsd: openInterest !== null && price !== null ? openInterest * price : null,
       fundingRate: finiteOrNull(context.funding),
       fundingIntervalHours: 1,
@@ -425,7 +456,10 @@ export function mergeSignalHistory(history, currentSnapshot, nowMs = Date.now())
   return snapshots;
 }
 
-async function updateRuntimeHistory(currentSnapshot, nowMs, { writeAllowed = true } = {}) {
+async function updateRuntimeHistory(currentSnapshot, nowMs, {
+  writeRequested = false,
+  writeAllowed = false,
+} = {}) {
   try {
     const cache = getCache({ namespace: HISTORY_NAMESPACE });
     const stored = await cache.get(HISTORY_KEY);
@@ -433,12 +467,12 @@ async function updateRuntimeHistory(currentSnapshot, nowMs, { writeAllowed = tru
     const previous = storedSnapshots
       .filter(snapshot => Number(snapshot?.t) < currentSnapshot.t)
       .slice(-(HISTORY_MAX_SNAPSHOTS - 1));
-    if (!writeAllowed) {
+    if (!writeRequested || !writeAllowed) {
       return {
         status: 'partial',
         previous,
         stored: storedSnapshots,
-        writeStatus: 'skipped-incomplete-sources',
+        writeStatus: writeRequested ? 'skipped-incomplete-sources' : 'read-only',
         error: null,
       };
     }
@@ -452,6 +486,44 @@ async function updateRuntimeHistory(currentSnapshot, nowMs, { writeAllowed = tru
   } catch (error) {
     console.error('[signal-snapshot] runtime history unavailable', error);
     return { status: 'unavailable', previous: [], stored: [], writeStatus: 'unavailable', error: error.message };
+  }
+}
+
+async function updateDailyVolumeHistory(assets, nowMs, {
+  writeRequested = false,
+  writeAllowed = false,
+} = {}) {
+  try {
+    const cache = getCache({ namespace: DAILY_VOLUME_HISTORY_NAMESPACE });
+    const storedValue = await cache.get(DAILY_VOLUME_HISTORY_KEY);
+    const stored = normalizeDailyVolumeHistory(storedValue, nowMs);
+    if (!writeRequested || !writeAllowed) {
+      return {
+        status:'partial',
+        stored,
+        writeStatus:writeRequested ? 'skipped-incomplete-sources' : 'read-only',
+        error:null,
+      };
+    }
+    // The hourly writer upserts one row for the current UTC day. Repeated
+    // executions replace that day, so the final successful run becomes the
+    // sealed rolling-24h anchor used from the following UTC day onward.
+    const current = compactDailyVolumeSnapshot(assets, nowMs, { dayMs:nowMs });
+    const merged = mergeDailyVolumeHistory(stored, current, nowMs);
+    await cache.set(DAILY_VOLUME_HISTORY_KEY, merged, {
+      ttl:DAILY_VOLUME_HISTORY_TTL_SECONDS,
+      tags:['rwa-signal-volume-daily-v1'],
+      name:'RWA perpetual volume daily anchor history',
+    });
+    return { status:'partial', stored:merged, writeStatus:'stored', error:null };
+  } catch (error) {
+    console.error('[signal-snapshot] daily volume history unavailable', error);
+    return {
+      status:'unavailable',
+      stored:[],
+      writeStatus:'unavailable',
+      error:error.message,
+    };
   }
 }
 
@@ -480,7 +552,14 @@ export function isSignalSnapshotComparable(sources, expectedSourceNames = null) 
   return names.length > 0 && names.every(name => sources?.[name]?.status === 'full');
 }
 
-export async function serveSignalSnapshot(req, res, { publicCache = true } = {}) {
+export function signalHistoryWriteSucceeded(runtimeHistory, dailyVolumeHistory) {
+  return runtimeHistory?.writeStatus === 'stored' && dailyVolumeHistory?.writeStatus === 'stored';
+}
+
+export async function serveSignalSnapshot(req, res, {
+  publicCache = true,
+  writeHistory = false,
+} = {}) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');
@@ -533,19 +612,39 @@ export async function serveSignalSnapshot(req, res, { publicCache = true } = {})
   const capturedAtMs = Date.now();
   const compact = compactSignalSnapshot(normalized.assets, capturedAtMs, SIGNAL_ASSET_LIMIT);
   const snapshotComparable = isSignalSnapshotComparable(sources, SIGNAL_SOURCE_NAMES);
-  const runtimeHistory = await updateRuntimeHistory(compact, capturedAtMs, { writeAllowed: snapshotComparable });
+  const analysisComparable = snapshotComparable && normalized.conflicts.length === 0;
+  const [runtimeHistory, dailyVolumeHistory] = await Promise.all([
+    updateRuntimeHistory(compact, capturedAtMs, {
+      writeRequested:writeHistory,
+      writeAllowed:analysisComparable,
+    }),
+    updateDailyVolumeHistory(normalized.allAssets, capturedAtMs, {
+      writeRequested:writeHistory,
+      writeAllowed:analysisComparable,
+    }),
+  ]);
   const assets = attachSignalAnalysis(normalized.assets, runtimeHistory.previous, capturedAtMs, {
-    snapshotComparable,
+    snapshotComparable:analysisComparable,
     historyAvailable: runtimeHistory.status !== 'unavailable',
   });
+  const perpVolumeAnomalies = buildPerpVolumeAnomalies(
+    normalized.allAssets,
+    dailyVolumeHistory.stored,
+    capturedAtMs,
+    {
+      snapshotComparable:analysisComparable,
+      historyAvailable:dailyVolumeHistory.status !== 'unavailable',
+    },
+  );
   const volumeValues = normalized.assets.map(asset => asset.volume24hUsd).filter(Number.isFinite);
   const oiValues = normalized.assets.map(asset => asset.openInterestUsd).filter(Number.isFinite);
-  const responseStatus = snapshotComparable && !normalized.conflicts.length
+  const responseStatus = analysisComparable
     ? 'full'
     : 'partial';
   const historyStatus = runtimeHistory.status === 'unavailable'
     ? 'unavailable'
     : historyCoverageStatus(runtimeHistory.stored.length);
+  const writerSucceeded = signalHistoryWriteSucceeded(runtimeHistory, dailyVolumeHistory);
 
   if (publicCache) {
     setPublicCache(res, 300, 600);
@@ -553,7 +652,7 @@ export async function serveSignalSnapshot(req, res, { publicCache = true } = {})
   } else {
     setNoStore(res);
   }
-  return res.status(200).json({
+  return res.status(writeHistory && !writerSucceeded ? 503 : 200).json({
     schemaVersion: SIGNAL_SCHEMA_VERSION,
     generatedAt: new Date(capturedAtMs).toISOString(),
     bucket: new Date(compact.t).toISOString(),
@@ -584,12 +683,24 @@ export async function serveSignalSnapshot(req, res, { publicCache = true } = {})
     persistence: {
       mode: 'vercel-runtime-cache',
       status: runtimeHistory.status,
+      writer: {
+        requested:writeHistory,
+        succeeded:writeHistory ? writerSucceeded : null,
+      },
       continuity: 'regional best effort; cache survives deployments but can be evicted and is not a permanent database',
       region: process.env.VERCEL_REGION || 'iad1',
       retentionHours: HISTORY_MAX_SNAPSHOTS,
       storedSnapshots: runtimeHistory.stored.length,
       writeStatus: runtimeHistory.writeStatus,
       error: runtimeHistory.error ? 'runtime cache unavailable' : null,
+      dailyVolume: {
+        namespace:DAILY_VOLUME_HISTORY_NAMESPACE,
+        status:dailyVolumeHistory.status,
+        retentionDays:PERP_VOLUME_HISTORY_DAYS,
+        storedDays:dailyVolumeHistory.stored.length,
+        writeStatus:dailyVolumeHistory.writeStatus,
+        error:dailyVolumeHistory.error ? 'daily volume runtime cache unavailable' : null,
+      },
     },
     history: {
       status: historyStatus,
@@ -602,10 +713,11 @@ export async function serveSignalSnapshot(req, res, { publicCache = true } = {})
       newestAt: runtimeHistory.stored.at(-1)?.t ? new Date(runtimeHistory.stored.at(-1).t).toISOString() : null,
     },
     aggregateHistory: aggregateHistoryPoints(runtimeHistory.stored),
+    perpVolumeAnomalies,
     assets,
   });
 }
 
 export default function handler(req, res) {
-  return serveSignalSnapshot(req, res, { publicCache: true });
+  return serveSignalSnapshot(req, res, { publicCache:true, writeHistory:false });
 }

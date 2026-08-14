@@ -422,7 +422,7 @@ test('Perpetual and Spot market filters share official US identity and aggregate
       directoryRoute.indexOf('const nowMs = Date.now()'),
     'response/cache time must be captured after both upstream directory fetches',
   );
-  assert.match(health, /mapWithConcurrency\(probeJobs, 4/);
+  assert.match(health, /mapWithConcurrency\(probeJobs, 5/);
   assert.doesNotMatch(health, /timeoutMs: 20000, retries: 1/);
   assert.match(i18n, /'US-listed':'美股'/);
   assert.match(i18n, /'All Markets':'全部市场'/);

@@ -548,6 +548,29 @@ th.op-col:hover { color:var(--foreground-dim) !important; }
 .listing-badge.review-required, .listing-badge.pending-refresh { color:#9A6700; background:rgba(255,184,0,.12); }
 .listing-evidence { max-width:280px; color:var(--foreground-dim); font-size:8.5px; line-height:1.45; }
 .listing-empty { padding:34px 18px; border-top:1px solid var(--border); text-align:center; color:var(--foreground-dim); font-size:10px; line-height:1.6; }
+.volume-anomaly-monitor { margin-bottom:14px; overflow:hidden; }
+.volume-anomaly-summary.high .listing-summary-value { color:#C62828; }
+.volume-anomaly-summary.medium .listing-summary-value { color:#9A6700; }
+.volume-anomaly-summary.down .listing-summary-value { color:#AF2D55; }
+.volume-anomaly-summary.frequency .listing-summary-value { color:#6D3CA3; }
+.volume-anomaly-table { min-width:1040px; }
+.volume-anomaly-table thead th:nth-child(n+3), .volume-anomaly-table tbody td:nth-child(n+3) { text-align:right; }
+.volume-anomaly-table thead th:first-child, .volume-anomaly-table tbody td:first-child {
+  position:sticky; left:0; z-index:2; background:rgba(249,250,252,.98);
+}
+.volume-anomaly-table thead th:first-child { z-index:3; }
+.volume-anomaly-row:hover td:first-child, .volume-anomaly-row:focus-visible td:first-child { background:rgba(239,247,255,.98); }
+.volume-anomaly-level { display:inline-flex; align-items:center; gap:5px; padding:3px 8px; border-radius:999px; font:800 9px/1 Inter,sans-serif; white-space:nowrap; }
+.volume-anomaly-level::before { content:''; width:5px; height:5px; border-radius:50%; background:currentColor; }
+.volume-anomaly-level.high { color:#C62828; background:rgba(255,59,48,.10); }
+.volume-anomaly-level.medium { color:#9A6700; background:rgba(255,184,0,.12); }
+.volume-anomaly-level.down { color:#AF2D55; background:rgba(255,45,85,.10); }
+.volume-anomaly-ratio { color:var(--foreground); font:800 12px/1.2 'JetBrains Mono',monospace; }
+.volume-anomaly-frequency { min-width:150px; }
+.volume-anomaly-flags { display:flex; justify-content:flex-end; gap:4px; flex-wrap:wrap; margin-top:4px; }
+.volume-anomaly-flag { display:inline-flex; padding:2px 5px; border-radius:5px; color:#6D3CA3; background:rgba(175,82,222,.09); font:700 8px/1.25 Inter,sans-serif; white-space:nowrap; }
+.volume-anomaly-flag.streak { color:#9A6700; background:rgba(255,184,0,.11); }
+.volume-anomaly-method { margin:0 16px 12px; color:var(--foreground-dim); font-size:8.5px; line-height:1.5; }
 .spot-vc-row { display:flex; justify-content:space-between; padding:4px 0; font-size:12px; }
 .spot-vc-row-label { color:var(--foreground-dim); }
 .spot-vc-row-val { font-family:'JetBrains Mono',monospace; font-weight:600; }
@@ -2052,6 +2075,55 @@ input[type="checkbox"] {
     </section>
 
     <div class="radar-kpis" id="radarKpis" aria-live="polite"></div>
+
+    <section class="section-card volume-anomaly-monitor" id="perpVolumeAnomalySection" aria-labelledby="perpVolumeAnomalyTitle">
+      <div class="listing-monitor-head">
+        <div>
+          <h3 class="listing-monitor-title" id="perpVolumeAnomalyTitle">Perpetual Volume Anomalies</h3>
+          <p class="listing-monitor-lede">Compares current rolling 24h USD contract volume with the prior seven sealed UTC-date rolling-24h observations for the same exact venue-instrument cohort. HIGH ≥ 2× · MEDIUM ≥ 1.5× · DOWN ≤ 0.4×.</p>
+        </div>
+        <div class="listing-monitor-asof" id="perpVolumeAnomalyAsOf">Snapshot<br>not loaded</div>
+      </div>
+      <div class="listing-monitor-summary" id="perpVolumeAnomalySummary" aria-live="polite"></div>
+      <div class="listing-monitor-banner warming" id="perpVolumeAnomalyStatus">Open Signal Radar to load server-side contract-volume anomaly history.</div>
+      <div class="volume-anomaly-method" id="perpVolumeAnomalyMethod">Anomaly levels, 7-day baselines, 30-day frequency and consecutive-expansion flags are supplied by the server. Missing fields or changing venue coverage never become DOWN alerts.</div>
+      <div class="radar-toolbar">
+        <select class="radar-control" id="perpVolumeAnomalyLevelFilter" aria-label="Filter volume anomaly level" onchange="setPerpVolumeAnomalyFilter('level',this.value)">
+          <option value="all">All anomaly levels</option>
+          <option value="high">HIGH</option>
+          <option value="medium">MEDIUM</option>
+          <option value="down">DOWN</option>
+        </select>
+        <select class="radar-control" id="perpVolumeAnomalyCategoryFilter" aria-label="Filter volume anomaly category" onchange="setPerpVolumeAnomalyFilter('category',this.value)">
+          <option value="all">All categories</option>
+        </select>
+        <select class="radar-control" id="perpVolumeAnomalyVenueFilter" aria-label="Filter volume anomaly venue" onchange="setPerpVolumeAnomalyFilter('venue',this.value)">
+          <option value="all">All venues</option>
+        </select>
+        <select class="radar-control" id="perpVolumeAnomalyStatusFilter" aria-label="Filter volume anomaly data status" onchange="setPerpVolumeAnomalyFilter('status',this.value)">
+          <option value="all">All data statuses</option>
+          <option value="full">Full</option>
+          <option value="partial">Partial</option>
+          <option value="estimated">Estimated</option>
+          <option value="unavailable">Unavailable</option>
+        </select>
+        <select class="radar-control" id="perpVolumeAnomalySort" aria-label="Sort volume anomalies" onchange="setPerpVolumeAnomalySort(this.value)">
+          <option value="priority">Alert priority</option>
+          <option value="ratio">Volume ratio</option>
+          <option value="volume">Current 24h volume</option>
+          <option value="frequency">30d anomaly frequency</option>
+          <option value="asset">Asset A–Z</option>
+        </select>
+        <input class="radar-control radar-search" id="perpVolumeAnomalySearch" type="search" placeholder="Search volume anomalies..." aria-label="Search volume anomaly assets" oninput="setPerpVolumeAnomalySearch(this.value)">
+        <span class="radar-result-count" id="perpVolumeAnomalyResultCount"></span>
+      </div>
+      <div id="perpVolumeAnomalyTableRegion" aria-live="polite">
+        <div class="radar-empty"><div class="radar-empty-title">Open Signal Radar to load</div><div class="radar-empty-detail">This section displays only server-classified contract-volume anomalies.</div></div>
+      </div>
+      <div class="radar-more-wrap" id="perpVolumeAnomalyMoreWrap" style="display:none">
+        <button type="button" class="radar-more" id="perpVolumeAnomalyMore" onclick="showMorePerpVolumeAnomalies()">More · 50 / 100</button>
+      </div>
+    </section>
 
     <section class="section-card listing-monitor" id="competitorListingsSection" aria-labelledby="competitorListingsTitle">
       <div class="listing-monitor-head">
@@ -7989,6 +8061,7 @@ const SIGNAL_SNAPSHOT_TTL = 5 * 60 * 1000;
 const SIGNAL_RETRY_BASE = 5 * 60 * 1000;
 const SIGNAL_RETRY_MAX = 30 * 60 * 1000;
 const SIGNAL_SCHEMA_VERSION = 'rwa-signal-snapshot/v1';
+const PERP_VOLUME_ANOMALY_FORMULA_VERSION = 'rwa-perp-volume-anomaly-1.0';
 let signalSnapshotCache = null;
 let signalSnapshotPromise = null;
 let signalSnapshotLoading = false;
@@ -7998,6 +8071,8 @@ let signalSnapshotRetryAt = 0;
 let signalRefreshTimer = null;
 let radarExpanded = false;
 const radarFilter = { severity:'all', type:'all', category:'all', search:'', sort:'server' };
+let perpVolumeAnomalyExpanded = false;
+const perpVolumeAnomalyFilter = { level:'all', category:'all', venue:'all', status:'all', search:'', sort:'priority' };
 const LISTING_AUDIT_SCHEMA_VERSION = 'rwa-listing-audit/v1';
 const LISTING_HISTORY_RETENTION_DAYS = 45;
 const LISTING_CHANGES_TTL = 5 * 60 * 1000;
@@ -8530,6 +8605,288 @@ function filteredRadarRows(indexedRows) {
   return filtered;
 }
 
+function perpVolumeAnomalyPayload(payload = signalSnapshotCache?.payload) {
+  const section = payload?.perpVolumeAnomalies;
+  return section && typeof section === 'object' && !Array.isArray(section) ? section : null;
+}
+
+function perpVolumeAnomalyContractValid(payload) {
+  const section = payload?.perpVolumeAnomalies;
+  const rows = section?.rows;
+  const history = section?.history;
+  const methodology = section?.methodology;
+  const thresholds = methodology?.thresholds;
+  const allowedCategories = new Set(['equity','etf','commodity','index','fx','pre-ipo','bond']);
+  const allowedVenues = new Set(['gate','binance','bitget','tradexyz','okx']);
+  const monitoredAssets = numberOrNull(section?.monitoredAssets);
+  const canonicalAssetCount = numberOrNull(payload?.coverage?.canonicalAssetCount);
+  if (!section || section.formulaVersion !== PERP_VOLUME_ANOMALY_FORMULA_VERSION ||
+      !['full','partial','warming','unavailable'].includes(String(section.status || '').toLowerCase()) ||
+      !Number.isFinite(Date.parse(section.generatedAt)) || !Array.isArray(rows) ||
+      !Number.isInteger(monitoredAssets) || monitoredAssets < 0 || monitoredAssets !== canonicalAssetCount ||
+      numberOrNull(history?.retentionDays) !== 45 || numberOrNull(history?.baselineDays) !== 7 ||
+      numberOrNull(history?.frequencyWindowDays) !== 30 ||
+      numberOrNull(thresholds?.high) !== 2 || numberOrNull(thresholds?.medium) !== 1.5 ||
+      numberOrNull(thresholds?.down) !== 0.4) return false;
+  const ranks = new Set();
+  return rows.every(row => {
+    const symbol = String(row?.symbol || '').trim().toUpperCase();
+    const category = String(row?.category || '').trim().toLowerCase();
+    const level = String(row?.level || '').trim().toLowerCase();
+    const status = String(row?.status || '').trim().toLowerCase();
+    const rank = numberOrNull(row?.rank);
+    const current = numberOrNull(row?.currentVolumeUsd);
+    const average = numberOrNull(row?.average7dVolumeUsd);
+    const ratio = numberOrNull(row?.ratio7d);
+    const venues = Array.isArray(row?.venues) ? row.venues.map(venue => String(venue || '').toLowerCase()) : [];
+    const valid = /^[A-Z0-9][A-Z0-9._-]{0,39}$/.test(symbol) && allowedCategories.has(category) &&
+      ['high','medium','down'].includes(level) && status === 'estimated' &&
+      Number.isInteger(rank) && rank > 0 && !ranks.has(rank) &&
+      current !== null && current >= 0 && average !== null && average > 0 && ratio !== null && ratio >= 0 &&
+      venues.length > 0 && new Set(venues).size === venues.length && venues.every(venue => allowedVenues.has(venue));
+    if (valid) ranks.add(rank);
+    return valid;
+  });
+}
+
+function unavailablePerpVolumeAnomalySection(payload) {
+  return {
+    formulaVersion:PERP_VOLUME_ANOMALY_FORMULA_VERSION,
+    generatedAt:payload?.generatedAt || null,
+    status:'unavailable',
+    monitoredAssets:numberOrNull(payload?.coverage?.canonicalAssetCount) || 0,
+    readyAssets:0,
+    frequencyReadyAssets:0,
+    counts:{ high:null, medium:null, down:null, highFrequency:null },
+    history:{ retentionDays:45, baselineDays:7, frequencyWindowDays:30 },
+    methodology:{
+      thresholds:{ high:2, medium:1.5, down:0.4 },
+      highFrequencyMinEligibleDays:21,
+      highFrequencyMinAnomalyDays:6,
+      consecutiveExpansionMinDays:2,
+    },
+    rows:[],
+  };
+}
+
+function perpVolumeAnomalyPanelStatus(section) {
+  const status = String(section?.status || '').toLowerCase();
+  const normalized = ['full','partial','warming','unavailable'].includes(status) ? status : 'warming';
+  // A failed refresh makes a cached Full snapshot insufficient for an
+  // absence conclusion. Keep its known rows, but downgrade this panel only.
+  return signalSnapshotError && section && normalized === 'full' ? 'partial' : normalized;
+}
+
+function perpVolumeAnomalyLevel(row) {
+  const level = String(row?.level || '').toLowerCase();
+  return ['high','medium','down'].includes(level) ? level : 'unavailable';
+}
+
+function perpVolumeAnomalyRowStatus(row) {
+  const status = String(row?.status || '').toLowerCase();
+  return DATA_STATUS_LABELS[status] ? status : 'unavailable';
+}
+
+function perpVolumeAnomalyRows(section) {
+  return (Array.isArray(section?.rows) ? section.rows : []).filter(row => {
+    const symbol = String(row?.symbol || '').trim();
+    const category = String(row?.category || '').trim();
+    return symbol && category && ['high','medium','down'].includes(perpVolumeAnomalyLevel(row));
+  });
+}
+
+function perpVolumeAnomalyFrequency(row) {
+  return row?.frequency30d && typeof row.frequency30d === 'object' ? row.frequency30d : {};
+}
+
+function perpVolumeAnomalyVenueLabel(venue) {
+  const key = String(venue || '').toLowerCase();
+  return VENUES[key]?.name || SPOT_VENUE_NAMES?.[key] || key;
+}
+
+function updatePerpVolumeAnomalyFilterOptions(section) {
+  const rows = perpVolumeAnomalyRows(section);
+  const categories = [...new Set(rows.map(row => String(row.category || '').toLowerCase()).filter(Boolean))].sort();
+  const venues = [...new Set(rows.flatMap(row => Array.isArray(row.venues) ? row.venues : []).map(venue => String(venue || '').toLowerCase()).filter(Boolean))]
+    .sort((left, right) => perpVolumeAnomalyVenueLabel(left).localeCompare(perpVolumeAnomalyVenueLabel(right)));
+  populateRadarFilter(
+    'perpVolumeAnomalyCategoryFilter',
+    categories.map(key => ({ key, label:key.replace(/\b\w/g, letter => letter.toUpperCase()) })),
+    'All categories',
+    perpVolumeAnomalyFilter.category,
+  );
+  populateRadarFilter(
+    'perpVolumeAnomalyVenueFilter',
+    venues.map(key => ({ key, label:perpVolumeAnomalyVenueLabel(key) })),
+    'All venues',
+    perpVolumeAnomalyFilter.venue,
+  );
+  perpVolumeAnomalyFilter.category = document.getElementById('perpVolumeAnomalyCategoryFilter')?.value || 'all';
+  perpVolumeAnomalyFilter.venue = document.getElementById('perpVolumeAnomalyVenueFilter')?.value || 'all';
+}
+
+function filteredPerpVolumeAnomalyRows(section) {
+  const query = perpVolumeAnomalyFilter.search.trim().toLowerCase();
+  const filtered = perpVolumeAnomalyRows(section).map((row, serverIndex) => ({ row, serverIndex })).filter(({ row }) => {
+    const levelMatch = perpVolumeAnomalyFilter.level === 'all' || perpVolumeAnomalyLevel(row) === perpVolumeAnomalyFilter.level;
+    const category = String(row?.category || '').toLowerCase();
+    const categoryMatch = perpVolumeAnomalyFilter.category === 'all' || category === perpVolumeAnomalyFilter.category;
+    const venues = (Array.isArray(row?.venues) ? row.venues : []).map(venue => String(venue || '').toLowerCase());
+    const venueMatch = perpVolumeAnomalyFilter.venue === 'all' || venues.includes(perpVolumeAnomalyFilter.venue);
+    const statusMatch = perpVolumeAnomalyFilter.status === 'all' || perpVolumeAnomalyRowStatus(row) === perpVolumeAnomalyFilter.status;
+    const venueText = venues.map(perpVolumeAnomalyVenueLabel).join(' ');
+    const searchText = `${row?.symbol || ''} ${category} ${venues.join(' ')} ${venueText}`.toLowerCase();
+    return levelMatch && categoryMatch && venueMatch && statusMatch && (!query || searchText.includes(query));
+  });
+  if (perpVolumeAnomalyFilter.sort === 'asset') {
+    filtered.sort((left, right) => String(left.row?.symbol || '').localeCompare(String(right.row?.symbol || '')) || left.serverIndex - right.serverIndex);
+  } else if (perpVolumeAnomalyFilter.sort === 'ratio') {
+    filtered.sort((left, right) => (numberOrNull(right.row?.ratio7d) ?? -Infinity) - (numberOrNull(left.row?.ratio7d) ?? -Infinity) || left.serverIndex - right.serverIndex);
+  } else if (perpVolumeAnomalyFilter.sort === 'volume') {
+    filtered.sort((left, right) => (numberOrNull(right.row?.currentVolumeUsd) ?? -Infinity) - (numberOrNull(left.row?.currentVolumeUsd) ?? -Infinity) || left.serverIndex - right.serverIndex);
+  } else if (perpVolumeAnomalyFilter.sort === 'frequency') {
+    filtered.sort((left, right) => (numberOrNull(perpVolumeAnomalyFrequency(right.row).anomalyDays) ?? -Infinity) - (numberOrNull(perpVolumeAnomalyFrequency(left.row).anomalyDays) ?? -Infinity) || left.serverIndex - right.serverIndex);
+  } else {
+    filtered.sort((left, right) => (numberOrNull(left.row?.rank) ?? left.serverIndex + 1) - (numberOrNull(right.row?.rank) ?? right.serverIndex + 1) || left.serverIndex - right.serverIndex);
+  }
+  return filtered;
+}
+
+function perpVolumeAnomalyCount(section, key) {
+  const count = numberOrNull(section?.counts?.[key]);
+  return count === null ? '—' : Math.max(0, Math.trunc(count)).toLocaleString(window.uiLocale());
+}
+
+function renderPerpVolumeAnomalySummary(section) {
+  const host = document.getElementById('perpVolumeAnomalySummary');
+  if (!host) return;
+  host.innerHTML = `
+    <div class="listing-summary-item volume-anomaly-summary high"><div class="listing-summary-label i18n-ui-token">HIGH</div><div class="listing-summary-value">${perpVolumeAnomalyCount(section,'high')}</div><div class="listing-summary-sub">≥2× 7d avg</div></div>
+    <div class="listing-summary-item volume-anomaly-summary medium"><div class="listing-summary-label i18n-ui-token">MEDIUM</div><div class="listing-summary-value">${perpVolumeAnomalyCount(section,'medium')}</div><div class="listing-summary-sub">≥1.5× 7d avg</div></div>
+    <div class="listing-summary-item volume-anomaly-summary down"><div class="listing-summary-label i18n-ui-token">DOWN</div><div class="listing-summary-value">${perpVolumeAnomalyCount(section,'down')}</div><div class="listing-summary-sub">≤0.4× · liquidity warning</div></div>
+    <div class="listing-summary-item volume-anomaly-summary frequency"><div class="listing-summary-label">High-frequency</div><div class="listing-summary-value">${perpVolumeAnomalyCount(section,'highFrequency')}</div><div class="listing-summary-sub">30d server flag</div></div>`;
+}
+
+function renderPerpVolumeAnomalyStatus(section) {
+  const host = document.getElementById('perpVolumeAnomalyStatus');
+  const asOf = document.getElementById('perpVolumeAnomalyAsOf');
+  if (!host || !asOf) return;
+  const generatedAt = section?.generatedAt;
+  asOf.innerHTML = `Snapshot<br>${Number.isFinite(Date.parse(generatedAt)) ? escapeHtml(radarTimestamp(generatedAt)) : 'not loaded'}`;
+  const panelStatus = perpVolumeAnomalyPanelStatus(section);
+  const rows = perpVolumeAnomalyRows(section);
+  let text;
+  if (signalSnapshotLoading && !section) {
+    text = 'Loading server-side contract-volume anomalies…';
+  } else if (!section || panelStatus === 'warming') {
+    text = 'Perpetual volume anomaly baseline is warming. No absence conclusion is available until seven comparable daily observations are ready.';
+  } else if (panelStatus === 'unavailable') {
+    text = 'Perpetual volume anomaly history is unavailable. No HIGH, MEDIUM or DOWN conclusion is available.';
+  } else if (panelStatus === 'partial') {
+    text = signalSnapshotError && String(section?.status || '').toLowerCase() === 'full'
+      ? `Perpetual volume anomaly refresh failed (${signalSnapshotError}). Last-known alerts remain visible, but the cached snapshot cannot support a no-anomaly conclusion.`
+      : 'Perpetual volume anomaly coverage is Partial. Known alerts remain visible; missing coverage cannot support a no-anomaly conclusion.';
+  } else if (!rows.length) {
+    text = 'No perpetual volume anomalies in this snapshot';
+  } else {
+    text = 'Server-side contract-volume anomaly classification is Full.';
+  }
+  host.className = `listing-monitor-banner ${panelStatus === 'full' ? '' : panelStatus}`.trim();
+  host.textContent = text;
+}
+
+function renderPerpVolumeAnomalyTable(section) {
+  const host = document.getElementById('perpVolumeAnomalyTableRegion');
+  const count = document.getElementById('perpVolumeAnomalyResultCount');
+  const moreWrap = document.getElementById('perpVolumeAnomalyMoreWrap');
+  const more = document.getElementById('perpVolumeAnomalyMore');
+  if (!host || !count || !moreWrap || !more) return;
+  const allRows = perpVolumeAnomalyRows(section);
+  const rows = filteredPerpVolumeAnomalyRows(section);
+  const visible = rows.slice(0, perpVolumeAnomalyExpanded ? 100 : 50);
+  count.textContent = section ? `${visible.length} of ${rows.length}` : '';
+  if (!rows.length) {
+    const panelStatus = perpVolumeAnomalyPanelStatus(section);
+    let title, detail;
+    if (!section) {
+      title = 'Open Signal Radar to load';
+      detail = 'This section displays only server-classified contract-volume anomalies.';
+    } else if (allRows.length) {
+      title = 'No known volume anomalies match the current filters';
+      detail = panelStatus === 'full'
+        ? 'Adjust the level, category, venue, data status or search filters.'
+        : 'Adjust the filters. Coverage is incomplete, so this is not a no-anomaly conclusion.';
+    } else if (panelStatus === 'full') {
+      title = 'No perpetual volume anomalies in this snapshot';
+      detail = 'All monitored assets have comparable server history for this snapshot.';
+    } else if (panelStatus === 'partial') {
+      title = 'Perpetual volume anomaly coverage is Partial';
+      detail = 'No absence conclusion is available while monitored assets or frequency history remain incomplete.';
+    } else if (panelStatus === 'unavailable') {
+      title = 'Perpetual volume anomaly history is unavailable';
+      detail = 'No HIGH, MEDIUM or DOWN conclusion is available.';
+    } else {
+      title = 'Perpetual volume anomaly baseline is warming';
+      detail = 'Seven comparable daily observations are required before the first classification.';
+    }
+    host.innerHTML = `<div class="radar-empty"><div class="radar-empty-title">${escapeHtml(title)}</div><div class="radar-empty-detail">${escapeHtml(detail)}</div></div>`;
+    moreWrap.style.display = 'none';
+    return;
+  }
+  const htmlRows = visible.map(({ row, serverIndex }) => {
+    const symbol = String(row.symbol || '').toUpperCase();
+    const category = String(row.category || '').toLowerCase();
+    const rank = numberOrNull(row.rank) ?? serverIndex + 1;
+    const level = perpVolumeAnomalyLevel(row);
+    const ratio = numberOrNull(row.ratio7d);
+    const baseline = row?.baseline && typeof row.baseline === 'object' ? row.baseline : {};
+    const frequency = perpVolumeAnomalyFrequency(row);
+    const anomalyDays = numberOrNull(frequency.anomalyDays);
+    const eligibleDays = numberOrNull(frequency.eligibleDays);
+    const observedDays = numberOrNull(baseline.observedDays);
+    const expectedDays = numberOrNull(baseline.expectedDays);
+    const venues = (Array.isArray(row.venues) ? row.venues : []).map(perpVolumeAnomalyVenueLabel).filter(Boolean);
+    const listingCount = numberOrNull(row.listingCount) ?? venues.length;
+    const flags = new Set(Array.isArray(row.flags) ? row.flags.map(flag => String(flag).toUpperCase()) : []);
+    const streakDays = numberOrNull(frequency.consecutiveExpansionDays);
+    const flagHtml = [
+      flags.has('CONSECUTIVE_EXPANSION') && streakDays !== null
+        ? `<span class="volume-anomaly-flag streak">${Math.max(0,Math.trunc(streakDays))}-day expansion streak</span>`
+        : '',
+      flags.has('HIGH_FREQUENCY_ANOMALY') || frequency.highFrequency === true
+        ? '<span class="volume-anomaly-flag">High-frequency anomaly</span>'
+        : '',
+    ].filter(Boolean).join('');
+    const rowStatus = perpVolumeAnomalyRowStatus(row);
+    const baselineStatus = String(baseline.status || '').toLowerCase();
+    const frequencyStatus = String(frequency.status || '').toLowerCase();
+    return `<tr class="radar-row volume-anomaly-row" ${assetIntelligenceTriggerAttrs(symbol, category, 'perpetual volume anomalies')}>
+      <td><div class="radar-asset-symbol"><span class="radar-rank">#${escapeHtml(rank)}</span> <span data-i18n-skip>${escapeHtml(symbol)}</span></div><div class="radar-asset-meta"><span class="radar-category">${escapeHtml(category)}</span></div></td>
+      <td><span class="volume-anomaly-level ${level} i18n-ui-token">${escapeHtml(level.toUpperCase())}</span></td>
+      <td><div class="radar-value-status"><span>${fmtVolume(numberOrNull(row.currentVolumeUsd))}</span></div></td>
+      <td><div class="radar-value-status"><span>${fmtVolume(numberOrNull(row.average7dVolumeUsd))}</span></div></td>
+      <td><div class="volume-anomaly-ratio">${ratio === null ? '—' : `${ratio.toFixed(2)}×`}</div><div class="radar-baseline">${level === 'down' ? 'Liquidity warning' : 'Volume expansion'}</div></td>
+      <td class="volume-anomaly-frequency"><div>${anomalyDays === null || eligibleDays === null ? '—' : `${Math.max(0,Math.trunc(anomalyDays))} / ${Math.max(0,Math.trunc(eligibleDays))} eligible days`}</div>${flagHtml ? `<div class="volume-anomaly-flags">${flagHtml}</div>` : ''}</td>
+      <td class="radar-coverage"><div class="radar-coverage-venues">${escapeHtml(venues.length ? venues.join(' · ') : 'Unavailable')}</div><div class="radar-baseline">${escapeHtml(listingCount)} listings</div></td>
+      <td><div>${dataStatusBadge(rowStatus)}</div><div class="radar-baseline">${observedDays === null || expectedDays === null ? 'Baseline unavailable' : `Baseline ${Math.max(0,Math.trunc(observedDays))}/${Math.max(0,Math.trunc(expectedDays))} days`} · ${radarHistoryBadge(baselineStatus)}</div><div class="radar-baseline">Frequency · ${radarHistoryBadge(frequencyStatus)}</div></td>
+    </tr>`;
+  }).join('');
+  host.innerHTML = `<div class="radar-table-wrap"><table class="radar-table volume-anomaly-table"><thead><tr><th>Asset</th><th>Alert</th><th>Current 24h Volume</th><th>7d Avg Volume</th><th>vs 7d Avg</th><th>30d Anomaly Frequency</th><th>Coverage</th><th>Data Status / Baseline</th></tr></thead><tbody>${htmlRows}</tbody></table></div>`;
+  const canExpand = rows.length > 50;
+  moreWrap.style.display = canExpand ? 'block' : 'none';
+  more.setAttribute('aria-expanded', String(perpVolumeAnomalyExpanded));
+  more.setAttribute('aria-controls', 'perpVolumeAnomalyTableRegion');
+  more.textContent = perpVolumeAnomalyExpanded ? `Less · ${visible.length} / ${rows.length}` : `More · ${visible.length} / ${Math.min(rows.length,100)}`;
+}
+
+function renderPerpVolumeAnomalies(payload) {
+  const section = perpVolumeAnomalyPayload(payload);
+  if (section) updatePerpVolumeAnomalyFilterOptions(section);
+  renderPerpVolumeAnomalySummary(section);
+  renderPerpVolumeAnomalyStatus(section);
+  renderPerpVolumeAnomalyTable(section);
+}
+
 function renderRadarStatus(payload, indexedRows) {
   const host = document.getElementById('radarStatus');
   if (!host) return;
@@ -8682,6 +9039,7 @@ function renderSignalRadar() {
   renderRadarStatus(payload, indexedRows);
   renderRadarMeta(payload, indexedRows);
   renderRadarKpis(payload, indexedRows);
+  renderPerpVolumeAnomalies(payload);
   renderCompetitorListings();
   renderRadarTable(payload, indexedRows);
 }
@@ -8702,8 +9060,15 @@ async function loadSignalSnapshot(force = false) {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const payload = await response.json();
       const schema = payload?.schemaVersion || payload?.schema;
-      if (schema && schema !== SIGNAL_SCHEMA_VERSION) throw new Error(`Unsupported schema ${schema}`);
+      if (schema !== SIGNAL_SCHEMA_VERSION) throw new Error(`Unsupported schema ${schema || 'missing'}`);
       if (!Array.isArray(payload?.assets) && !Array.isArray(payload?.signals)) throw new Error('Invalid signal snapshot');
+      // The volume panel is additive to the v1 Radar payload. Isolate a bad or
+      // legacy-missing child contract so existing Radar KPI/signals remain
+      // available while this panel fails closed as Unavailable.
+      if (!perpVolumeAnomalyContractValid(payload)) {
+        console.warn('[Signal Radar] perpetual volume anomaly section unavailable or invalid');
+        payload.perpVolumeAnomalies = unavailablePerpVolumeAnomalySection(payload);
+      }
       signalSnapshotCache = { receivedAt:Date.now(), payload };
       signalSnapshotFailures = 0;
       signalSnapshotRetryAt = 0;
@@ -8759,6 +9124,34 @@ function setRadarSort(value) {
 
 function showMoreRadarSignals() {
   radarExpanded = !radarExpanded;
+  renderSignalRadar();
+}
+
+function setPerpVolumeAnomalyFilter(key, value) {
+  if (!['level','category','venue','status'].includes(key)) return;
+  const normalized = String(value || 'all').toLowerCase();
+  if (key === 'level') perpVolumeAnomalyFilter.level = ['all','high','medium','down'].includes(normalized) ? normalized : 'all';
+  else if (key === 'status') perpVolumeAnomalyFilter.status = ['all','full','partial','estimated','unavailable'].includes(normalized) ? normalized : 'all';
+  else perpVolumeAnomalyFilter[key] = normalized || 'all';
+  perpVolumeAnomalyExpanded = false;
+  renderSignalRadar();
+}
+
+function setPerpVolumeAnomalySearch(value) {
+  perpVolumeAnomalyFilter.search = String(value || '');
+  perpVolumeAnomalyExpanded = false;
+  renderSignalRadar();
+}
+
+function setPerpVolumeAnomalySort(value) {
+  const normalized = String(value || 'priority').toLowerCase();
+  perpVolumeAnomalyFilter.sort = ['priority','ratio','volume','frequency','asset'].includes(normalized) ? normalized : 'priority';
+  perpVolumeAnomalyExpanded = false;
+  renderSignalRadar();
+}
+
+function showMorePerpVolumeAnomalies() {
+  perpVolumeAnomalyExpanded = !perpVolumeAnomalyExpanded;
   renderSignalRadar();
 }
 
