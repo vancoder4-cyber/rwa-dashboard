@@ -73,9 +73,11 @@ function validDirectoryPayload(nowMs, sourceMs = nowMs) {
       validUntilMs:alignedSourceMs + US_MARKET_DIRECTORY_MAX_SOURCE_AGE_MS,
     },
     symbols,
+    etfs:['QQQ'],
     adrs:['BABA'],
     coverage:{
       listedSecurityCount:symbols.length,
+      etfCount:1,
       adrCount:1,
       sourceCounts:{ nasdaqListed:4002, otherListed:4002 },
     },
@@ -182,6 +184,45 @@ test('directory freshness is absolute, fail-closed, and cannot be extended by re
   assert.equal(validateUsMarketDirectoryPayload(orphanAdr, { nowMs }).valid, false);
 });
 
+test('directory ETF membership is a sorted, unique subset with exact coverage', () => {
+  const nowMs = Date.UTC(2026, 7, 8, 22, 0);
+  const fresh = validDirectoryPayload(nowMs, nowMs - 60_000);
+  const valid = validateUsMarketDirectoryPayload(fresh, { nowMs });
+  assert.equal(valid.valid, true);
+  assert.equal(valid.etfCount, 1);
+  assert.equal(valid.etfCountMatches, true);
+  assert.equal(valid.sortedEtfs, true);
+
+  const orphanEtf = structuredClone(fresh);
+  orphanEtf.etfs.push('ZZZZ');
+  orphanEtf.coverage.etfCount += 1;
+  const orphanValidation = validateUsMarketDirectoryPayload(orphanEtf, { nowMs });
+  assert.equal(orphanValidation.valid, false);
+  assert.ok(orphanValidation.issues.includes('etf-contract'));
+
+  const duplicateEtf = structuredClone(fresh);
+  duplicateEtf.etfs.push('QQQ');
+  duplicateEtf.coverage.etfCount += 1;
+  const duplicateValidation = validateUsMarketDirectoryPayload(duplicateEtf, { nowMs });
+  assert.equal(duplicateValidation.valid, false);
+  assert.ok(duplicateValidation.issues.includes('duplicate'));
+
+  const unsortedEtfs = structuredClone(fresh);
+  unsortedEtfs.etfs = ['QQQ', 'AAPL'];
+  unsortedEtfs.coverage.etfCount = 2;
+  const unsortedValidation = validateUsMarketDirectoryPayload(unsortedEtfs, { nowMs });
+  assert.equal(unsortedValidation.valid, false);
+  assert.equal(unsortedValidation.sortedEtfs, false);
+  assert.ok(unsortedValidation.issues.includes('sort-order'));
+
+  const wrongCount = structuredClone(fresh);
+  wrongCount.coverage.etfCount = 2;
+  const countValidation = validateUsMarketDirectoryPayload(wrongCount, { nowMs });
+  assert.equal(countValidation.valid, false);
+  assert.equal(countValidation.etfCountMatches, false);
+  assert.ok(countValidation.issues.includes('coverage-count'));
+});
+
 test('directory CDN cache policy never crosses the source hard expiry', () => {
   const nowMs = Date.UTC(2026, 7, 8, 22, 0);
   assert.deepEqual(usMarketDirectoryCachePolicy(nowMs + 30_000, nowMs), { maxAge:30, staleWhileRevalidate:0 });
@@ -223,8 +264,11 @@ test('U.S. directory endpoint returns one deterministic, cacheable official iden
     assert.equal(res.payload.schemaVersion, 1);
     assert.equal(res.payload.status, 'full');
     assert.equal(res.payload.coverage.listedSecurityCount, 8006);
+    assert.equal(res.payload.coverage.etfCount, 2);
     assert.deepEqual(res.payload.coverage.sourceCounts, { nasdaqListed:4002, otherListed:4004 });
     assert.ok(res.payload.symbols.includes('AAPL'));
+    assert.deepEqual(res.payload.etfs, ['BTC', 'QQQ']);
+    assert.ok(res.payload.etfs.includes('QQQ'));
     assert.ok(res.payload.adrs.includes('BABA'));
     assert.ok(res.payload.symbols.includes('BTC'), 'legitimate U.S.-listed BTC ETF ticker must not poison the directory');
     assert.ok(res.payload.symbols.includes('OPENAI'), 'directory validation must not depend on any ticker remaining absent forever');
@@ -280,17 +324,20 @@ test('U.S. directory endpoint rejects cache-fragmenting queries and fails closed
   }
 });
 
-test('compact directory sorts symbols and keeps ADRs additive', () => {
+test('compact directory sorts symbols and emits ETF and ADR subsets', () => {
   const payload = compactUsMarketDirectory({
     asOf:'2026-08-08T18:01:00-04:00',
     bySymbol:new Map([
-      ['TSM', { symbol:'TSM', exchange:'N', tags:[] }],
-      ['BABA', { symbol:'BABA', exchange:'NASDAQ', tags:['ADR'] }],
-      ['AAPL', { symbol:'AAPL', exchange:'NASDAQ', tags:[] }],
+      ['TSM', { symbol:'TSM', category:'equity', exchange:'N', tags:[] }],
+      ['QQQ', { symbol:'QQQ', category:'etf', exchange:'NASDAQ', tags:[] }],
+      ['BABA', { symbol:'BABA', category:'equity', exchange:'NASDAQ', tags:['ADR'] }],
+      ['AAPL', { symbol:'AAPL', category:'equity', exchange:'NASDAQ', tags:[] }],
     ]),
   });
-  assert.deepEqual(payload.symbols, ['AAPL', 'BABA', 'TSM']);
+  assert.deepEqual(payload.symbols, ['AAPL', 'BABA', 'QQQ', 'TSM']);
+  assert.deepEqual(payload.etfs, ['QQQ']);
   assert.deepEqual(payload.adrs, ['BABA']);
+  assert.equal(payload.coverage.etfCount, 1);
 });
 
 test('health treats an invalid HTTP-200 U.S. directory as critical', async () => {

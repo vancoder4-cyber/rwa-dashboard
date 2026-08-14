@@ -70,6 +70,21 @@ function makeSpotSnapshot() {
   };
 }
 
+function refreshPerpCoverage(snapshot) {
+  const count = snapshot.instruments.length;
+  snapshot.coverage = {
+    tickers: fullCoverage(count),
+    marks: fullCoverage(count),
+    openInterest: fullCoverage(count),
+  };
+  return snapshot;
+}
+
+function refreshSpotCoverage(snapshot) {
+  snapshot.coverage = { tickers: fullCoverage(snapshot.instruments.length) };
+  return snapshot;
+}
+
 function jsonResponse(payload, status = 200) {
   return {
     ok: status >= 200 && status < 300,
@@ -93,6 +108,77 @@ test('OKX health validators require the complete official catalog and market joi
   assert.equal(spot.utsListings, 48);
   assert.equal(spot.goldListings, 3);
   assert.equal(spot.coverage.tickers.valid, true);
+});
+
+test('OKX reviewed counts are lower bounds so official category-gated growth passes', () => {
+  const perpSnapshot = makePerpSnapshot();
+  const newPerp = {
+    instType:'SWAP', instId:'NEWSTOCK-USDT-SWAP', canonicalSymbol:'NEWSTOCK',
+    state:'live', ruleType:'normal', instCategory:'3',
+  };
+  perpSnapshot.instruments.push(newPerp);
+  perpSnapshot.tickers.push({ instId:newPerp.instId });
+  perpSnapshot.marks.push({ instId:newPerp.instId });
+  perpSnapshot.openInterest.push({ instId:newPerp.instId });
+  const perp = validateOkxPerpSnapshot(refreshPerpCoverage(perpSnapshot));
+  assert.equal(perp.valid, true);
+  assert.equal(perp.countValid, true);
+  assert.equal(perp.listingDelta, 1);
+  assert.equal(perp.growthDetected, true);
+
+  const spotSnapshot = makeSpotSnapshot();
+  const newSpot = {
+    instType:'SPOT', instId:'XNEWSTOCK-USDT', baseCcy:'XNEWSTOCK', quoteCcy:'USDT',
+    canonicalSymbol:'NEWSTOCK', state:'live', instCategory:'3',
+  };
+  spotSnapshot.instruments.push(newSpot);
+  spotSnapshot.tickers.push({ instId:newSpot.instId });
+  const spot = validateOkxSpotSnapshot(refreshSpotCoverage(spotSnapshot));
+  assert.equal(spot.valid, true);
+  assert.equal(spot.countValid, true);
+  assert.equal(spot.listingDelta, 1);
+  assert.equal(spot.growthDetected, true);
+});
+
+test('OKX lower bounds still reject catalog shrinkage and split substitution', () => {
+  const shrunk = makePerpSnapshot();
+  const removedSwap = shrunk.instruments.shift();
+  for (const field of ['tickers','marks','openInterest']) {
+    shrunk[field] = shrunk[field].filter(row => row.instId !== removedSwap.instId);
+  }
+  const shrinkValidation = validateOkxPerpSnapshot(refreshPerpCoverage(shrunk));
+  assert.equal(shrinkValidation.identityValid, true);
+  assert.equal(shrinkValidation.marketCoverageValid, true);
+  assert.equal(shrinkValidation.countValid, false);
+  assert.equal(shrinkValidation.valid, false);
+
+  const substituted = makePerpSnapshot();
+  const removedXPerp = substituted.instruments.pop();
+  for (const field of ['tickers','marks','openInterest']) {
+    substituted[field] = substituted[field].filter(row => row.instId !== removedXPerp.instId);
+  }
+  const replacement = {
+    instType:'SWAP', instId:'EXTRASWAP-USDT-SWAP', canonicalSymbol:'EXTRASWAP',
+    state:'live', ruleType:'normal', instCategory:'3',
+  };
+  substituted.instruments.push(replacement);
+  substituted.tickers.push({ instId:replacement.instId });
+  substituted.marks.push({ instId:replacement.instId });
+  substituted.openInterest.push({ instId:replacement.instId });
+  const splitValidation = validateOkxPerpSnapshot(refreshPerpCoverage(substituted));
+  assert.equal(splitValidation.listingCount, 183);
+  assert.equal(splitValidation.xPerpListings, 33);
+  assert.equal(splitValidation.countValid, false);
+  assert.equal(splitValidation.valid, false);
+
+  const spotShrunk = makeSpotSnapshot();
+  const removedUts = spotShrunk.instruments.shift();
+  spotShrunk.tickers = spotShrunk.tickers.filter(row => row.instId !== removedUts.instId);
+  const spotValidation = validateOkxSpotSnapshot(refreshSpotCoverage(spotShrunk));
+  assert.equal(spotValidation.identityValid, true);
+  assert.equal(spotValidation.marketCoverageValid, true);
+  assert.equal(spotValidation.countValid, false);
+  assert.equal(spotValidation.valid, false);
 });
 
 test('OKX health validators fail closed on crypto identity collisions and missing market rows', () => {

@@ -32,5 +32,10 @@ jobs:
       - name: Production data contracts
         run: npm run audit:data
 
+      - name: Competitor listing review
+        if: ${{ always() }}
+        run: npm run audit:listings
+
       - name: Production health endpoint
+        if: ${{ always() }}
         run: npm run audit:health

@@ -347,6 +347,9 @@ async function collectBitget() {
 
 async function collectTradeXyz(baseUrl) {
   const payload = await fetchSameOrigin(baseUrl, '/api/hyperliquid-market');
+  if (!/^dex:(?:xyz|tradexyz)$/i.test(String(payload?.source || '').trim())) {
+    throw new Error('dedicated trade.xyz DEX identity unavailable');
+  }
   const data = payload?.data;
   const universe = Array.isArray(data) && data.length === 2 ? (data[0]?.universe || data[0]) : null;
   const contexts = Array.isArray(data) && data.length === 2 ? data[1] : null;
@@ -357,8 +360,11 @@ async function collectTradeXyz(baseUrl) {
   }
   if (!officialTypes.size) throw new Error('trade.xyz official category metadata unavailable');
   const listings = [];
+  const activeIndexes = [];
   for (let index = 0; index < universe.length; index += 1) {
     const meta = universe[index] || {};
+    if (meta.isDelisted === true || ['1','true','yes'].includes(String(meta.isDelisted || '').toLowerCase())) continue;
+    activeIndexes.push(index);
     const context = contexts[index] || {};
     const venueSymbol = String(meta.name || '');
     const symbol = (venueSymbol.includes(':') ? venueSymbol.split(':').pop() : venueSymbol).toUpperCase();
@@ -386,9 +392,9 @@ async function collectTradeXyz(baseUrl) {
     });
   }
   if (!listings.length) throw new Error('trusted trade.xyz RWA catalog is empty');
-  const marketContextComplete = contexts.length === universe.length && universe.every((_, index) =>
+  const marketContextComplete = contexts.length === universe.length && activeIndexes.every(index =>
     contexts[index] && typeof contexts[index] === 'object');
-  const identityCoverageComplete = listings.length === universe.length;
+  const identityCoverageComplete = listings.length === activeIndexes.length;
   const warnings = [];
   if (!marketContextComplete) warnings.push('MARKET_CONTEXT_INCOMPLETE');
   if (!identityCoverageComplete) warnings.push('IDENTITY_COVERAGE_INCOMPLETE');

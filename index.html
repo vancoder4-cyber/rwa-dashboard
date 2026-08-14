@@ -520,6 +520,34 @@ th.op-col:hover { color:var(--foreground-dim) !important; }
 .radar-more { border:1px solid rgba(0,0,0,.07); border-radius:8px; background:rgba(255,255,255,.65); color:var(--foreground-sec); padding:8px 18px; font:700 10px/1 Inter,sans-serif; cursor:pointer; }
 .radar-more:hover { border-color:rgba(0,122,255,.28); color:var(--accent); background:rgba(0,122,255,.05); }
 .radar-error { color:#C62828; }
+.listing-monitor { margin-bottom:14px; overflow:hidden; }
+.listing-monitor-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; padding:16px 16px 12px; }
+.listing-monitor-title { margin:0; color:var(--foreground); font-size:15px; font-weight:800; letter-spacing:-.015em; }
+.listing-monitor-lede { max-width:760px; margin:5px 0 0; color:var(--foreground-dim); font-size:10px; line-height:1.55; }
+.listing-monitor-asof { color:var(--foreground-dim); font:500 9px/1.5 'JetBrains Mono',monospace; text-align:right; white-space:nowrap; }
+.listing-monitor-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; padding:0 16px 12px; }
+.listing-summary-item { min-width:0; padding:9px 10px; border:1px solid var(--border); border-radius:9px; background:rgba(255,255,255,.42); }
+.listing-summary-label { color:var(--foreground-dim); font-size:8px; font-weight:750; text-transform:uppercase; letter-spacing:.055em; }
+.listing-summary-value { margin-top:4px; color:var(--foreground); font:750 15px/1 'JetBrains Mono',monospace; }
+.listing-summary-sub { margin-top:4px; color:var(--foreground-dim); font-size:8px; line-height:1.4; }
+.listing-monitor-banner { margin:0 16px 12px; padding:8px 10px; border:1px solid rgba(52,199,89,.14); border-radius:8px; background:rgba(52,199,89,.05); color:var(--foreground-sec); font-size:9px; line-height:1.5; }
+.listing-monitor-banner.partial { border-color:rgba(255,184,0,.18); background:rgba(255,184,0,.07); }
+.listing-monitor-banner.unavailable, .listing-monitor-banner.warming { border-color:rgba(120,120,128,.14); background:rgba(120,120,128,.05); }
+.listing-table-wrap { overflow-x:auto; border-top:1px solid var(--border); }
+.listing-table { width:100%; min-width:940px; border-collapse:collapse; }
+.listing-table th { padding:9px 10px; border-bottom:1px solid var(--border); color:var(--foreground-dim); font-size:8.5px; font-weight:750; letter-spacing:.035em; text-transform:uppercase; text-align:left; white-space:nowrap; }
+.listing-table td { padding:10px; border-bottom:1px solid var(--border); color:var(--foreground-sec); font-size:9.5px; line-height:1.4; vertical-align:middle; }
+.listing-row[data-asset-intel="true"] { cursor:pointer; }
+.listing-row[data-asset-intel="true"]:hover, .listing-row[data-asset-intel="true"]:focus-visible { background:rgba(0,122,255,.045); outline:none; }
+.listing-symbol { color:var(--foreground); font-size:11px; font-weight:800; }
+.listing-instrument { margin-top:2px; color:var(--foreground-dim); font:500 8px/1.35 'JetBrains Mono',monospace; }
+.listing-badge { display:inline-flex; align-items:center; padding:3px 7px; border-radius:999px; font-size:8px; font-weight:750; white-space:nowrap; }
+.listing-badge.new { color:#0055CC; background:rgba(0,122,255,.09); }
+.listing-badge.relisted { color:#6D3CA3; background:rgba(175,82,222,.10); }
+.listing-badge.verified, .listing-badge.included { color:#248A3D; background:rgba(52,199,89,.09); }
+.listing-badge.review-required, .listing-badge.pending-refresh { color:#9A6700; background:rgba(255,184,0,.12); }
+.listing-evidence { max-width:280px; color:var(--foreground-dim); font-size:8.5px; line-height:1.45; }
+.listing-empty { padding:34px 18px; border-top:1px solid var(--border); text-align:center; color:var(--foreground-dim); font-size:10px; line-height:1.6; }
 .spot-vc-row { display:flex; justify-content:space-between; padding:4px 0; font-size:12px; }
 .spot-vc-row-label { color:var(--foreground-dim); }
 .spot-vc-row-val { font-family:'JetBrains Mono',monospace; font-weight:600; }
@@ -1363,6 +1391,9 @@ input[type="checkbox"] {
   .radar-page { padding:12px; }
   .radar-hero-head { flex-direction:column; }
   .radar-meta-grid, .radar-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .listing-monitor-head { flex-direction:column; }
+  .listing-monitor-asof { text-align:left; }
+  .listing-monitor-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .radar-search { margin-left:0; width:100%; max-width:none; }
   .radar-control { flex:1; max-width:none; }
 }
@@ -2022,6 +2053,51 @@ input[type="checkbox"] {
 
     <div class="radar-kpis" id="radarKpis" aria-live="polite"></div>
 
+    <section class="section-card listing-monitor" id="competitorListingsSection" aria-labelledby="competitorListingsTitle">
+      <div class="listing-monitor-head">
+        <div>
+          <h3 class="listing-monitor-title" id="competitorListingsTitle">Competitor New Listings</h3>
+          <p class="listing-monitor-lede">Daily official catalog review with a rolling seven-day view. Verified listings are eligible for the existing Perpetual or Spot loaders; exact website inclusion is confirmed by venue instrument, while ambiguous identities remain Review required.</p>
+        </div>
+        <div class="listing-monitor-asof" id="listingMonitorAsOf">Daily check<br>not loaded</div>
+      </div>
+      <div class="listing-monitor-summary" id="listingMonitorSummary" aria-live="polite"></div>
+      <div class="listing-monitor-banner warming" id="listingMonitorStatus">Open Signal Radar to load the latest daily listing review.</div>
+      <div class="radar-toolbar">
+        <select class="radar-control" id="listingWindowFilter" aria-label="Listing review window" onchange="setListingMonitorFilter('window',this.value)">
+          <option value="7">Rolling 7 days</option>
+          <option value="30">Rolling 30 days</option>
+        </select>
+        <select class="radar-control" id="listingMarketFilter" aria-label="Filter listing market" onchange="setListingMonitorFilter('market',this.value)">
+          <option value="all">All markets</option>
+          <option value="perp">Perpetuals</option>
+          <option value="spot">Spot</option>
+        </select>
+        <select class="radar-control" id="listingVenueFilter" aria-label="Filter listing venue" onchange="setListingMonitorFilter('venue',this.value)">
+          <option value="all">All venues</option>
+          <option value="tradexyz">trade.xyz</option>
+          <option value="bitget">Bitget</option>
+          <option value="gate">Gate.io</option>
+          <option value="kraken">Kraken</option>
+          <option value="binance">Binance</option>
+          <option value="okx">OKX</option>
+        </select>
+        <select class="radar-control" id="listingStatusFilter" aria-label="Filter listing status" onchange="setListingMonitorFilter('status',this.value)">
+          <option value="all">All listing statuses</option>
+          <option value="new">New listing</option>
+          <option value="relisted">Re-listed</option>
+          <option value="review-required">Review required</option>
+          <option value="included">Included</option>
+        </select>
+        <input class="radar-control radar-search" id="listingSearch" type="search" placeholder="Search new listings..." aria-label="Search new listings" oninput="setListingMonitorSearch(this.value)">
+        <span class="radar-result-count" id="listingResultCount"></span>
+      </div>
+      <div id="listingMonitorRegion"><div class="listing-empty">Open Signal Radar to load the latest daily listing review.</div></div>
+      <div class="radar-more-wrap" id="listingMoreWrap" style="display:none">
+        <button type="button" class="radar-more" id="listingMore" onclick="showMoreListingEvents()">More</button>
+      </div>
+    </section>
+
     <section class="section-card" aria-label="RWA signal rankings">
       <div class="radar-toolbar">
         <select class="radar-control" id="radarSeverityFilter" aria-label="Filter by severity" onchange="setRadarFilter('severity',this.value)">
@@ -2362,6 +2438,8 @@ function securityListingForSymbol(symbol) {
   return { canonical, ...SECURITY_LISTING_REGISTRY[canonical] };
 }
 
+let OFFICIAL_US_ETF_SYMBOLS = new Set();
+
 function securityCategoryForUnderlying(symbol, fallback = 'equity') {
   const raw = String(symbol || '').trim().toUpperCase();
   const fallbackCategory = String(fallback || '').trim().toLowerCase();
@@ -2370,7 +2448,8 @@ function securityCategoryForUnderlying(symbol, fallback = 'equity') {
   if (fallbackCategory && !['equity','pre-ipo'].includes(fallbackCategory)) return fallbackCategory;
   const listing = securityListingForSymbol(raw);
   if (listing) return listing.category;
-  if (ETF_SYMBOLS.has(raw) || ETF_SYMBOLS.has(EQUITY_SYMBOL_ALIASES[raw])) return 'etf';
+  if (ETF_SYMBOLS.has(raw) || ETF_SYMBOLS.has(EQUITY_SYMBOL_ALIASES[raw]) ||
+      OFFICIAL_US_ETF_SYMBOLS.has(raw) || OFFICIAL_US_ETF_SYMBOLS.has(EQUITY_SYMBOL_ALIASES[raw])) return 'etf';
   return fallbackCategory;
 }
 
@@ -2771,7 +2850,7 @@ const SYMBOL_MARKET_TAGS = {
 };
 
 const US_MARKET_DIRECTORY = {
-  symbols:new Set(), adrs:new Set(), status:'loading', asOf:null, error:'', promise:null,
+  symbols:new Set(), etfs:new Set(), adrs:new Set(), status:'loading', asOf:null, error:'', promise:null,
   failures:0, retryAt:0, loadedAt:0, validUntilMs:0, expiryTimer:null,
 };
 const US_MARKET_DIRECTORY_REFRESH_MS = 60 * 60 * 1000;
@@ -2780,10 +2859,13 @@ const US_MARKET_DIRECTORY_MAX_FUTURE_SKEW_MS = 15 * 60 * 1000;
 
 function validateUsMarketDirectoryClientPayload(payload, now = Date.now()) {
   const rawSymbols = Array.isArray(payload?.symbols) ? payload.symbols : [];
+  const rawEtfs = Array.isArray(payload?.etfs) ? payload.etfs : [];
   const rawAdrs = Array.isArray(payload?.adrs) ? payload.adrs : [];
   const symbols = rawSymbols.map(value => String(value || '').trim().toUpperCase());
+  const etfs = rawEtfs.map(value => String(value || '').trim().toUpperCase());
   const adrs = rawAdrs.map(value => String(value || '').trim().toUpperCase());
   const symbolSet = new Set(symbols);
+  const etfSet = new Set(etfs);
   const adrSet = new Set(adrs);
   const sourceCounts = payload?.coverage?.sourceCounts || {};
   const sourceEpochs = payload?.freshness?.sourceEpochs || {};
@@ -2798,22 +2880,26 @@ function validateUsMarketDirectoryClientPayload(payload, now = Date.now()) {
     payload?.asOf === payload?.sourceAsOf?.[sourceTimes[0] <= sourceTimes[1] ? 'nasdaqListed' : 'otherListed'];
   const required = ['AAPL','QQQ','BABA','TSM'];
   const valid = payload?.schemaVersion === 1 && payload?.status === 'full' && symbols.length >= 8000 &&
-    symbolSet.size === symbols.length && adrSet.size === adrs.length &&
+    symbolSet.size === symbols.length && etfSet.size === etfs.length && adrSet.size === adrs.length &&
     rawSymbols.every((value, index) => value === symbols[index]) &&
+    rawEtfs.every((value, index) => value === etfs[index]) &&
     rawAdrs.every((value, index) => value === adrs[index]) &&
     symbols.every(symbol => /^[A-Z][A-Z0-9.-]{0,13}$/.test(symbol)) &&
     adrs.every(symbol => /^[A-Z][A-Z0-9.-]{0,13}$/.test(symbol)) &&
     symbols.every((symbol, index) => index === 0 || symbols[index - 1].localeCompare(symbol) <= 0) &&
+    etfs.every((symbol, index) => index === 0 || etfs[index - 1].localeCompare(symbol) <= 0) &&
     adrs.every((symbol, index) => index === 0 || adrs[index - 1].localeCompare(symbol) <= 0) &&
     Number(payload?.coverage?.listedSecurityCount) === symbols.length &&
+    Number(payload?.coverage?.etfCount) === etfs.length &&
     Number(payload?.coverage?.adrCount) === adrs.length &&
     Number(sourceCounts.nasdaqListed) >= 3000 && Number(sourceCounts.otherListed) >= 3000 &&
     Number(sourceCounts.nasdaqListed) + Number(sourceCounts.otherListed) >= symbols.length &&
     sourceProjectionValid && newestSourceMs <= now + US_MARKET_DIRECTORY_MAX_FUTURE_SKEW_MS && now <= validUntilMs &&
     Number.isFinite(generatedAtMs) && generatedAtMs <= now + US_MARKET_DIRECTORY_MAX_FUTURE_SKEW_MS &&
-    required.every(symbol => symbolSet.has(symbol)) && adrSet.has('BABA') &&
+    required.every(symbol => symbolSet.has(symbol)) && etfSet.has('QQQ') && adrSet.has('BABA') &&
+    etfs.every(symbol => symbolSet.has(symbol)) &&
     adrs.every(symbol => symbolSet.has(symbol));
-  return { valid, symbolSet, adrSet, validUntilMs };
+  return { valid, symbolSet, etfSet, adrSet, validUntilMs };
 }
 
 function _usListingSymbolCandidates(symbol) {
@@ -2830,6 +2916,8 @@ function expireUsMarketDirectoryIfNeeded(now = Date.now()) {
   if (US_MARKET_DIRECTORY.expiryTimer) clearTimeout(US_MARKET_DIRECTORY.expiryTimer);
   US_MARKET_DIRECTORY.expiryTimer = null;
   US_MARKET_DIRECTORY.symbols = new Set();
+  US_MARKET_DIRECTORY.etfs = new Set();
+  OFFICIAL_US_ETF_SYMBOLS = new Set();
   US_MARKET_DIRECTORY.adrs = new Set();
   US_MARKET_DIRECTORY.loadedAt = 0;
   US_MARKET_DIRECTORY.validUntilMs = 0;
@@ -2934,6 +3022,8 @@ async function ensureUsMarketDirectory(force = false) {
       const validation = validateUsMarketDirectoryClientPayload(payload);
       if (!validation.valid) throw new Error('directory contract or freshness validation failed');
       US_MARKET_DIRECTORY.symbols = validation.symbolSet;
+      US_MARKET_DIRECTORY.etfs = validation.etfSet;
+      OFFICIAL_US_ETF_SYMBOLS = validation.etfSet;
       US_MARKET_DIRECTORY.adrs = validation.adrSet;
       US_MARKET_DIRECTORY.status = 'ready';
       US_MARKET_DIRECTORY.asOf = payload.asOf || payload.generatedAt || null;
@@ -2942,6 +3032,7 @@ async function ensureUsMarketDirectory(force = false) {
       US_MARKET_DIRECTORY.error = '';
       US_MARKET_DIRECTORY.failures = 0;
       US_MARKET_DIRECTORY.retryAt = 0;
+      reclassifySpotEtfsFromOfficialDirectory();
       scheduleUsMarketDirectoryExpiry();
     } catch (error) {
       // Keep a previously verified identity set usable during a transient
@@ -2951,6 +3042,8 @@ async function ensureUsMarketDirectory(force = false) {
         if (US_MARKET_DIRECTORY.expiryTimer) clearTimeout(US_MARKET_DIRECTORY.expiryTimer);
         US_MARKET_DIRECTORY.expiryTimer = null;
         US_MARKET_DIRECTORY.symbols = new Set();
+        US_MARKET_DIRECTORY.etfs = new Set();
+        OFFICIAL_US_ETF_SYMBOLS = new Set();
         US_MARKET_DIRECTORY.adrs = new Set();
         US_MARKET_DIRECTORY.loadedAt = 0;
         US_MARKET_DIRECTORY.validUntilMs = 0;
@@ -3397,7 +3490,10 @@ async function fetchTradeXyz() {
   if (useServerMarket) {
     try {
       const response = await fetch('/api/hyperliquid-market');
-      if (response.ok) serverMarket = await response.json();
+      if (response.ok) {
+        const candidate = await response.json();
+        if (/^dex:(?:xyz|tradexyz)$/i.test(String(candidate?.source || ''))) serverMarket = candidate;
+      }
     } catch { /* retain direct fallback */ }
   }
 
@@ -3413,7 +3509,8 @@ async function fetchTradeXyz() {
     body: JSON.stringify({ type: 'perpCategories' })
   }).then(res => res.ok ? res.json() : []).catch(() => []);
 
-  // Try dex param first, then fallback to all perps
+  // Only the dedicated DEX is admissible. The global universe can contain a
+  // same-ticker Crypto perpetual and must never be joined to xyz:* categories.
   let meta, ctxs, source;
   if (Array.isArray(serverMarket?.data) && serverMarket.data.length === 2 && Array.isArray(serverMarket.data[1])) {
     meta = serverMarket.data[0];
@@ -3440,22 +3537,7 @@ async function fetchTradeXyz() {
     } catch (e) { /* try next */ }
   }
 
-  if (!meta) {
-    // Fallback: all perps, filter by known names
-    const res = await fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'metaAndAssetCtxs' })
-    });
-    const data = await res.json();
-    if (!Array.isArray(data) || data.length !== 2 || !data[0] || !Array.isArray(data[1])) {
-      throw new Error('trade.xyz returned incomplete market context');
-    }
-    meta = data[0]; ctxs = data[1]; source = 'all_perps';
-    const fallbackUniverse = meta.universe || meta;
-    if (!Array.isArray(fallbackUniverse)) throw new Error('trade.xyz returned invalid market metadata');
-    logLoad(`trade.xyz: ${fallbackUniverse.length} total perps (filtering by known RWA)`);
-  }
+  if (!meta) throw new Error('Dedicated trade.xyz DEX market context unavailable');
 
   const universe = meta.universe || meta;
   if (!Array.isArray(universe) || !Array.isArray(ctxs)) throw new Error('trade.xyz market data unavailable');
@@ -3486,7 +3568,6 @@ async function fetchTradeXyz() {
     // U.S.-listed 2x ETF that happens to own the same ticker.
     const underlyingSymbol = venueCoin === 'SKHX' && cat === 'equity' ? 'SKHYNIX' : undefined;
 
-    if (source === 'all_perps' && !KNOWN_CATEGORIES[coin] && !TRADE_XYZ_COMMODITY_SYMBOLS.has(venueCoin) && !TRADE_XYZ_INDEX_SYMBOLS.has(venueCoin)) continue;
     if (EXCLUDED_SYMBOLS.has(venueCoin.toUpperCase()) || EXCLUDED_SYMBOLS.has(coin)) continue;
     const officialName = TRADE_XYZ_OFFICIAL_NAMES[venueCoin] || u.fullName || '';
     registerRwaAsset(coin, officialName, cat);
@@ -7916,9 +7997,352 @@ let signalSnapshotRetryAt = 0;
 let signalRefreshTimer = null;
 let radarExpanded = false;
 const radarFilter = { severity:'all', type:'all', category:'all', search:'', sort:'server' };
+const LISTING_AUDIT_SCHEMA_VERSION = 'rwa-listing-audit/v1';
+const LISTING_HISTORY_RETENTION_DAYS = 45;
+const LISTING_CHANGES_TTL = 5 * 60 * 1000;
+let listingChangesCache = null;
+let listingChangesPromise = null;
+let listingChangesLoading = false;
+let listingChangesError = '';
+let listingChangesFailures = 0;
+let listingChangesRetryAt = 0;
+let listingEventsExpanded = false;
+const listingMonitorFilter = { window:'7', market:'all', venue:'all', status:'all', search:'' };
 
 function radarPageIsActive() {
   return pageIsVisible() && document.querySelector('.top-tab[data-p="cross"]')?.classList.contains('active');
+}
+
+function listingNewEvents(payload = listingChangesCache?.payload) {
+  return (Array.isArray(payload?.events) ? payload.events : [])
+    .filter(event => ['new','relisted'].includes(String(event?.changeType || '').toLowerCase()));
+}
+
+function listingAuditEvents(payload = listingChangesCache?.payload) {
+  const rows = new Map();
+  // Server events are newest first. Keep the first event for an instrument so
+  // a recent Re-listed record cannot be overwritten by its older New record.
+  for (const event of listingNewEvents(payload)) {
+    const key = event.listingKey || `${event.market}:${event.venue}:${event.venueSymbol}`;
+    if (!rows.has(key)) rows.set(key, event);
+  }
+  for (const pending of Array.isArray(payload?.pendingReviews) ? payload.pendingReviews : []) {
+    const key = pending.listingKey || `${pending.market}:${pending.venue}:${pending.venueSymbol}`;
+    const previous = rows.get(key);
+    rows.set(key, {
+      ...(previous || pending),
+      ...pending,
+      changeType: previous?.changeType || 'review-required',
+      detectedAt: previous?.detectedAt || pending.firstSeenAt || pending.lastSeenAt,
+      activeReview:true,
+    });
+  }
+  return [...rows.values()];
+}
+
+function listingSnapshotFresh(payload, now = Date.now()) {
+  const generatedAt = Date.parse(payload?.generatedAt);
+  return Number.isFinite(generatedAt) && generatedAt <= now + 5 * 60 * 1000 && generatedAt >= now - 36 * 60 * 60 * 1000;
+}
+
+function listingHistoryContractValid(history) {
+  const nullableTimestamp = value => value === null ||
+    (typeof value === 'string' && Number.isFinite(Date.parse(value)));
+  const retentionDays = history?.retentionDays;
+  const maxEvents = history?.maxEvents;
+  const droppedAtLeast = history?.droppedAtLeast;
+  const droppedThrough = history?.droppedThrough ?? null;
+  const fieldsPresent = Boolean(history) &&
+    ['retentionDays','maxEvents','truncated','droppedAtLeast','droppedThrough','retainedFrom']
+      .every(key => Object.prototype.hasOwnProperty.call(history, key));
+  return fieldsPresent &&
+    Number.isInteger(retentionDays) && retentionDays === LISTING_HISTORY_RETENTION_DAYS &&
+    Number.isInteger(maxEvents) && maxEvents > 0 &&
+    typeof history.truncated === 'boolean' &&
+    Number.isInteger(droppedAtLeast) && droppedAtLeast >= 0 &&
+    nullableTimestamp(droppedThrough) && nullableTimestamp(history?.retainedFrom ?? null) &&
+    (!history.truncated
+      ? droppedAtLeast === 0 && droppedThrough === null
+      : droppedAtLeast > 0 && droppedThrough !== null);
+}
+
+function listingHistoryPartialText(payload) {
+  const history = payload?.history || {};
+  const retentionDays = Number(history.retentionDays) || LISTING_HISTORY_RETENTION_DAYS;
+  const maxEvents = Number(history.maxEvents) || 0;
+  const droppedAtLeast = Number(history.droppedAtLeast) || 0;
+  const omitted = droppedAtLeast === 1
+    ? '1 older event was omitted'
+    : `${droppedAtLeast.toLocaleString('en-US')} older events were omitted`;
+  let text = `Listing event history is Partial: the ${retentionDays}-day retention target exceeded the ${maxEvents.toLocaleString('en-US')}-event safety limit, so at least ${omitted}.`;
+  if (Number.isFinite(Date.parse(history.droppedThrough))) {
+    text += ` Omitted history runs through ${radarTimestamp(history.droppedThrough)}.`;
+  }
+  if (Number.isFinite(Date.parse(history.retainedFrom))) {
+    text += ` Retained history begins ${radarTimestamp(history.retainedFrom)}.`;
+  }
+  return `${text} Retained catalogs and active identity reviews remain available.`;
+}
+
+function listingEventWithinWindow(event, days = Number(listingMonitorFilter.window) || 7, now = Date.now()) {
+  if (event?.activeReview) return true;
+  const detectedAt = Date.parse(event?.detectedAt);
+  return Number.isFinite(detectedAt) && detectedAt >= now - days * 24 * 60 * 60 * 1000 && detectedAt <= now + 5 * 60 * 1000;
+}
+
+function listingEventWebsiteCoverage(event) {
+  if (event?.identityStatus !== 'verified') return 'review-required';
+  const venue = String(event?.venue || '').toLowerCase();
+  const venueSymbol = String(event?.venueSymbol || '').toUpperCase();
+  const assetKey = assetIntelligenceKey(event?.canonicalSymbol, event?.category);
+  if (!venue || !venueSymbol || !assetKey) return 'pending-refresh';
+  if (event?.market === 'perp') {
+    const rows = (allData || []).filter(asset => asset?.venue === venue);
+    const exact = rows.some(asset =>
+      String(asset?.venueSymbol || asset?.symbol || '').toUpperCase() === venueSymbol &&
+      assetIntelligencePerpIdentity(asset)?.assetKey === assetKey
+    );
+    return exact ? 'included' : 'pending-refresh';
+  }
+  const rows = Array.isArray(SPOT_DATA?.[venue]) ? SPOT_DATA[venue] : [];
+  const exact = rows.some(asset =>
+    String(asset?.venueSymbol || asset?.pair || '').toUpperCase() === venueSymbol &&
+    assetIntelligenceSpotIdentity(asset, venue)?.assetKey === assetKey
+  );
+  return exact ? 'included' : 'pending-refresh';
+}
+
+function listingEventInteractive(event, coverage) {
+  if (coverage !== 'included' || event?.identityStatus !== 'verified') return false;
+  const identity = assetIntelligenceIdentity({
+    canonical:event?.canonicalSymbol,
+    category:event?.category,
+    source:'competitor new listings',
+  });
+  return Boolean(identity && assetIntelligenceEvidence(identity).verified);
+}
+
+function filteredListingEvents(payload = listingChangesCache?.payload) {
+  const query = listingMonitorFilter.search.trim().toLowerCase();
+  return listingAuditEvents(payload)
+    .filter(event => listingEventWithinWindow(event))
+    .map(event => ({ event, websiteCoverage:listingEventWebsiteCoverage(event) }))
+    .filter(({ event, websiteCoverage }) => {
+      const marketMatch = listingMonitorFilter.market === 'all' || event.market === listingMonitorFilter.market;
+      const venueMatch = listingMonitorFilter.venue === 'all' || event.venue === listingMonitorFilter.venue;
+      const statusMatch = listingMonitorFilter.status === 'all' ||
+        event.changeType === listingMonitorFilter.status ||
+        (listingMonitorFilter.status === 'review-required' && event.identityStatus === 'review-required') ||
+        (listingMonitorFilter.status === 'included' && websiteCoverage === 'included');
+      const searchText = `${event.canonicalSymbol || ''} ${event.venueSymbol || ''} ${event.name || ''} ${event.category || ''} ${event.venue || ''}`.toLowerCase();
+      return marketMatch && venueMatch && statusMatch && (!query || searchText.includes(query));
+    })
+    .sort((left, right) => Date.parse(right.event.detectedAt) - Date.parse(left.event.detectedAt) ||
+      String(left.event.venueSymbol || '').localeCompare(String(right.event.venueSymbol || '')));
+}
+
+function listingMonitorStatusText(payload, weeklyEvents) {
+  if (listingChangesLoading && !payload) return 'Loading the latest daily official catalog review…';
+  if (listingChangesError && !payload) return `Listing review unavailable: ${listingChangesError}`;
+  if (!payload) {
+    return 'Baseline warming. The first complete catalog pass establishes the comparison baseline and does not label every existing asset as New.';
+  }
+  const unavailable = numberOrNull(payload?.coverage?.unavailableSources) || 0;
+  const hasGeneratedSnapshot = Number.isFinite(Date.parse(payload.generatedAt));
+  if (hasGeneratedSnapshot && !listingSnapshotFresh(payload)) {
+    let staleText = `Daily listing review stale. Last successful snapshot ${radarTimestamp(payload.generatedAt)}. No empty or Full conclusion is inferred.`;
+    if (payload?.history?.truncated === true) {
+      staleText += ` ${listingHistoryPartialText(payload)}`;
+      if (unavailable > 0) {
+        staleText += ` ${unavailable} official catalog source${unavailable === 1 ? ' is' : 's are'} also unavailable.`;
+      }
+      if (listingChangesError) staleText += ` Latest refresh also failed: ${listingChangesError}.`;
+    }
+    return staleText;
+  }
+  if (payload?.history?.truncated === true) {
+    let historyText = listingHistoryPartialText(payload);
+    if (unavailable > 0) {
+      historyText += ` ${unavailable} official catalog source${unavailable === 1 ? ' is' : 's are'} also unavailable.`;
+    }
+    if (listingChangesError) historyText += ` Latest refresh also failed: ${listingChangesError}.`;
+    return historyText;
+  }
+  if (payload.status === 'warming') {
+    return 'Baseline warming. The first complete catalog pass establishes the comparison baseline and does not label every existing asset as New.';
+  }
+  if (listingChangesError || unavailable > 0 || payload.status === 'partial') {
+    return `Partial daily review · ${unavailable} source${unavailable === 1 ? '' : 's'} unavailable. Last-good catalogs are retained; no synthetic delistings are created.`;
+  }
+  const pendingReviews = Array.isArray(payload?.pendingReviews) ? payload.pendingReviews.length : 0;
+  if (weeklyEvents.length) {
+    const base = `${weeklyEvents.length} new or re-listed venue asset${weeklyEvents.length === 1 ? '' : 's'} detected in the rolling ${listingMonitorFilter.window}-day window.`;
+    return pendingReviews ? `${base} ${pendingReviews} active identity review${pendingReviews === 1 ? '' : 's'} remain visible until resolved.` : base;
+  }
+  const base = `No new competitor listings detected in the rolling ${listingMonitorFilter.window}-day window.`;
+  return pendingReviews ? `${base} ${pendingReviews} active identity review${pendingReviews === 1 ? '' : 's'} remain visible until resolved.` : base;
+}
+
+function renderCompetitorListings() {
+  const payload = listingChangesCache?.payload || null;
+  const weeklyEvents = listingNewEvents(payload).filter(event => listingEventWithinWindow(event));
+  const filtered = filteredListingEvents(payload);
+  const visible = filtered.slice(0, listingEventsExpanded ? 100 : 20);
+  const summary = document.getElementById('listingMonitorSummary');
+  const status = document.getElementById('listingMonitorStatus');
+  const asOf = document.getElementById('listingMonitorAsOf');
+  const region = document.getElementById('listingMonitorRegion');
+  const count = document.getElementById('listingResultCount');
+  const moreWrap = document.getElementById('listingMoreWrap');
+  const more = document.getElementById('listingMore');
+  if (!summary || !status || !asOf || !region || !count || !moreWrap || !more) return;
+
+  const newCount = weeklyEvents.filter(event => event.changeType === 'new').length;
+  const perpCount = weeklyEvents.filter(event => event.market === 'perp').length;
+  const spotCount = weeklyEvents.filter(event => event.market === 'spot').length;
+  const reviewCount = Array.isArray(payload?.pendingReviews) ? payload.pendingReviews.length : 0;
+  const historyTruncated = payload?.history?.truncated === true;
+  summary.innerHTML = [
+    ['New this window', historyTruncated ? `≥${newCount}` : newCount, historyTruncated ? `retained history only · rolling ${listingMonitorFilter.window} days` : `rolling ${listingMonitorFilter.window} days`],
+    ['Perpetuals', historyTruncated ? `≥${perpCount}` : perpCount, historyTruncated ? 'retained history only' : 'official contract catalogs'],
+    ['Spot', historyTruncated ? `≥${spotCount}` : spotCount, historyTruncated ? 'retained history only' : 'official spot catalogs'],
+    ['Review required', reviewCount, 'not auto-admitted'],
+  ].map(([label,value,detail]) => `<div class="listing-summary-item"><div class="listing-summary-label">${label}</div><div class="listing-summary-value">${payload ? value : '—'}</div><div class="listing-summary-sub">${detail}</div></div>`).join('');
+  const generatedAt = payload?.generatedAt;
+  asOf.innerHTML = `Daily check<br>${generatedAt ? escapeHtml(radarTimestamp(generatedAt)) : 'not loaded'}`;
+  // A never-initialized baseline has no generatedAt by design. It is Warming,
+  // not stale; only a previously generated snapshot can age into Stale.
+  const snapshotStale = Boolean(
+    payload && Number.isFinite(Date.parse(payload.generatedAt)) && !listingSnapshotFresh(payload)
+  );
+  const statusClass = (listingChangesError && !payload) || snapshotStale
+    ? 'unavailable'
+    : String(payload?.status || 'warming').toLowerCase();
+  status.className = `listing-monitor-banner ${['full','partial','unavailable','warming'].includes(statusClass) ? statusClass : 'partial'}`;
+  status.textContent = listingMonitorStatusText(payload, weeklyEvents);
+  count.textContent = historyTruncated
+    ? `${visible.length} of ≥${filtered.length} retained`
+    : `${visible.length} of ${filtered.length}`;
+
+  if (!visible.length) {
+    const title = listingChangesError && !payload
+      ? 'Daily listing review unavailable'
+      : snapshotStale
+        ? 'Daily listing review stale'
+        : historyTruncated
+          ? 'Listing history partial'
+          : !payload || payload.status === 'warming' ? 'Listing baseline warming' : 'No matching new listings';
+    const detail = listingChangesError && !payload
+      ? `${listingChangesError}. The existing Perpetual and Spot datasets are unaffected.`
+      : snapshotStale
+        ? 'The last successful snapshot remains visible for diagnosis, but it cannot support an empty or Full conclusion.'
+        : historyTruncated
+          ? 'The retained event history reached its safety limit. No matching retained rows is not proof that the selected window contained no events.'
+          : !payload || payload.status === 'warming'
+            ? 'The first successful daily pass initializes all venue baselines without generating false New events.'
+            : `No verified or review-required additions match these filters in the rolling ${listingMonitorFilter.window}-day window.`;
+    region.innerHTML = `<div class="listing-empty"><strong>${escapeHtml(title)}</strong><br>${escapeHtml(detail)}</div>`;
+    moreWrap.style.display = 'none';
+    return;
+  }
+
+  const rows = visible.map(({ event, websiteCoverage }) => {
+    const interactive = listingEventInteractive(event, websiteCoverage);
+    const attrs = interactive
+      ? assetIntelligenceTriggerAttrs(event.canonicalSymbol, event.category, 'competitor new listings')
+      : '';
+    const venueName = VENUES[event.venue]?.name || SPOT_VENUE_NAMES?.[event.venue] || event.venue;
+    const marketLabel = event.market === 'perp' ? 'Perpetual' : 'Spot';
+    const changeLabel = event.changeType === 'relisted'
+      ? 'Re-listed'
+      : event.changeType === 'review-required' ? 'Review required' : 'New listing';
+    const identityLabel = event.identityStatus === 'verified' ? 'Verified' : 'Review required';
+    const coverageLabel = websiteCoverage === 'included'
+      ? 'Included'
+      : websiteCoverage === 'review-required' ? 'Review required' : 'Pending refresh';
+    return `<tr class="listing-row" ${attrs}>
+      <td>${escapeHtml(radarTimestamp(event.detectedAt))}</td>
+      <td><div class="listing-symbol" data-i18n-skip>${escapeHtml(event.canonicalSymbol)}</div>${event.name ? `<div class="listing-instrument" data-i18n-skip>${escapeHtml(event.name)}</div>` : ''}</td>
+      <td>${escapeHtml(marketLabel)}</td>
+      <td><strong>${escapeHtml(venueName)}</strong><div class="listing-instrument" data-i18n-skip>${escapeHtml(event.venueSymbol)}</div></td>
+      <td>${escapeHtml(String(event.category || '').replace(/^./, letter => letter.toUpperCase()))}</td>
+      <td><span class="listing-badge ${escapeHtml(event.changeType)}">${escapeHtml(changeLabel)}</span></td>
+      <td><span class="listing-badge ${escapeHtml(event.identityStatus)}">${escapeHtml(identityLabel)}</span></td>
+      <td><span class="listing-badge ${escapeHtml(websiteCoverage)}">${escapeHtml(coverageLabel)}</span></td>
+      <td class="listing-evidence">${escapeHtml(event.identityEvidence || 'Official venue catalog')}</td>
+    </tr>`;
+  }).join('');
+  region.innerHTML = `<div class="listing-table-wrap"><table class="listing-table"><thead><tr><th>First observed</th><th>Asset</th><th>Market</th><th>Venue instrument</th><th>Category</th><th>Change</th><th>Identity</th><th>Website coverage</th><th>Official evidence</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  moreWrap.style.display = filtered.length > 20 ? 'block' : 'none';
+  more.setAttribute('aria-expanded', String(listingEventsExpanded));
+  more.setAttribute('aria-controls', 'listingMonitorRegion');
+  more.textContent = listingEventsExpanded ? `Less · ${visible.length} / ${filtered.length}` : `More · ${visible.length} / ${Math.min(filtered.length,100)}`;
+}
+
+async function loadListingChanges(force = false) {
+  if (!radarPageIsActive()) return listingChangesCache?.payload || null;
+  if (listingChangesPromise) return listingChangesPromise;
+  const now = Date.now();
+  const fresh = listingChangesCache && now - listingChangesCache.receivedAt < LISTING_CHANGES_TTL;
+  if (!force && fresh) return listingChangesCache.payload;
+  if (!force && now < listingChangesRetryAt) return listingChangesCache?.payload || null;
+  const task = (async () => {
+    listingChangesLoading = true;
+    listingChangesError = '';
+    renderCompetitorListings();
+    try {
+      const response = await fetch('/api/listing-changes', { method:'GET' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      if (payload?.schemaVersion !== LISTING_AUDIT_SCHEMA_VERSION || !Array.isArray(payload?.events) ||
+          !Array.isArray(payload?.sources) || !Array.isArray(payload?.pendingReviews) ||
+          !listingHistoryContractValid(payload?.history) || payload.events.length > Number(payload.history.maxEvents) ||
+          (payload.history.truncated && payload.status === 'full')) {
+        throw new Error('Invalid listing audit snapshot');
+      }
+      listingChangesCache = { receivedAt:Date.now(), payload };
+      listingChangesFailures = 0;
+      listingChangesRetryAt = 0;
+      return payload;
+    } catch (error) {
+      listingChangesFailures += 1;
+      listingChangesRetryAt = Date.now() + Math.min(SIGNAL_RETRY_MAX, SIGNAL_RETRY_BASE * (2 ** Math.min(listingChangesFailures - 1, 2)));
+      listingChangesError = error?.message || 'Daily listing review unavailable';
+      console.error('[Listing Monitor] snapshot load failed:', error);
+      return listingChangesCache?.payload || null;
+    } finally {
+      listingChangesLoading = false;
+      listingChangesPromise = null;
+      renderCompetitorListings();
+      renderSignalRadar();
+    }
+  })();
+  listingChangesPromise = task;
+  return task;
+}
+
+function ensureListingChanges(force = false) {
+  return loadListingChanges(force);
+}
+
+function setListingMonitorFilter(key, value) {
+  if (key === 'window') listingMonitorFilter.window = ['7','30'].includes(String(value)) ? String(value) : '7';
+  else if (key === 'market') listingMonitorFilter.market = ['all','perp','spot'].includes(value) ? value : 'all';
+  else if (key === 'venue') listingMonitorFilter.venue = ['all','tradexyz','bitget','gate','kraken','binance','okx'].includes(value) ? value : 'all';
+  else if (key === 'status') listingMonitorFilter.status = ['all','new','relisted','review-required','included'].includes(value) ? value : 'all';
+  listingEventsExpanded = false;
+  renderCompetitorListings();
+}
+
+function setListingMonitorSearch(value) {
+  listingMonitorFilter.search = String(value || '');
+  listingEventsExpanded = false;
+  renderCompetitorListings();
+}
+
+function showMoreListingEvents() {
+  listingEventsExpanded = !listingEventsExpanded;
+  renderCompetitorListings();
 }
 
 function signalSnapshotRows(payload = signalSnapshotCache?.payload) {
@@ -8250,13 +8674,14 @@ function renderSignalRadar() {
   const indexedRows = signalSnapshotRows(payload);
   const refreshButton = document.getElementById('radarRefresh');
   if (refreshButton) {
-    refreshButton.disabled = signalSnapshotLoading;
-    refreshButton.textContent = signalSnapshotLoading ? 'Refreshing…' : 'Refresh snapshot';
+    refreshButton.disabled = signalSnapshotLoading || listingChangesLoading;
+    refreshButton.textContent = signalSnapshotLoading || listingChangesLoading ? 'Refreshing…' : 'Refresh snapshot';
   }
   if (payload) updateRadarFilterOptions(indexedRows);
   renderRadarStatus(payload, indexedRows);
   renderRadarMeta(payload, indexedRows);
   renderRadarKpis(payload, indexedRows);
+  renderCompetitorListings();
   renderRadarTable(payload, indexedRows);
 }
 
@@ -8305,7 +8730,11 @@ function ensureSignalSnapshot(force = false) {
 function refreshSignalRadar() {
   if (!radarPageIsActive()) return;
   signalSnapshotRetryAt = 0;
-  ensureSignalSnapshot(true).catch(error => console.error('[Signal Radar] manual refresh failed:', error));
+  listingChangesRetryAt = 0;
+  Promise.allSettled([
+    ensureSignalSnapshot(true),
+    ensureListingChanges(true),
+  ]);
 }
 
 function setRadarFilter(key, value) {
@@ -8351,7 +8780,10 @@ function switchTopPage(page) {
     ensureTraditionalActivity(false).catch(error => console.error('[TradFi] page load failed:', error));
   } else if (page === 'cross') {
     renderSignalRadar();
-    ensureSignalSnapshot(false).catch(error => console.error('[Signal Radar] page load failed:', error));
+    Promise.allSettled([
+      ensureSignalSnapshot(false),
+      ensureListingChanges(false),
+    ]);
   } else if (page === 'spot') {
     renderVisibleDataPage();
     scheduleSpotReferenceEnrichment();
@@ -8952,7 +9384,7 @@ async function fetchSpotRwaKraken(generation = spotRefreshGeneration) {
         const open = firstNumber(t.o, last);
         const vol24 = numberOrNull(t.v?.[1]);
         assets.push({
-          coin: base, pair: pairKey,
+          coin: base, pair: pairKey, venueSymbol:pairKey,
           last,
           chg: open > 0 && last !== null ? ((last - open) / open * 100) : null,
           vol: vol24 !== null && last !== null ? vol24 * last : null,
@@ -9007,14 +9439,16 @@ async function _fetchKrakenXStocks() {
   const seen = new Set();
   const xPairs = [];
   for (const [pairName, info] of Object.entries(allPairs)) {
+    if (String(info.aclass_base || '').toLowerCase() !== 'tokenized_asset') continue;
+    if (String(info.status || '').toLowerCase() !== 'online') continue;
     const quote = (info.quote || '').replace(/^[XZ]/, '');
     if (quote !== 'USD' && quote !== 'USDT') continue;
     const base = (info.base || '');
-    if (seen.has(base)) continue;
-    seen.add(base);
     // Kraken's tokenized_asset class also contains non-equity RWAs such as
     // PAXG. Only the explicit trailing-x wrappers are xStocks.
     if (!/x$/i.test(base)) continue;
+    if (seen.has(base)) continue;
+    seen.add(base);
     // Extract underlying: "AAPLx" → "AAPL", "GOOGLx" → "GOOGL"
     const underlying = base.replace(/x$/i, '').toUpperCase();
     if (!underlying || underlying.length < 1) continue;
@@ -9047,10 +9481,10 @@ async function _fetchKrakenXStocks() {
         const open = firstNumber(t.o, last);
         const vol24 = numberOrNull(t.v?.[1]);
         const tokenCoin = `${pairInfo.underlying}X`;
-        const category = ETF_SYMBOLS.has(pairInfo.underlying) ? 'etf' : 'equity';
+        const category = securityCategoryForUnderlying(pairInfo.underlying, 'equity');
         registerSpotAssetMeta(tokenCoin, pairInfo.underlying, 'xStocks', category, 'kraken');
         assets.push({
-          coin: tokenCoin, pair: pairKey, underlyingSymbol: pairInfo.underlying,
+          coin: tokenCoin, pair: pairInfo.altname, venueSymbol:pairInfo.altname, underlyingSymbol: pairInfo.underlying,
           last,
           chg: open > 0 && last !== null ? ((last - open) / open * 100) : null,
           vol: vol24 !== null && last !== null ? vol24 * last : null,
@@ -9070,10 +9504,10 @@ async function _fetchKrakenXStocks() {
   xPairs.forEach(pairInfo => {
     const tokenCoin = `${pairInfo.underlying}X`;
     if (discoveredTokens.has(tokenCoin)) return;
-    const category = ETF_SYMBOLS.has(pairInfo.underlying) ? 'etf' : 'equity';
+    const category = securityCategoryForUnderlying(pairInfo.underlying, 'equity');
     registerSpotAssetMeta(tokenCoin, pairInfo.underlying, 'xStocks', category, 'kraken');
     assets.push({
-      coin: tokenCoin, pair: pairInfo.pairName, underlyingSymbol: pairInfo.underlying,
+      coin: tokenCoin, pair: pairInfo.altname, venueSymbol:pairInfo.altname, underlyingSymbol: pairInfo.underlying,
       last:null, chg:null, vol:null, hi:null, lo:null, bid:null, ask:null,
       xstock:true, isListed:true, isActive:String(pairInfo.status).toLowerCase() === 'online', isPriced:false,
       fieldStatus:{ last:'unavailable', change:'unavailable', volume:'unavailable', highLow:'unavailable', bidAsk:'unavailable', depth2:'unavailable' },
@@ -9764,6 +10198,19 @@ function registerSpotAssetMeta(token, underlyingSymbol, issuer, category, venue 
   };
   registerRwaAsset(underlying, '', resolvedCategory);
   return true;
+}
+
+function reclassifySpotEtfsFromOfficialDirectory() {
+  if (!OFFICIAL_US_ETF_SYMBOLS.size || typeof ASSET_META === 'undefined') return;
+  for (const [token, meta] of Object.entries(ASSET_META)) {
+    if (meta?.category !== 'equity') continue;
+    const underlying = String(meta.underlyingSymbol || _arbUnderlyingKey(token) || '').toUpperCase();
+    const candidates = _usListingSymbolCandidates(underlying);
+    if (!candidates.some(symbol => OFFICIAL_US_ETF_SYMBOLS.has(symbol))) continue;
+    meta.category = 'etf';
+    meta.underlyingSymbol = canonicalSymbolForCategory(underlying, 'etf');
+    registerRwaAsset(meta.underlyingSymbol, '', 'etf');
+  }
 }
 
 // Resolve a tokenized spot wrapper only through venue-validated metadata.
@@ -10763,7 +11210,10 @@ async function resumeVisibleRefreshes() {
   ensureUsMarketDirectory().catch(error => console.error('[US market directory] retry failed:', error));
   const activePage = activeTopPage();
   if (activePage === 'cross') {
-    await ensureSignalSnapshot(false);
+    await Promise.allSettled([
+      ensureSignalSnapshot(false),
+      ensureListingChanges(false),
+    ]);
     return;
   }
   const now = Date.now();
@@ -10825,7 +11275,12 @@ function startPolling() {
     }
   }, SPOT_REFRESH_INTERVAL);
   signalRefreshTimer = setInterval(() => {
-    if (radarPageIsActive()) ensureSignalSnapshot(false).catch(error => console.error('[Signal Radar] scheduled refresh failed:', error));
+    if (radarPageIsActive()) {
+      Promise.allSettled([
+        ensureSignalSnapshot(false),
+        ensureListingChanges(false),
+      ]);
+    }
   }, SIGNAL_SNAPSHOT_TTL);
 }
 

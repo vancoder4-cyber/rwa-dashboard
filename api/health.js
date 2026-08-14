@@ -1,5 +1,11 @@
 import { assessChecks, checkResult, PRODUCTION_BASELINES } from './_lib/health.js';
 import {
+  LISTING_AUDIT_SCHEMA_VERSION,
+  LISTING_EVENT_MAX,
+  LISTING_EVENT_RETENTION_DAYS,
+  LISTING_SOURCE_KEYS,
+} from './_lib/listing-audit.js';
+import {
   OKX_SPOT_GOLD_EXCEPTIONS,
   canonicalOkxPerpSymbol,
   canonicalOkxSpotSymbol,
@@ -19,8 +25,11 @@ const FUNDING_PROBES = Object.freeze({
   binance: 'AAPLUSDT',
   okx: 'AAPL-USDT-SWAP',
 });
-const OKX_EXPECTED_PERP_SPLIT = Object.freeze({ swap: 149, xperp: 34 });
-const OKX_EXPECTED_SPOT_SPLIT = Object.freeze({ uts: 48, gold: 3 });
+// These are reviewed lower bounds, not permanent exact allowlists. Official
+// category/type metadata remains the identity gate, while the listing audit
+// reports legitimate catalog growth independently.
+const OKX_REVIEWED_PERP_MINIMUMS = Object.freeze({ total: 183, swap: 149, xperp: 34 });
+const OKX_REVIEWED_SPOT_MINIMUMS = Object.freeze({ total: 51, uts: 48, gold: 3 });
 
 function deploymentBaseUrl(req) {
   const forwarded = String(req.headers?.['x-forwarded-host'] || req.headers?.host || '').toLowerCase();
@@ -94,6 +103,127 @@ export async function probeUsMarketDirectory(baseUrl) {
       latencyMs:Date.now() - startedAt,
       reason:error.message,
     }, { critical:true });
+  }
+}
+
+export function validateListingAuditSnapshot(payload, now = Date.now()) {
+  const generatedAtMs = Date.parse(payload?.generatedAt);
+  const ageHours = Number.isFinite(generatedAtMs) ? (now - generatedAtMs) / 3_600_000 : null;
+  const expectedSources = Number(payload?.coverage?.expectedSources);
+  const availableSources = Number(payload?.coverage?.availableSources);
+  const unavailableSources = Number(payload?.coverage?.unavailableSources);
+  const sourceKeys = Array.isArray(payload?.sources)
+    ? payload.sources.map(source => String(source?.sourceKey || ''))
+    : [];
+  const exactSourceKeys = sourceKeys.length === LISTING_SOURCE_KEYS.length &&
+    new Set(sourceKeys).size === LISTING_SOURCE_KEYS.length &&
+    LISTING_SOURCE_KEYS.every(sourceKey => sourceKeys.includes(sourceKey));
+  const availableSourceTimestampsFresh = Array.isArray(payload?.sources) && payload.sources.every(source => {
+    if (source?.status === 'unavailable') return true;
+    const observedAt = Date.parse(source?.observedAt);
+    const sourceAgeHours = Number.isFinite(observedAt) ? (now - observedAt) / 3_600_000 : null;
+    return sourceAgeHours !== null && sourceAgeHours >= -0.1 && sourceAgeHours <= 36;
+  });
+
+  const history = payload?.history;
+  const historyRetentionDays = history?.retentionDays;
+  const historyMaxEvents = history?.maxEvents;
+  const historyDroppedAtLeast = history?.droppedAtLeast;
+  const historyDroppedThrough = history?.droppedThrough ?? null;
+  const historyRetainedFrom = history?.retainedFrom ?? null;
+  const historyTruncated = history?.truncated === true;
+  const historyFieldsPresent = Boolean(history) &&
+    ['retentionDays', 'maxEvents', 'truncated', 'droppedAtLeast', 'droppedThrough', 'retainedFrom']
+      .every(key => Object.prototype.hasOwnProperty.call(history, key));
+  const historyStatusCoherent = !historyTruncated || payload?.status !== 'full';
+  const validNullableTimestamp = value => value === null ||
+    (typeof value === 'string' && Number.isFinite(Date.parse(value)));
+  const historyContractValid = historyFieldsPresent && historyStatusCoherent &&
+    Number.isInteger(historyRetentionDays) && historyRetentionDays === LISTING_EVENT_RETENTION_DAYS &&
+    Number.isInteger(historyMaxEvents) && historyMaxEvents === LISTING_EVENT_MAX &&
+    typeof history.truncated === 'boolean' &&
+    Number.isInteger(historyDroppedAtLeast) && historyDroppedAtLeast >= 0 &&
+    validNullableTimestamp(historyDroppedThrough) && validNullableTimestamp(historyRetainedFrom) &&
+    (!historyTruncated
+      ? historyDroppedAtLeast === 0 && historyDroppedThrough === null
+      : historyDroppedAtLeast > 0 && historyDroppedThrough !== null) &&
+    (!Array.isArray(payload?.events) || payload.events.length <= historyMaxEvents);
+  const contractValid = payload?.schemaVersion === LISTING_AUDIT_SCHEMA_VERSION &&
+    Array.isArray(payload?.sources) && Array.isArray(payload?.events) && Array.isArray(payload?.pendingReviews) &&
+    expectedSources === LISTING_SOURCE_KEYS.length && exactSourceKeys && historyContractValid;
+  const fresh = ageHours !== null && ageHours >= -0.1 && ageHours <= 36;
+  const complete = contractValid && fresh && availableSourceTimestampsFresh && !historyTruncated &&
+    availableSources === LISTING_SOURCE_KEYS.length && unavailableSources === 0;
+  const status = !contractValid || !fresh || !availableSourceTimestampsFresh
+    ? 'fail'
+    : historyTruncated ? 'fail'
+      : complete && payload.status === 'full' ? 'pass'
+        : availableSources > 0 ? 'warn' : 'fail';
+  return {
+    status,
+    contractValid,
+    fresh,
+    complete,
+    ageHours,
+    expectedSources,
+    availableSources,
+    unavailableSources,
+    exactSourceKeys,
+    availableSourceTimestampsFresh,
+    historyContractValid,
+    historyTruncated,
+    historyStatusCoherent,
+    historyRetentionDays,
+    historyMaxEvents,
+    historyDroppedAtLeast,
+    historyDroppedThrough,
+    historyRetainedFrom,
+    reason: status === 'pass'
+      ? null
+      : !contractValid ? 'Listing audit response or history contract is invalid'
+        : !fresh || !availableSourceTimestampsFresh ? 'No successful listing audit snapshot within 36 hours'
+          : historyTruncated ? 'Listing audit event history exceeded its safety limit and is truncated'
+            : 'Listing audit is warming or one or more venue catalogs are unavailable',
+  };
+}
+
+async function probeListingAudit(baseUrl) {
+  const startedAt = Date.now();
+  try {
+    const payload = await fetchJsonWithPolicy(
+      `${baseUrl}/api/listing-changes`,
+      {},
+      { timeoutMs: 8_000, retries: 0 },
+    );
+    const validation = validateListingAuditSnapshot(payload);
+    return checkResult('daily-listing-audit', validation.status, {
+      latencyMs: Date.now() - startedAt,
+      snapshotStatus: payload?.status || 'unavailable',
+      generatedAt: payload?.generatedAt || null,
+      ageHours: validation.ageHours === null ? null : Number(validation.ageHours.toFixed(2)),
+      expectedSources: validation.expectedSources,
+      availableSources: validation.availableSources,
+      unavailableSources: validation.unavailableSources,
+      exactSourceKeys: validation.exactSourceKeys,
+      availableSourceTimestampsFresh: validation.availableSourceTimestampsFresh,
+      historyContractValid: validation.historyContractValid,
+      historyTruncated: validation.historyTruncated,
+      historyStatusCoherent: validation.historyStatusCoherent,
+      historyRetentionDays: validation.historyRetentionDays,
+      historyMaxEvents: validation.historyMaxEvents,
+      historyDroppedAtLeast: validation.historyDroppedAtLeast,
+      historyDroppedThrough: validation.historyDroppedThrough,
+      historyRetainedFrom: validation.historyRetainedFrom,
+      newListings: Number(payload?.counts?.new) || 0,
+      relisted: Number(payload?.counts?.relisted) || 0,
+      reviewRequired: Number(payload?.counts?.reviewRequired) || 0,
+      reason: validation.reason,
+    });
+  } catch (error) {
+    return checkResult('daily-listing-audit', 'fail', {
+      latencyMs: Date.now() - startedAt,
+      reason: error.message,
+    });
   }
 }
 
@@ -193,14 +323,15 @@ export function validateOkxPerpSnapshot(payload) {
     payload?.coverage?.openInterest,
   );
   const identityValid = invalidIdentityIds.length === 0 && duplicateCount === 0;
-  const countValid = instruments.length === expectedListings && uniqueIds.size === expectedListings &&
-    swapListings === OKX_EXPECTED_PERP_SPLIT.swap &&
-    xPerpListings === OKX_EXPECTED_PERP_SPLIT.xperp;
+  const countValid = instruments.length >= OKX_REVIEWED_PERP_MINIMUMS.total &&
+    uniqueIds.size >= OKX_REVIEWED_PERP_MINIMUMS.total &&
+    swapListings >= OKX_REVIEWED_PERP_MINIMUMS.swap &&
+    xPerpListings >= OKX_REVIEWED_PERP_MINIMUMS.xperp;
   const marketCoverageValid = tickerCoverage.valid && markCoverage.valid && openInterestCoverage.valid;
   const issues = [];
   if (!identityValid) issues.push(`identity rejected ${invalidIdentityIds.length} rows; duplicates ${duplicateCount}`);
   if (!countValid) {
-    issues.push(`expected ${expectedListings} listings (${OKX_EXPECTED_PERP_SPLIT.swap} SWAP + ${OKX_EXPECTED_PERP_SPLIT.xperp} X-Perp), got ${instruments.length} (${swapListings} + ${xPerpListings})`);
+    issues.push(`expected at least ${expectedListings} listings (${OKX_REVIEWED_PERP_MINIMUMS.swap} SWAP + ${OKX_REVIEWED_PERP_MINIMUMS.xperp} X-Perp), got ${instruments.length} (${swapListings} + ${xPerpListings})`);
   }
   if (!marketCoverageValid) issues.push('ticker, mark, or open-interest coverage is not a complete catalog join');
   return {
@@ -210,6 +341,8 @@ export function validateOkxPerpSnapshot(payload) {
     marketCoverageValid,
     expectedListings,
     listingCount: instruments.length,
+    listingDelta: instruments.length - expectedListings,
+    growthDetected: instruments.length > expectedListings,
     uniqueListingCount: uniqueIds.size,
     swapListings,
     xPerpListings,
@@ -236,15 +369,16 @@ export function validateOkxSpotSnapshot(payload) {
   const expectedListings = PRODUCTION_BASELINES.spot.okx;
   const tickerCoverage = summarizeResourceCoverage(payload?.tickers, uniqueIds, payload?.coverage?.tickers);
   const identityValid = invalidIdentityIds.length === 0 && duplicateCount === 0;
-  const countValid = instruments.length === expectedListings && uniqueIds.size === expectedListings &&
-    utsListings === OKX_EXPECTED_SPOT_SPLIT.uts &&
-    goldIds.size === OKX_EXPECTED_SPOT_SPLIT.gold &&
+  const countValid = instruments.length >= OKX_REVIEWED_SPOT_MINIMUMS.total &&
+    uniqueIds.size >= OKX_REVIEWED_SPOT_MINIMUMS.total &&
+    utsListings >= OKX_REVIEWED_SPOT_MINIMUMS.uts &&
+    goldIds.size === OKX_REVIEWED_SPOT_MINIMUMS.gold &&
     Object.keys(OKX_SPOT_GOLD_EXCEPTIONS).every(instId => goldIds.has(instId));
   const marketCoverageValid = tickerCoverage.valid;
   const issues = [];
   if (!identityValid) issues.push(`identity rejected ${invalidIdentityIds.length} rows; duplicates ${duplicateCount}`);
   if (!countValid) {
-    issues.push(`expected ${expectedListings} listings (${OKX_EXPECTED_SPOT_SPLIT.uts} UTS + ${OKX_EXPECTED_SPOT_SPLIT.gold} gold), got ${instruments.length} (${utsListings} + ${goldIds.size})`);
+    issues.push(`expected at least ${expectedListings} listings (${OKX_REVIEWED_SPOT_MINIMUMS.uts} UTS + ${OKX_REVIEWED_SPOT_MINIMUMS.gold} gold), got ${instruments.length} (${utsListings} + ${goldIds.size})`);
   }
   if (!marketCoverageValid) issues.push('ticker coverage is not a complete catalog join');
   return {
@@ -254,6 +388,8 @@ export function validateOkxSpotSnapshot(payload) {
     marketCoverageValid,
     expectedListings,
     listingCount: instruments.length,
+    listingDelta: instruments.length - expectedListings,
+    growthDetected: instruments.length > expectedListings,
     uniqueListingCount: uniqueIds.size,
     utsListings,
     goldListings: goldIds.size,
@@ -311,6 +447,7 @@ export default async function handler(req, res) {
   const probeJobs = [
     () => probeReferences(baseUrl),
     () => probeUsMarketDirectory(baseUrl),
+    () => probeListingAudit(baseUrl),
     () => probeOkxMarkets(baseUrl),
     ...Object.entries(FUNDING_PROBES).map(([venue, symbol]) =>
       () => probeFunding(baseUrl, venue, symbol)),

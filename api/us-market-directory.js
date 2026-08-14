@@ -49,9 +49,11 @@ export function compactUsMarketDirectory(directory, nowMs = Date.now()) {
     },
     scope:'Nasdaq Trader confirmed U.S.-listed equities and ETFs; Test Issue=N; non-common security types excluded',
     symbols:rows.map(row => row.symbol),
+    etfs:rows.filter(row => row.category === 'etf').map(row => row.symbol),
     adrs:rows.filter(row => row.tags.includes('ADR')).map(row => row.symbol),
     coverage:{
       listedSecurityCount:rows.length,
+      etfCount:rows.filter(row => row.category === 'etf').length,
       adrCount:rows.filter(row => row.tags.includes('ADR')).length,
       sourceCounts:directory.sourceCounts || null,
       exchangeCounts,

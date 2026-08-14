@@ -16,6 +16,7 @@ import {
 } from '../api/_lib/signal-analysis.js';
 import {
   BROAD_STOCK_INDEX_UNDERLYINGS,
+  GATE_SPOT_VERIFIED_WRAPPERS,
   SECURITY_ETF_UNDERLYINGS,
   SECURITY_LISTING_REGISTRY,
   TOKENIZED_ETF_WRAPPERS,
@@ -231,6 +232,19 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
     [...wrapperSource.matchAll(/([A-Z0-9]+):'([A-Z0-9-]+)'/g)].map(match => [match[1], match[2]]),
   );
   assert.deepEqual(clientWrappers, TOKENIZED_ETF_WRAPPERS, 'tokenized ETF wrapper drift between client and server');
+  const gateWrapperSource = sourceBetween(
+    html,
+    'const GATE_SPOT_VERIFIED_WRAPPERS = new Set([',
+    'function registerSpotAssetMeta(',
+  );
+  const clientGateWrappers = [...new Set(
+    [...gateWrapperSource.matchAll(/'([A-Z0-9.-]+)'/g)].map(match => match[1]),
+  )].sort();
+  assert.deepEqual(
+    clientGateWrappers,
+    [...GATE_SPOT_VERIFIED_WRAPPERS].sort(),
+    'Gate Spot exact-wrapper identity drift between client and server',
+  );
 });
 
 test('signal history uses idempotent hourly buckets and a bounded seven-day ring', () => {
@@ -381,13 +395,34 @@ test('Signal Radar and Asset Intelligence use server history and one canonical d
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   assert.match(html, /data-p="cross"[\s\S]*?RWA Signal Radar/);
   assert.match(html, /id="page-cross"[\s\S]*?id="radarTableRegion"/);
+  const radarPage = sourceBetween(html, '<div class="page-container" id="page-cross">', '</div><!-- END page-cross -->');
+  assert.match(radarPage, /id="competitorListingsSection"[\s\S]*?Competitor New Listings/);
+  assert.match(radarPage, /id="listingWindowFilter"[\s\S]*?Rolling 7 days[\s\S]*?Rolling 30 days/);
+  assert.match(radarPage, /id="listingMarketFilter"[\s\S]*?Perpetuals[\s\S]*?Spot/);
+  assert.equal((html.match(/id="competitorListingsSection"/g) || []).length, 1);
   assert.match(html, /fetch\('\/api\/signal-snapshot', \{ method:'GET' \}\)/);
+  assert.match(html, /fetch\('\/api\/listing-changes', \{ method:'GET' \}\)/);
   assert.match(html, /function radarPageIsActive\(\)[\s\S]*?pageIsVisible\(\)/);
   assert.match(html, /const SIGNAL_SNAPSHOT_TTL = 5 \* 60 \* 1000/);
+  assert.match(html, /const LISTING_CHANGES_TTL = 5 \* 60 \* 1000/);
   assert.match(html, /rows\.slice\(0, radarExpanded \? 100 : 50\)/);
-  assert.match(html, /if \(activePage === 'cross'\) \{[\s\S]*?await ensureSignalSnapshot\(false\);[\s\S]*?return;/);
+  assert.match(html, /if \(activePage === 'cross'\) \{[\s\S]*?await Promise\.allSettled\(\[[\s\S]*?ensureSignalSnapshot\(false\)[\s\S]*?ensureListingChanges\(false\)[\s\S]*?\]\);[\s\S]*?return;/);
   assert.match(html, /if \(activePage === 'spot' \|\| activePage === 'traditional'\) \{[\s\S]*?refreshSpotArbData\(\)/);
   assert.match(html, /Baseline warming/);
+  assert.match(html, /function listingEventWithinWindow\(event, days = Number\(listingMonitorFilter\.window\) \|\| 7/);
+  assert.match(html, /function listingSnapshotFresh\(payload, now = Date\.now\(\)\)[\s\S]*?36 \* 60 \* 60 \* 1000/);
+  assert.match(html, /Number\.isFinite\(Date\.parse\(payload\.generatedAt\)\) && !listingSnapshotFresh\(payload\)/,
+    'an uninitialized baseline is Warming, while a generated snapshot can age into Stale');
+  const listingStatusText = sourceBetween(html, 'function listingMonitorStatusText(payload, weeklyEvents)', 'function renderCompetitorListings()');
+  assert.match(listingStatusText, /hasGeneratedSnapshot && !listingSnapshotFresh\(payload\)[\s\S]*?history\?\.truncated === true[\s\S]*?payload\.status === 'warming'/,
+    'Stale must remain visible ahead of truncated or warming status details');
+  assert.match(html, /Array\.isArray\(payload\?\.pendingReviews\)/);
+  assert.match(html, /event\?\.identityStatus !== 'verified'[\s\S]*?return 'review-required'/);
+  const listingCoverage = sourceBetween(html, 'function listingEventWebsiteCoverage(event)', 'function listingEventInteractive');
+  assert.doesNotMatch(listingCoverage, /identityMatch/);
+  assert.match(listingCoverage, /assetIntelligencePerpIdentity\(asset\)\?\.assetKey === assetKey/);
+  assert.match(listingCoverage, /assetIntelligenceSpotIdentity\(asset, venue\)\?\.assetKey === assetKey/);
+  assert.match(listingCoverage, /return exact \? 'included' : 'pending-refresh'/);
   assert.doesNotMatch(html, /localStorage|rwa_kpi_snapshots/);
 
   assert.match(html, /id="assetModal" role="dialog" aria-modal="true"/);
@@ -400,6 +435,29 @@ test('Signal Radar and Asset Intelligence use server history and one canonical d
 
   const vercelConfig = JSON.parse(await readFile(new URL('../vercel.json', import.meta.url), 'utf8'));
   assert.ok(vercelConfig.crons.some(cron => cron.path === '/api/signal-snapshot-cron' && cron.schedule === '7 * * * *'));
+  assert.ok(vercelConfig.crons.some(cron => cron.path === '/api/listing-audit-cron' && cron.schedule === '45 0 * * *'));
+});
+
+test('Competitor listings keep the newest relisting event for each venue instrument', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const start = html.indexOf('function listingNewEvents(');
+  const end = html.indexOf('function listingSnapshotFresh(', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const source = html.slice(start, end) + `
+    globalThis.listingRows = listingAuditEvents({
+      events:[
+        { listingKey:'spot:kraken:AAPLXUSD', changeType:'relisted', detectedAt:'2026-08-14T00:45:00Z' },
+        { listingKey:'spot:kraken:AAPLXUSD', changeType:'new', detectedAt:'2026-07-01T00:45:00Z' },
+      ],
+      pendingReviews:[],
+    });
+  `;
+  const context = { listingChangesCache:null };
+  runInNewContext(source, context);
+  assert.equal(context.listingRows.length, 1);
+  assert.equal(context.listingRows[0].changeType, 'relisted');
+  assert.equal(context.listingRows[0].detectedAt, '2026-08-14T00:45:00Z');
 });
 
 test('bilingual UI is accessible, persisted under one preference key, and switches without navigation or I/O', async () => {
@@ -453,6 +511,7 @@ test('bilingual UI is accessible, persisted under one preference key, and switch
 
   const sentinels = [
     ['RWA Signal Radar', 'RWA 信号雷达'],
+    ['Competitor New Listings', '竞品新上线资产'],
     ['Traditional Market Activity Monitor · Top 100', '传统市场活跃度监控 · Top 100'],
     ['Asset Intelligence · canonical underlying', '资产情报 · 标准底层资产'],
   ];
@@ -1436,6 +1495,14 @@ test('Spot cold load streams venue catalogs while optional depth enrichment stay
   assert.doesNotMatch(html, /class="spot-cnt">(?:8|2|5|0)<\/span>/);
   assert.equal((html.match(/class="spot-cnt">—<\/span>/g) || []).length, 5);
   assert.match(html, /function updateSpotStatusLine[\s\S]*?spotEmptyStateIsLoading\(\)[\s\S]*?Loading spot venue catalogs…/);
+  const krakenXStockSource = sourceBetween(
+    html,
+    'async function _fetchKrakenXStocks()',
+    '// ── Bitget Spot Fetch ──',
+  );
+  assert.match(krakenXStockSource, /info\.aclass_base \|\| ''\)\.toLowerCase\(\) !== 'tokenized_asset'/);
+  assert.match(krakenXStockSource, /info\.status \|\| ''\)\.toLowerCase\(\) !== 'online'/);
+  assert.match(krakenXStockSource, /pair: pairInfo\.altname, venueSymbol:pairInfo\.altname/);
 
   const settleSource = sourceBetween(
     html,

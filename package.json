@@ -4,7 +4,8 @@
     "test": "node --test tests/*.test.mjs",
     "check:inline": "node scripts/check-inline-js.mjs",
     "audit:data": "node scripts/audit-data.mjs",
-    "audit:health": "node scripts/audit-health.mjs"
+    "audit:health": "node scripts/audit-health.mjs",
+    "audit:listings": "node scripts/audit-listings.mjs"
   },
   "dependencies": {
     "@vercel/functions": "3.9.0"

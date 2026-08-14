@@ -36,17 +36,10 @@ export default async function handler(req, res) {
     } catch { /* try the next canonical DEX name */ }
   }
 
-  if (!data) {
-    try {
-      const candidate = await postInfo({ type: 'metaAndAssetCtxs' });
-      if (Array.isArray(candidate) && candidate.length === 2 && Array.isArray(candidate[1])) {
-        data = candidate;
-        source = 'all_perps';
-      }
-    } catch { /* handled below */ }
-  }
-
-  if (!data) return res.status(502).json({ error: 'Hyperliquid market data unavailable' });
+  // Never fall back to the global Hyperliquid universe here. Joining a bare
+  // global ticker such as QNT to xyz:QNT's official stock category can turn an
+  // unrelated crypto perpetual into a false RWA listing.
+  if (!data) return res.status(502).json({ error: 'Dedicated trade.xyz market data unavailable' });
   const categories = await categoriesPromise;
   res.setHeader('Cache-Control', 's-maxage=15, stale-while-revalidate=60');
   return res.status(200).json({ data, categories: Array.isArray(categories) ? categories : [], source });

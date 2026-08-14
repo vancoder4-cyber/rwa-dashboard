@@ -52,12 +52,16 @@ export function parseNasdaqTraderAsOf(value) {
 
 export function validateUsMarketDirectoryPayload(payload, { nowMs = Date.now() } = {}) {
   const rawSymbols = Array.isArray(payload?.symbols) ? payload.symbols : [];
+  const rawEtfs = Array.isArray(payload?.etfs) ? payload.etfs : [];
   const rawAdrs = Array.isArray(payload?.adrs) ? payload.adrs : [];
   const symbols = rawSymbols
     .map(value => String(value || '').trim().toUpperCase());
   const adrs = rawAdrs
     .map(value => String(value || '').trim().toUpperCase());
+  const etfs = rawEtfs
+    .map(value => String(value || '').trim().toUpperCase());
   const symbolSet = new Set(symbols);
+  const etfSet = new Set(etfs);
   const adrSet = new Set(adrs);
   const sourceCounts = payload?.coverage?.sourceCounts || {};
   const sourceAsOf = payload?.sourceAsOf || {};
@@ -70,11 +74,14 @@ export function validateUsMarketDirectoryPayload(payload, { nowMs = Date.now() }
     newestSourceMs <= nowMs + US_MARKET_DIRECTORY_MAX_FUTURE_SKEW_MS &&
     sourceAgeMs <= US_MARKET_DIRECTORY_MAX_SOURCE_AGE_MS;
   const listedCountMatches = Number(payload?.coverage?.listedSecurityCount) === symbols.length;
+  const etfCountMatches = Number(payload?.coverage?.etfCount) === etfs.length;
   const adrCountMatches = Number(payload?.coverage?.adrCount) === adrs.length;
   const sortedSymbols = symbols.every((symbol, index) => index === 0 || symbols[index - 1].localeCompare(symbol) <= 0);
   const sortedAdrs = adrs.every((symbol, index) => index === 0 || adrs[index - 1].localeCompare(symbol) <= 0);
+  const sortedEtfs = etfs.every((symbol, index) => index === 0 || etfs[index - 1].localeCompare(symbol) <= 0);
   const canonicalSymbols = rawSymbols.every((value, index) => value === symbols[index]);
   const canonicalAdrs = rawAdrs.every((value, index) => value === adrs[index]);
+  const canonicalEtfs = rawEtfs.every((value, index) => value === etfs[index]);
   const generatedAtMs = Date.parse(payload?.generatedAt);
   const generatedAtValid = Number.isFinite(generatedAtMs) && generatedAtMs <= nowMs + US_MARKET_DIRECTORY_MAX_FUTURE_SKEW_MS;
   const expectedAsOf = oldestSourceMs === null
@@ -93,27 +100,30 @@ export function validateUsMarketDirectoryPayload(payload, { nowMs = Date.now() }
   if (!freshnessValid) issues.push('source-freshness');
   if (!freshnessProjectionValid) issues.push('freshness-projection');
   if (!generatedAtValid) issues.push('generated-at');
-  if (!canonicalSymbols || !canonicalAdrs) issues.push('non-canonical-symbol');
-  if (!sortedSymbols || !sortedAdrs) issues.push('sort-order');
-  if (!listedCountMatches || !adrCountMatches) issues.push('coverage-count');
-  if (symbolSet.size !== symbols.length || adrSet.size !== adrs.length) issues.push('duplicate');
+  if (!canonicalSymbols || !canonicalAdrs || !canonicalEtfs) issues.push('non-canonical-symbol');
+  if (!sortedSymbols || !sortedAdrs || !sortedEtfs) issues.push('sort-order');
+  if (!listedCountMatches || !adrCountMatches || !etfCountMatches) issues.push('coverage-count');
+  if (symbolSet.size !== symbols.length || adrSet.size !== adrs.length || etfSet.size !== etfs.length) issues.push('duplicate');
   if (adrs.some(symbol => !symbolSet.has(symbol)) || !adrSet.has('BABA')) issues.push('adr-contract');
+  if (etfs.some(symbol => !symbolSet.has(symbol)) || !etfSet.has('QQQ')) issues.push('etf-contract');
   if (REQUIRED_DIRECTORY_SYMBOLS.some(symbol => !symbolSet.has(symbol))) issues.push('required-sentinel');
   const valid = payload?.schemaVersion === 1 && payload?.status === 'full' &&
-    symbols.length >= 8000 && symbolSet.size === symbols.length && adrSet.size === adrs.length &&
+    symbols.length >= 8000 && symbolSet.size === symbols.length && adrSet.size === adrs.length && etfSet.size === etfs.length &&
     symbols.every(symbol => /^[A-Z][A-Z0-9.-]{0,13}$/.test(symbol)) &&
     Number(sourceCounts.nasdaqListed) >= 3000 && Number(sourceCounts.otherListed) >= 3000 &&
     Number(sourceCounts.nasdaqListed) + Number(sourceCounts.otherListed) >= symbols.length &&
-    listedCountMatches && adrCountMatches && sortedSymbols && sortedAdrs &&
-    canonicalSymbols && canonicalAdrs && freshnessValid && freshnessProjectionValid && generatedAtValid &&
+    listedCountMatches && adrCountMatches && etfCountMatches && sortedSymbols && sortedAdrs && sortedEtfs &&
+    canonicalSymbols && canonicalAdrs && canonicalEtfs && freshnessValid && freshnessProjectionValid && generatedAtValid &&
     REQUIRED_DIRECTORY_SYMBOLS.every(symbol => symbolSet.has(symbol)) &&
-    adrSet.has('BABA') && adrs.every(symbol => symbolSet.has(symbol));
+    adrSet.has('BABA') && etfSet.has('QQQ') && adrs.every(symbol => symbolSet.has(symbol)) &&
+    etfs.every(symbol => symbolSet.has(symbol));
   if (!valid && !issues.length) issues.push('schema-or-completeness');
   const reason = valid ? null : `Official U.S. listing directory validation failed: ${issues.join(', ')}`;
   return {
     valid,
     listedSecurityCount:symbols.length,
     adrCount:adrs.length,
+    etfCount:etfs.length,
     sourceCounts,
     sourceAsOf,
     oldestSourceMs,
@@ -125,10 +135,13 @@ export function validateUsMarketDirectoryPayload(payload, { nowMs = Date.now() }
     adrDuplicateCount:adrs.length - adrSet.size,
     listedCountMatches,
     adrCountMatches,
+    etfCountMatches,
     sortedSymbols,
     sortedAdrs,
+    sortedEtfs,
     canonicalSymbols,
     canonicalAdrs,
+    canonicalEtfs,
     sourceEpochsValid,
     freshnessProjectionValid,
     generatedAtValid,

@@ -136,6 +136,7 @@ Gate 当前另有 `BP + is_pre_market=true`，但其 `contract_type` 为空，�
 - ADR 识别只对 Equity 生效；名称包含 ADR 的 ETF（例如 ADR 主题 ETF）本身不能被标成 ADR。首次获取官方目录失败时 fail closed；已有已验证快照后可在 7 天上限内使用 last-known-good 并明确标 stale，超过上限重新禁用 US 筛选，而不是无限期沿用或猜测补齐。
 - Perpetual By Asset 与 Spot All Assets 使用所有 listing 的 market-tag 并集；venue 顺序不能决定聚合标签。Category、Market、Search、Active-only 筛选互相独立并以 AND 组合。
 - 官方目录的源时间采用 `America/New_York` 严格解析；服务端、health 和浏览器都校验两份原始 source epoch、最早/最新源时间与 7 天硬过期投影。CDN 的 fresh + stale 时间不得跨过该硬过期点。
+- `/api/us-market-directory` 必须同时返回排序、去重且属于 `symbols` 子集的 `etfs` 与 `adrs`，并分别核对 `coverage.etfCount` / `coverage.adrCount`；QQQ 与 BABA 分别作为 ETF、ADR 正向 sentinel。Nasdaq Trader 官方 ETF 标志只可在场所已经确认 RWA/security 身份后，把宽泛 Equity/Stock 类别细分为 ETF，不能反向证明某个交易所产品是 RWA。目录不可用或校验失败时必须保留既有 last-known-good 的硬过期语义，首次无有效快照则 fail closed，禁止按名称猜 ETF。
 
 ## 8. 数据完整度状态
 
@@ -179,7 +180,7 @@ OKX 页面中的默认 Spot/Perp 手续费不是账户鉴权后的费率，只�
 7. 对现货价格与股票参考价做异常比率扫描；异常只触发复核，不自动决定身份。
 8. Preview 中核对 venue counts、目标资产标签、Top 30 和 Cross-Venue Coverage。
 9. OKX 断言 `instCategory=1` 的 CAT/LIT/QNT 不进入，UTS 只在 category 3 后剥一层 `X`，普通 FUTURES 不进入，且同一 underlying 的 SWAP/X-Perp listing 都保留。
-10. 检查 `/api/us-market-directory` 数量不低于 8,000，AAPL/QQQ/BABA/TSM 存在且 BABA 属于 ADR；不以任何 ticker 缺席作为目录健康条件。逐页验证 Crypto BTC、Pre-IPO OPENAI 等不会越过类别门控，Perpetual 与 Spot 的 `US-listed / 美股` 筛选只保留带 US 标签的证券资产。
+10. 检查 `/api/us-market-directory` 数量不低于 8,000，AAPL/QQQ/BABA/TSM 存在，QQQ 属于 `etfs`、BABA 属于 `adrs`，且 symbols/ETF/ADR 数量、排序、去重和子集关系全部一致；不以任何 ticker 缺席作为目录健康条件。逐页验证 Crypto BTC、Pre-IPO OPENAI 等不会越过类别门控，Perpetual 与 Spot 的 `US-listed / 美股` 筛选只保留带 US 标签的证券资产。
 11. 浏览器每小时后台刷新一次完整美股目录；首次失败时筛选 fail-closed，已有通过校验的目录后刷新失败则在最长 7 天内继续使用 last-known-good，并按 5–30 分钟退避重试。筛选与类别、搜索、Active-only 条件始终使用 AND 组合。
 12. 推送 Git 后再 promote 到生产，最后复查生产 DOM、Vercel `Ready`、`/api/health` 和 5xx 日志。
 
@@ -324,8 +325,8 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 
 生产运维、阈值、定时机制与发布门禁统一记录在 `OPERATIONS.md`：
 
-- Vercel 每日健康探针检查页面 shell、Reference Price、五个合约场所的 Funding History sentinel，以及 OKX Perp/Spot catalog 与身份/字段完整度 sentinel。
-- GitHub Actions 每日执行静态语法、数据契约和生产健康检查。
+- Vercel 每日 00:45 UTC 先运行十源 Listing Audit，01:00 再由健康探针检查页面 shell、Reference Price、五个合约场所的 Funding History sentinel、OKX Perp/Spot catalog 与身份/字段完整度，以及 Listing Audit 的 36 小时新鲜度和十源覆盖。
+- GitHub Actions 每日执行静态语法、数据契约、近 7 天竞品新上线摘要和生产健康检查。
 - Codex 每日生成只读健康摘要，每周重新核对完整场所 catalog、身份冲突、上市生命周期、分类标签和历史覆盖。
 - 自动检查不得直接修改 allowlist、分类、基线或生产；发现漂移时必须给出官方证据并等待人工确认。
 - 任何已知 crypto 同名资产泄漏、币种/单位错误或大面积 Reference/Funding 错误均按 P0 处理。
@@ -366,3 +367,15 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 - 切换语言必须是纯 DOM 展示操作：不得调用 `fetch`、页面导航、数据 refresh 或可能继续加载 Funding History 的 renderer；当前顶层页面、子页、筛选、搜索、More 展开状态和已打开的 Asset Intelligence Drawer 必须保持不变。
 - 动态状态由同一套 `Full / Partial / Estimated / Unavailable` canonical 值生成，再在展示层翻译；数据状态语义、缺失值与真实零值不能因语言变化而改变。
 - 新增页面或动态模板时，必须同时补英文 source、中文映射和契约哨兵；生产发布前至少验证一次 `EN → 中文 → EN`、动态 MutationObserver 内容、320px 手机导航和 ticker/venue 不被翻译。
+
+## 19. 竞品新上线资产监控
+
+- 检测频率与展示周期分离：服务端每天读取一次官方目录并做 diff；RWA Signal Radar 默认展示滚动 7 天，允许切换滚动 30 天。不得为了“周视图”把检测降低为每周一次。
+- 覆盖必须恰好对应当前产品范围的十个独立 source：Perpetual 的 trade.xyz、Bitget、Gate、Binance、OKX，以及 Spot 的 Bitget、Gate、Kraken、Binance、OKX。主键是 `market:venue:venueSymbol`；不能以裸 canonical ticker 合并不同交易标的。
+- 每个 source 的首次成功读取只建立基线，不生成 New。只有完整、无重复且通过类别漂移检查的官方 catalog 才能替换该 source 的 last-good 基线；Unavailable/Partial 不得清空基线，也不得制造假下架。单次缺失先记为 pending removal，至少跨两个不同 UTC 日的完整观测仍缺失后才记下架，同日重试不算第二次观测。通过官方身份门控的合理纯新增必须生成提醒，不能被普通 10% 缩表保护吞掉；包含删除的显著漂移及同时超过 50 个、50% 的极端纯增长继续隔离复核。新增、下架、重新上线必须分别记录，页面“竞品新上线资产”只显示新增和重新上线。
+- 身份门控继续遵循本文件总规则。明确官方 RWA 类型且通过现有通用 admission gate 的标的可标 `verified`；普通 Crypto 类型直接拒绝。Gate Spot 不提供资产类别，新 suffix 即使与另一官方 RWA 目录同 canonical，也只能标 `review-required`，在精确 wrapper 身份确认前不得自动加入行情数据。
+- Listing Audit 只观察和报告，不能写 allowlist、类别、生命周期、baseline 常量或客户端资产表。页面的 `Included` 必须同时匹配当前 Spot/Perpetual 数据中同一 venue 的精确 `venueSymbol` 与 `category:canonical` 身份；仅有相同 canonical underlying 不足以宣称该新 listing 已收录。
+- `pendingReviews` 是独立的活动复核队列，不受页面 7/30 天事件窗口截断；只要标的仍活跃且身份未解决，就必须持续显示。它不能因事件过期而自动放行；精确官方身份确认后可转为 `verified`，连续完整目录确认下架后才可移出活动队列。
+- 受 `CRON_SECRET` 保护的 `/api/listing-audit-cron` 是唯一 writer；公开 `/api/listing-changes` 是 GET-only、无 query 的 CDN 缓存 reader。状态与公开快照作为一个紧凑 bundle 保存于 `iad1` 的 Runtime Cache namespace `rwa-listing-audit-v1`：source 目录只保存身份键、known identity 使用紧凑行编码、事件历史只持久化一份；事件以 45 天为保留目标，inactive identity 保留 180 天，单项不超过 1.75 MB。事件数量安全上限可能在 45 天之前触发；此时必须公开 `history={retentionDays,maxEvents,truncated,droppedAtLeast,droppedThrough,retainedFrom}`，禁止整体状态为 Full，并把页面窗口计数表达为已保留历史的下限。通常降为 Partial；若 source 状态本身已经是 Unavailable，则保留更严重的 Unavailable，writer 继续返回 503。不得静默裁剪后继续宣称 Full 或“没有新资产”，health 与每日审计必须至少为非通过。该缓存是区域 best-effort 而非永久审计数据库或 system of record；逐出后必须重新 Warming，不能把现有目录误报为全量 New。
+- Nasdaq Trader 官方目录的 `etfs` 数组只用于在场所 RWA/security 门控之后细分宽泛 Stock/Equity 类别。当前 Kraken xStocks Listing Audit 依赖该官方 ETF 目录区分 Equity 与 ETF；目录不可用或契约不完整时，该 source 必须 Unavailable，不能把未知 ETF 猜成 Equity。官方 ETF 目录不是 RWA 准入白名单。
+- OKX 的 183 Perpetual（至少 149 SWAP + 34 X-Perp）和 51 Spot（至少 48 UTS + 精确 3 gold）是已审核下限，不是阻止官方新增的永久精确数量。低于任一分项、Crypto/category 泄漏、重复或 market-data join 不完整继续失败；合法增长由 Listing Audit 单独提醒。

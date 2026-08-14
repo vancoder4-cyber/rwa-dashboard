@@ -1,5 +1,6 @@
 {
   "crons": [
+    { "path": "/api/listing-audit-cron", "schedule": "45 0 * * *" },
     { "path": "/api/health", "schedule": "0 1 * * *" },
     { "path": "/api/signal-snapshot-cron", "schedule": "7 * * * *" }
   ],

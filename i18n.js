@@ -20,6 +20,69 @@
     'Spot':'现货',
     'Traditional Market':'传统市场',
     'RWA Signal Radar':'RWA 信号雷达',
+    'Competitor New Listings':'竞品新上线资产',
+    'Daily official catalog review with a rolling seven-day view. Verified listings are eligible for the existing Perpetual or Spot loaders; exact website inclusion is confirmed by venue instrument, while ambiguous identities remain Review required.':'每日检查官方目录，并以滚动七天展示。已验证标的具备进入现有永续合约或现货加载流程的资格；本站是否已收录以同一平台的精确标的为准，身份不明确的标的保持待审核。',
+    'Daily check':'每日检查',
+    'not loaded':'尚未加载',
+    'Open Signal Radar to load the latest daily listing review.':'打开 RWA 信号雷达以加载最新每日上架检查。',
+    'Listing review window':'上架检查周期',
+    'Rolling 7 days':'滚动 7 天',
+    'Rolling 30 days':'滚动 30 天',
+    'Filter listing market':'筛选上架市场',
+    'All markets':'全部市场',
+    'All venues':'全部平台',
+    'Filter listing venue':'筛选上架平台',
+    'Filter listing status':'筛选上架状态',
+    'All listing statuses':'全部上架状态',
+    'New listing':'新上线',
+    'Re-listed':'重新上线',
+    'Review required':'待审核',
+    'Included':'已收录',
+    'Pending refresh':'等待刷新',
+    'Verified':'已验证',
+    'Search new listings...':'搜索新上线资产…',
+    'Search new listings':'搜索新上线资产',
+    'New this window':'本周期新增',
+    'retained history only':'仅统计已保留历史',
+    'official contract catalogs':'官方合约目录',
+    'official spot catalogs':'官方现货目录',
+    'not auto-admitted':'不会自动收录',
+    'Loading the latest daily official catalog review…':'正在加载最新每日官方目录检查…',
+    'Baseline warming. The first complete catalog pass establishes the comparison baseline and does not label every existing asset as New.':'基线预热中。首次完整目录检查只建立比较基线，不会把所有现有资产误标为新上线。',
+    'Daily listing review unavailable':'每日上架检查不可用',
+    'Daily listing review stale':'每日上架检查已过期',
+    'Listing baseline warming':'上架基线预热中',
+    'Listing history partial':'上架历史部分可用',
+    'No matching new listings':'没有匹配的新上线资产',
+    'The first successful daily pass initializes all venue baselines without generating false New events.':'首次成功的每日检查会初始化各平台基线，不会生成错误的新上线事件。',
+    'The last successful snapshot remains visible for diagnosis, but it cannot support an empty or Full conclusion.':'最近一次成功快照会保留用于诊断，但不能据此判断为空或完整状态。',
+    'The retained event history reached its safety limit. No matching retained rows is not proof that the selected window contained no events.':'已保留的事件历史触及安全上限。当前没有匹配的保留记录，并不能证明所选周期内没有发生事件。',
+    'First observed':'首次发现',
+    'Market':'市场',
+    'Venue instrument':'平台标的',
+    'Category':'类别',
+    'Change':'变化',
+    'Identity':'身份',
+    'Website coverage':'本站收录',
+    'Official evidence':'官方依据',
+    'Perpetual':'永续合约',
+    'Official venue catalog':'平台官方目录',
+    'competitor new listings':'竞品新上线资产',
+    'audited untyped trade.xyz RWA exception':'已审计的 trade.xyz 无类型 RWA 精确例外',
+    'audited exact Bitget RWA type exception':'已审计的 Bitget RWA 类型精确例外',
+    'audited exact Bitget Reality type exception':'已审计的 Bitget Reality 类型精确例外',
+    'exact audited Bitget RWA asset in the live official instruments catalog':'Bitget 实时官方 instruments 目录中的已审计精确 RWA 资产',
+    'exact audited Gate Spot wrapper and live official pair':'已审计的 Gate 现货精确包装资产及实时官方交易对',
+    'Gate live pair plus same canonical on another official RWA catalog; exact Gate wrapper identity pending':'Gate 实时交易对及另一官方 RWA 目录中的同一标准资产；Gate 包装资产身份仍待确认',
+    'exact audited Kraken RWA asset in the live official AssetPairs catalog':'Kraken 实时官方 AssetPairs 目录中的已审计精确 RWA 资产',
+    'Kraken official tokenized_asset AssetPairs catalog':'Kraken 官方 tokenized_asset 交易对目录',
+    'Official U.S. ETF identity directory unavailable':'美国官方 ETF 身份目录不可用',
+    'Invalid listing audit snapshot':'上架审计快照无效',
+    'audited Binance tokenized-metal exception':'已审计的 Binance 代币化金属精确例外',
+    'audited-tokenized-metal':'已审计的代币化金属',
+    'active-tradifi-futures':'当前有效的官方 TradFi 合约目录',
+    'OKX official Unified Tokenized Stocks category':'OKX 官方 Unified Tokenized Stocks 类别',
+    'audited exact OKX tokenized-gold pair':'已审计的 OKX 代币化黄金精确交易对',
     'All Venues':'全部交易场所',
     'By Asset':'按资产',
     'Funding Heatmap':'资金费率热力图',
@@ -632,6 +695,50 @@
   }
 
   var PATTERNS = [
+    [/^Daily listing review stale\. Last successful snapshot (.+?)\. No empty or Full conclusion is inferred\. (Listing event history is Partial:.+)$/, function (m) {
+      return '每日上架检查已过期。最近一次成功快照为 ' + translateCore(m[1], 'zh-CN') + '。不会据此推断为空或完整状态。' + translateCore(m[2], 'zh-CN');
+    }],
+    [/^Listing event history is Partial: the (\d+)-day retention target exceeded the ([\d,]+)-event safety limit, so at least ([\d,]+) older events? (?:was|were) omitted\.(?: Omitted history runs through (.+?)\.)?(?: Retained history begins (.+?)\.)? Retained catalogs and active identity reviews remain available\.(?: ([\d,]+) official catalog sources? (?:is|are) also unavailable\.)?(?: Latest refresh also failed: (.+)\.)?$/, function (m) {
+      var translated = '上架事件历史为部分可用：' + m[1] + ' 天保留目标已超过 ' + m[2] + ' 条事件的安全上限，因此至少省略了 ' + m[3] + ' 条较旧事件。';
+      if (m[4]) translated += '已省略历史截至 ' + translateCore(m[4], 'zh-CN') + '。';
+      if (m[5]) translated += '已保留历史始于 ' + translateCore(m[5], 'zh-CN') + '。';
+      translated += '保留的目录与活动身份复核仍然可用。';
+      if (m[6]) translated += '另有 ' + m[6] + ' 个官方目录数据源不可用。';
+      if (m[7]) translated += '最近一次刷新也失败：' + m[7] + '。';
+      return translated;
+    }],
+    [/^rolling (7|30) days$/, function (m) { return '滚动 ' + m[1] + ' 天'; }],
+    [/^(\d[\d,]*) new or re-listed venue assets? detected in the rolling (7|30)-day window\.$/, function (m) {
+      return '滚动 ' + m[2] + ' 天内发现 ' + m[1] + ' 个新上线或重新上线的平台标的。';
+    }],
+    [/^(\d[\d,]*) new or re-listed venue assets? detected in the rolling (7|30)-day window\. (\d[\d,]*) active identity reviews? remain visible until resolved\.$/, function (m) {
+      return '滚动 ' + m[2] + ' 天内发现 ' + m[1] + ' 个新上线或重新上线的平台标的。' + m[3] + ' 个待身份审核项会持续显示，直至解决。';
+    }],
+    [/^No new competitor listings detected in the rolling (7|30)-day window\.$/, function (m) {
+      return '滚动 ' + m[1] + ' 天内未发现竞品新上线资产。';
+    }],
+    [/^No new competitor listings detected in the rolling (7|30)-day window\. (\d[\d,]*) active identity reviews? remain visible until resolved\.$/, function (m) {
+      return '滚动 ' + m[1] + ' 天内未发现竞品新上线资产。' + m[2] + ' 个待身份审核项会持续显示，直至解决。';
+    }],
+    [/^No verified or review-required additions match these filters in the rolling (7|30)-day window\.$/, function (m) {
+      return '滚动 ' + m[1] + ' 天内没有符合当前筛选的已验证或待审核新增资产。';
+    }],
+    [/^Partial daily review · (\d[\d,]*) sources? unavailable\. Last-good catalogs are retained; no synthetic delistings are created\.$/, function (m) {
+      return '每日检查部分可用 · ' + m[1] + ' 个数据源不可用。系统保留最近一次有效目录，不会制造错误的下架记录。';
+    }],
+    [/^Listing review unavailable: (.+)$/, function (m) { return '上架检查不可用：' + m[1]; }],
+    [/^Daily listing review stale\. Last successful snapshot (.+)\. No empty or Full conclusion is inferred\.$/, function (m) {
+      return '每日上架检查已过期。最近一次成功快照为 ' + translateCore(m[1], 'zh-CN') + '。不会据此推断为空或完整状态。';
+    }],
+    [/^(.+)\. The existing Perpetual and Spot datasets are unaffected\.$/, function (m) {
+      return translateCore(m[1], 'zh-CN') + '。现有永续合约与现货数据不受影响。';
+    }],
+    [/^Hyperliquid perpCategories:(.+)$/, function (m) { return 'Hyperliquid 官方 perpCategories：' + m[1]; }],
+    [/^Bitget isRwa=yes; symbolType=(.+)$/, function (m) { return 'Bitget 官方 isRwa=yes；symbolType=' + m[1]; }],
+    [/^Bitget isReality=yes; symbolType=(.+)$/, function (m) { return 'Bitget 官方 isReality=yes；symbolType=' + m[1]; }],
+    [/^Gate contract_type=(.+)$/, function (m) { return 'Gate 官方 contract_type=' + m[1]; }],
+    [/^Binance contractType=TRADIFI_PERPETUAL; underlyingType=(.+)$/, function (m) { return 'Binance 官方 TRADIFI_PERPETUAL；underlyingType=' + m[1]; }],
+    [/^OKX instCategory=(.+); (.+)$/, function (m) { return 'OKX 官方 instCategory=' + m[1] + '；' + m[2]; }],
     [/^(\d{1,2}):(\d{2})(?::(\d{2}))?[\s\u202f]+(AM|PM)$/, function (m) {
       return zhClock(m[1], m[2], m[3], m[4]);
     }],
@@ -686,6 +793,7 @@
     [/^(\d[\d,]*) venues priced$/, function (m) { return m[1] + ' 个交易场所已有价格'; }],
     [/^(\d+(?:\.\d+)?) pp$/, function (m) { return m[1] + ' 个百分点'; }],
     [/^(\d[\d,]*) of (\d[\d,]*)$/, function (m) { return m[1] + ' / ' + m[2]; }],
+    [/^(\d[\d,]*) of ≥(\d[\d,]*) retained$/, function (m) { return '已显示 ' + m[1] + ' / 至少 ' + m[2] + ' 条保留记录'; }],
     [/^Showing (\d[\d,]*) of (\d[\d,]*)$/, function (m) { return '显示 ' + m[1] + ' / ' + m[2]; }],
     [/^(\d[\d,]*) total$/, function (m) { return '共 ' + m[1] + ' 个'; }],
     [/^More · (.+)$/, function (m) { return '更多 · ' + m[1]; }],

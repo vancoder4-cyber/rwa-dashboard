@@ -102,6 +102,20 @@ export const TOKENIZED_ETF_WRAPPERS = Object.freeze({
   QQQX:'QQQ', SPYX:'SPY', TQQQX:'TQQQ', SLVON:'SLV',
 });
 
+// Gate Spot does not publish an asset-class field. These exact wrappers were
+// reviewed against independent official tokenized-security catalogs. New Gate
+// suffix lookalikes are discovery candidates only until the monitor records
+// equivalent official identity evidence; they must not enter market data by
+// ticker shape alone.
+export const GATE_SPOT_VERIFIED_WRAPPERS = Object.freeze([
+  'SPCXX','CRCLX','HOODON','SLVON','NVDAX','COINON','ACNON','PLTRON','SPYX','MSFTON',
+  'AMDON','TSLAON','AMZNON','SKHYON','TSLAX','CRCLON','SPCXON','MSTRON','METAON','SPYON',
+  'GOOGLX','AAPLON','AVGOON','QQQON','MSTRX','COINX','GOOGLON','BABAON','IAUON','IEFAON',
+  'NFLXON','AGGON','CSCOON','JPMON','UNHON','LLYON','AAPLX','PEPON','NVDAON','MCDON',
+  'CVXON','HOODX','LMTON','SBUXON','ABTON','NFLXX','AVGOX','TQQQX','TLTON','CSCOX',
+  'CRWDX','ABBVX','AMZNX','METAX','CMCSAX','SBETON','DFDVX','BTGOON',
+]);
+
 // Audited Binance bStock wrapper snapshot (2026-08-07). A trailing B is never
 // stripped generically: only wrappers in this exact official snapshot resolve.
 const BINANCE_BSTOCK_WRAPPERS = Object.freeze([
