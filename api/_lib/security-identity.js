@@ -116,6 +116,14 @@ export const GATE_SPOT_VERIFIED_WRAPPERS = Object.freeze([
   'CRWDX','ABBVX','AMZNX','METAX','CMCSAX','SBETON','DFDVX','BTGOON',
 ]);
 
+// Gate Spot has no product-class metadata. Keep the 2026-08-14 legacy
+// commodity review scoped to exact live pair/base/quote tuples, never to a
+// bare metal ticker or a generic quote family.
+export const GATE_SPOT_EXACT_LEGACY_PAIRS = Object.freeze({
+  PAXG_USDT: Object.freeze({ base:'PAXG', quote:'USDT', underlying:'PAXG', category:'commodity' }),
+  XAUT_USDT: Object.freeze({ base:'XAUT', quote:'USDT', underlying:'XAUT', category:'commodity' }),
+});
+
 // Audited Binance bStock wrapper snapshot (2026-08-07). A trailing B is never
 // stripped generically: only wrappers in this exact official snapshot resolve.
 const BINANCE_BSTOCK_WRAPPERS = Object.freeze([

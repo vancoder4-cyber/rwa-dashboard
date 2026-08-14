@@ -1,4 +1,5 @@
 import {
+  GATE_SPOT_EXACT_LEGACY_PAIRS,
   GATE_SPOT_VERIFIED_WRAPPERS,
   SECURITY_ETF_UNDERLYINGS,
   categoryFromOfficialSignalType,
@@ -108,6 +109,18 @@ function listing(market, venue, venueSymbol, canonicalSymbol, category, extras =
     identityStatus: extras.identityStatus || 'verified',
     identityEvidence: extras.identityEvidence || null,
   };
+}
+
+export function gateExactLegacySpotListing(pair) {
+  const venueSymbol = normalizedUpper(pair?.id);
+  const exact = GATE_SPOT_EXACT_LEGACY_PAIRS[venueSymbol];
+  if (!exact || pair?.trade_status !== 'tradable') return null;
+  if (normalizedUpper(pair?.base) !== exact.base || normalizedUpper(pair?.quote) !== exact.quote) return null;
+  const identity = normalizeSignalIdentity(exact.underlying, exact.category, { venue:'gate' });
+  if (!identity) return null;
+  return listing('spot', 'gate', venueSymbol, identity.symbol, identity.category, {
+    identityEvidence:'exact audited Gate legacy RWA pair (2026-08-14) in the live official catalog',
+  });
 }
 
 function assertCatalogBounds(market, venue, rows) {
@@ -311,6 +324,11 @@ async function collectGateSpot(baseUrl) {
   if (!rawPairs.length) throw new TypeError('Gate Spot official pair catalog unavailable');
   const rows = [];
   for (const pair of rawPairs) {
+    const exactLegacy = gateExactLegacySpotListing(pair);
+    if (exactLegacy) {
+      rows.push(exactLegacy);
+      continue;
+    }
     const base = normalizedUpper(pair?.base);
     if (!GATE_WRAPPER_SET.has(base)) continue;
     const rawUnderlying = base.endsWith('ON') ? base.slice(0, -2) : base.endsWith('X') ? base.slice(0, -1) : '';

@@ -11,9 +11,11 @@ import listingChangesHandler, {
   compactListingAuditBundle,
   hydrateListingAuditSnapshot,
   hydrateListingAuditState,
+  listingSnapshotIsCacheable,
 } from '../api/listing-changes.js';
 import { validateListingAuditSnapshot } from '../api/health.js';
 import {
+  gateExactLegacySpotListing,
   isDedicatedTradeXyzSource,
   krakenListingCandidate,
 } from '../api/_lib/listing-sources.js';
@@ -246,7 +248,48 @@ test('listing collectors reject global trade.xyz fallback and Kraken same-suffix
   }), { venueSymbol:'PAXGUSD', underlying:'PAXG', category:'commodity' });
 });
 
+test('Gate listing audit admits only the two exact live legacy commodity pairs', () => {
+  assert.deepEqual(gateExactLegacySpotListing({
+    id:'PAXG_USDT', base:'PAXG', quote:'USDT', trade_status:'tradable',
+  }), {
+    market:'spot', venue:'gate', venueSymbol:'PAXG_USDT', canonicalSymbol:'XAU', category:'commodity',
+    name:null, identityStatus:'verified',
+    identityEvidence:'exact audited Gate legacy RWA pair (2026-08-14) in the live official catalog',
+  });
+  assert.deepEqual(gateExactLegacySpotListing({
+    id:'XAUT_USDT', base:'XAUT', quote:'USDT', trade_status:'tradable',
+  }), {
+    market:'spot', venue:'gate', venueSymbol:'XAUT_USDT', canonicalSymbol:'XAU', category:'commodity',
+    name:null, identityStatus:'verified',
+    identityEvidence:'exact audited Gate legacy RWA pair (2026-08-14) in the live official catalog',
+  });
+  assert.equal(gateExactLegacySpotListing({
+    id:'PAXG_USD', base:'PAXG', quote:'USD', trade_status:'tradable',
+  }), null, 'the exception must not expand to another quote');
+  assert.equal(gateExactLegacySpotListing({
+    id:'XAUT_USD', base:'XAUT', quote:'USD', trade_status:'tradable',
+  }), null, 'the XAUT exception must not expand to another quote');
+  assert.equal(gateExactLegacySpotListing({
+    id:'PAXG_USDT', base:'PAXG', quote:'BTC', trade_status:'tradable',
+  }), null, 'the official fields must agree with the exact pair identifier');
+  assert.equal(gateExactLegacySpotListing({
+    id:'PAXG_USDT', base:'XAUM', quote:'USDT', trade_status:'tradable',
+  }), null, 'a mismatched or merely gold-like base must fail closed');
+  assert.equal(gateExactLegacySpotListing({
+    id:'PAXG_USDT', base:'PAXG', quote:'USDT', trade_status:'halted',
+  }), null, 'an inactive official pair is not a live listing');
+  assert.equal(gateExactLegacySpotListing({
+    id:'QNT_USDT', base:'QNT', quote:'USDT', trade_status:'tradable',
+  }), null, 'a same-ticker Crypto pair must remain excluded');
+  assert.equal(gateExactLegacySpotListing({
+    id:'XAUM_USDT', base:'XAUM', quote:'USDT', trade_status:'tradable',
+  }), null, 'another metal token cannot inherit the two exact Gate exceptions');
+});
+
 test('listing public reader is GET-only and rejects query-based cache variation before persistence access', async () => {
+  assert.equal(listingSnapshotIsCacheable({ generatedAt:null }), false);
+  assert.equal(listingSnapshotIsCacheable({ generatedAt:'not-a-date' }), false);
+  assert.equal(listingSnapshotIsCacheable({ generatedAt:'2026-08-14T09:17:16.350Z' }), true);
   const methodResponse = responseRecorder();
   await listingChangesHandler({ method:'POST', query:{}, headers:{} }, methodResponse);
   assert.equal(methodResponse.statusCode, 405);

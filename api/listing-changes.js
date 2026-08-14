@@ -12,8 +12,8 @@ import {
 
 export const config = { regions: ['iad1'], maxDuration: 120 };
 
-const CACHE_NAMESPACE = 'rwa-listing-audit-v1';
-const BUNDLE_KEY = 'audit-bundle-v1';
+const CACHE_NAMESPACE = 'rwa-listing-audit-v2';
+const BUNDLE_KEY = 'audit-bundle-v2';
 const CACHE_TTL_SECONDS = 90 * 24 * 60 * 60;
 const MAX_STATE_BYTES = 1_750_000;
 let listingAuditRunning = false;
@@ -32,7 +32,7 @@ function hasUnexpectedQuery(req) {
 function cacheOptions(name) {
   return {
     ttl: CACHE_TTL_SECONDS,
-    tags: ['rwa-listing-audit-v1'],
+    tags: ['rwa-listing-audit-v2'],
     name,
   };
 }
@@ -177,6 +177,10 @@ export async function readListingChangesSnapshot() {
     : responseSnapshot(emptyListingAuditSnapshot());
 }
 
+export function listingSnapshotIsCacheable(snapshot) {
+  return Number.isFinite(Date.parse(String(snapshot?.generatedAt || '')));
+}
+
 export async function runListingAudit(req, res) {
   if (listingAuditRunning) {
     setNoStore(res);
@@ -261,8 +265,14 @@ export default async function handler(req, res) {
   }
   try {
     const snapshot = await readListingChangesSnapshot();
-    setPublicCache(res, 300, 600);
-    res.setHeader('Vercel-Cache-Tag', 'rwa-listing-audit-v1');
+    if (listingSnapshotIsCacheable(snapshot)) {
+      setPublicCache(res, 300, 600);
+      res.setHeader('Vercel-Cache-Tag', 'rwa-listing-audit-v2');
+    } else {
+      // Do not let a reader request made before the first v2 writer run pin an
+      // empty Warming response at the CDN after the baseline is initialized.
+      setNoStore(res);
+    }
     return res.status(200).json(snapshot);
   } catch (error) {
     console.error('[listing-changes] runtime snapshot unavailable', error);

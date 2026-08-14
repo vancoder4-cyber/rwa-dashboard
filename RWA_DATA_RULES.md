@@ -45,7 +45,7 @@ trade.xyz 当前专用 `xyz` DEX universe 有 5 个 `perpCategories` 空缺：`U
 | Bitget | Reality catalog 的 `isReality=YES`；legacy feed 只允许已审计贵金属/FX token |
 | Kraken | `asset_class=tokenized_asset` 且 wrapper 为官方 xStocks；另允许已审计贵金属 token |
 | Binance | `B` suffix 只是候选，underlying 还必须出现在官方 TradFi catalog；PAXG/XAUT 单独允许 |
-| Gate.io | 不再仅凭 `X/ON` suffix 放行；必须是精确审计 wrapper，或 underlying 已被其他官方 tokenized catalog 交叉确认 |
+| Gate.io | 不再仅凭 `X/ON` suffix 放行；必须是精确审计 wrapper，或 2026-08-14 逐 pair 审计的 `PAXG_USDT` / `XAUT_USDT` legacy commodity；未知 suffix 只能作为待复核候选 |
 | OKX | Unified Tokenized Stocks 必须为 `state=live + instType=SPOT + instCategory=3 + quoteCcy=USDT`，再从官方大写 `X` wrapper 精确剥一层；`PAXG-USD`、`PAXG-USDT`、`XAUT-USDT` 是唯一 `instCategory=1` 精确例外 |
 
 ## 4. 同名 crypto 的处理
@@ -373,9 +373,9 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 - 检测频率与展示周期分离：服务端每天读取一次官方目录并做 diff；RWA Signal Radar 默认展示滚动 7 天，允许切换滚动 30 天。不得为了“周视图”把检测降低为每周一次。
 - 覆盖必须恰好对应当前产品范围的十个独立 source：Perpetual 的 trade.xyz、Bitget、Gate、Binance、OKX，以及 Spot 的 Bitget、Gate、Kraken、Binance、OKX。主键是 `market:venue:venueSymbol`；不能以裸 canonical ticker 合并不同交易标的。
 - 每个 source 的首次成功读取只建立基线，不生成 New。只有完整、无重复且通过类别漂移检查的官方 catalog 才能替换该 source 的 last-good 基线；Unavailable/Partial 不得清空基线，也不得制造假下架。单次缺失先记为 pending removal，至少跨两个不同 UTC 日的完整观测仍缺失后才记下架，同日重试不算第二次观测。通过官方身份门控的合理纯新增必须生成提醒，不能被普通 10% 缩表保护吞掉；包含删除的显著漂移及同时超过 50 个、50% 的极端纯增长继续隔离复核。新增、下架、重新上线必须分别记录，页面“竞品新上线资产”只显示新增和重新上线。
-- 身份门控继续遵循本文件总规则。明确官方 RWA 类型且通过现有通用 admission gate 的标的可标 `verified`；普通 Crypto 类型直接拒绝。Gate Spot 不提供资产类别，新 suffix 即使与另一官方 RWA 目录同 canonical，也只能标 `review-required`，在精确 wrapper 身份确认前不得自动加入行情数据。
+- 身份门控继续遵循本文件总规则。明确官方 RWA 类型且通过现有通用 admission gate 的标的可标 `verified`；普通 Crypto 类型直接拒绝。Gate Spot 不提供资产类别，只有 2026-08-14 已逐 pair 审计且仍在官方 live catalog 的 `PAXG_USDT`、`XAUT_USDT` 两个 legacy commodity pair 与精确 wrapper 可以直接验证；不得扩成其他 quote 或相似贵金属 ticker。其他新 suffix 即使与另一官方 RWA 目录同 canonical，也只能标 `review-required`，在精确 wrapper 身份确认前不得自动加入行情数据。
 - Listing Audit 只观察和报告，不能写 allowlist、类别、生命周期、baseline 常量或客户端资产表。页面的 `Included` 必须同时匹配当前 Spot/Perpetual 数据中同一 venue 的精确 `venueSymbol` 与 `category:canonical` 身份；仅有相同 canonical underlying 不足以宣称该新 listing 已收录。
 - `pendingReviews` 是独立的活动复核队列，不受页面 7/30 天事件窗口截断；只要标的仍活跃且身份未解决，就必须持续显示。它不能因事件过期而自动放行；精确官方身份确认后可转为 `verified`，连续完整目录确认下架后才可移出活动队列。
-- 受 `CRON_SECRET` 保护的 `/api/listing-audit-cron` 是唯一 writer；公开 `/api/listing-changes` 是 GET-only、无 query 的 CDN 缓存 reader。状态与公开快照作为一个紧凑 bundle 保存于 `iad1` 的 Runtime Cache namespace `rwa-listing-audit-v1`：source 目录只保存身份键、known identity 使用紧凑行编码、事件历史只持久化一份；事件以 45 天为保留目标，inactive identity 保留 180 天，单项不超过 1.75 MB。事件数量安全上限可能在 45 天之前触发；此时必须公开 `history={retentionDays,maxEvents,truncated,droppedAtLeast,droppedThrough,retainedFrom}`，禁止整体状态为 Full，并把页面窗口计数表达为已保留历史的下限。通常降为 Partial；若 source 状态本身已经是 Unavailable，则保留更严重的 Unavailable，writer 继续返回 503。不得静默裁剪后继续宣称 Full 或“没有新资产”，health 与每日审计必须至少为非通过。该缓存是区域 best-effort 而非永久审计数据库或 system of record；逐出后必须重新 Warming，不能把现有目录误报为全量 New。
+- 受 `CRON_SECRET` 保护的 `/api/listing-audit-cron` 是唯一 writer；公开 `/api/listing-changes` 是 GET-only、无 query 的 CDN 缓存 reader。状态与公开快照作为一个紧凑 bundle 保存于 `iad1` 的 Runtime Cache namespace `rwa-listing-audit-v2`；V2 在 Gate Spot 精确 legacy commodity 覆盖补全后重新建立无提醒基线，禁止把监控修正误报为 New。source 目录只保存身份键、known identity 使用紧凑行编码、事件历史只持久化一份；事件以 45 天为保留目标，inactive identity 保留 180 天，单项不超过 1.75 MB。事件数量安全上限可能在 45 天之前触发；此时必须公开 `history={retentionDays,maxEvents,truncated,droppedAtLeast,droppedThrough,retainedFrom}`，禁止整体状态为 Full，并把页面窗口计数表达为已保留历史的下限。通常降为 Partial；若 source 状态本身已经是 Unavailable，则保留更严重的 Unavailable，writer 继续返回 503。不得静默裁剪后继续宣称 Full 或“没有新资产”，health 与每日审计必须至少为非通过。该缓存是区域 best-effort 而非永久审计数据库或 system of record；逐出后必须重新 Warming，不能把现有目录误报为全量 New。
 - Nasdaq Trader 官方目录的 `etfs` 数组只用于在场所 RWA/security 门控之后细分宽泛 Stock/Equity 类别。当前 Kraken xStocks Listing Audit 依赖该官方 ETF 目录区分 Equity 与 ETF；目录不可用或契约不完整时，该 source 必须 Unavailable，不能把未知 ETF 猜成 Equity。官方 ETF 目录不是 RWA 准入白名单。
 - OKX 的 183 Perpetual（至少 149 SWAP + 34 X-Perp）和 51 Spot（至少 48 UTS + 精确 3 gold）是已审核下限，不是阻止官方新增的永久精确数量。低于任一分项、Crypto/category 泄漏、重复或 market-data join 不完整继续失败；合法增长由 Listing Audit 单独提醒。

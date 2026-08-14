@@ -3554,6 +3554,7 @@ async function fetchTradeXyz() {
     const u = universe[i];
     const c = ctxs[i];
     if (!c) continue;
+    if (u?.isDelisted === true || ['1','true','yes'].includes(String(u?.isDelisted || '').trim().toLowerCase())) continue;
     let rawName = u.name || '';
     const venueCoin = (rawName.includes(':') ? rawName.split(':')[1] : rawName).toUpperCase();
     const officialType = officialCategoryByCoin[String(rawName).toLowerCase()] || officialCategoryByCoin[`xyz:${venueCoin}`.toLowerCase()] || '';
@@ -9182,9 +9183,22 @@ function _isRwaBase(base) {
 // (COINX = Backed, TSLAon = Ondo) or are registered in ASSET_META.
 // Commodities (PAXG, XAUT, XAU…) are the exception — they trade under
 // their own unique tickers and are safe to allow.
+function isExactGateLegacySpotPair(entry) {
+  const venueSymbol = String(entry?.id || '').toUpperCase();
+  const exact = GATE_SPOT_EXACT_LEGACY_PAIRS[venueSymbol];
+  return Boolean(exact && entry?.trade_status === 'tradable' &&
+    String(entry?.base || '').toUpperCase() === exact.base &&
+    String(entry?.quote || '').toUpperCase() === exact.quote);
+}
+
 function _isRwaSpotBase(base, venue = '') {
   if (!base || base.length < 2) return false;
   const up = base.toUpperCase();
+
+  // Gate publishes no asset class. Its security wrappers must always resolve
+  // through the exact audited set before any mutable venue metadata; the two
+  // legacy commodity pairs are handled separately with id/base/quote checks.
+  if (venue === 'gate') return GATE_SPOT_VERIFIED_WRAPPERS.has(up);
 
   // 1. Metadata is venue-scoped even for hand-curated wrapper tickers. This
   // prevents a same-name crypto token on another venue from inheriting a
@@ -9192,7 +9206,6 @@ function _isRwaSpotBase(base, venue = '') {
   if (typeof ASSET_META !== 'undefined' && ASSET_META[up]) {
     const allowedVenues = ASSET_META[up].venues || [];
     if (venue && allowedVenues.includes(venue)) return true;
-    if (venue === 'gate' && GATE_SPOT_VERIFIED_WRAPPERS.has(up)) return true;
   }
 
   // 2. Tokenised suffix detected (COINX, GOOGLon, SPYon…) → allow if underlying is RWA
@@ -9205,9 +9218,6 @@ function _isRwaSpotBase(base, venue = '') {
     // Generic suffix matching is not sufficient proof: an unrelated crypto
     // token can also end in X/ON. Gate has no asset-class field on spot pairs,
     // so require an exact audited wrapper and fail closed on new names.
-    if (venue === 'gate') {
-      return GATE_SPOT_VERIFIED_WRAPPERS.has(up);
-    }
     return false;
   }
 
@@ -9275,7 +9285,7 @@ async function fetchSpotRwaGate(generation = spotRefreshGeneration) {
   for (const entry of catalog) {
     const pair = entry.id || '';
     const base = String(entry.base || pair.replace(/_(USDT|USD)$/i, '')).toUpperCase();
-    if (!_isRwaSpotBase(base, 'gate')) continue;
+    if (!isExactGateLegacySpotPair(entry) && !_isRwaSpotBase(base, 'gate')) continue;
     const t = tickerMap[pair] || {};
     const gateUnderlying = TOKENIZED_ETF_WRAPPERS[base] || _arbUnderlyingKey(base);
     if (gateUnderlying !== base) {
@@ -10157,9 +10167,13 @@ const ASSET_META = {
 // venue catalogs add dynamic entries to ASSET_META.
 const STATIC_SPOT_ASSET_KEYS = new Set(Object.keys(ASSET_META));
 
-// Exact Gate spot wrappers audited against Bitget Reality and Kraken xStocks
-// on 2026-08-07. The dynamic underlying set below permits newly cross-verified
-// listings while keeping unknown suffix collisions fail-closed.
+// Exact Gate spot wrappers were audited against official tokenized-security
+// catalogs on 2026-08-07; the two legacy commodity pairs were reviewed on
+// 2026-08-14. Unknown suffix or metal-like tickers remain fail-closed.
+const GATE_SPOT_EXACT_LEGACY_PAIRS = Object.freeze({
+  PAXG_USDT:Object.freeze({ base:'PAXG', quote:'USDT', underlying:'PAXG', category:'commodity' }),
+  XAUT_USDT:Object.freeze({ base:'XAUT', quote:'USDT', underlying:'XAUT', category:'commodity' }),
+});
 const GATE_SPOT_VERIFIED_WRAPPERS = new Set([
   'SPCXX','CRCLX','HOODON','SLVON','NVDAX','COINON','ACNON','PLTRON','SPYX','MSFTON',
   'AMDON','TSLAON','AMZNON','SKHYON','TSLAX','CRCLON','SPCXON','MSTRON','METAON','SPYON',

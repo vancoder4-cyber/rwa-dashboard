@@ -16,6 +16,7 @@ import {
 } from '../api/_lib/signal-analysis.js';
 import {
   BROAD_STOCK_INDEX_UNDERLYINGS,
+  GATE_SPOT_EXACT_LEGACY_PAIRS,
   GATE_SPOT_VERIFIED_WRAPPERS,
   SECURITY_ETF_UNDERLYINGS,
   SECURITY_LISTING_REGISTRY,
@@ -197,6 +198,9 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
 
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   assert.match(html, /const BROAD_STOCK_INDEX_SYMBOLS = new Set\(\['SP500','NDX100','KR200'\]\)/);
+  const tradeXyzLoader = sourceBetween(html, 'async function fetchTradeXyz()', '// API: Bitget');
+  assert.match(tradeXyzLoader, /u\?\.isDelisted === true[\s\S]*?continue/,
+    'the main Perpetual page must exclude the same officially delisted trade.xyz rows as Radar and Listing Audit');
   const registrySource = sourceBetween(
     html,
     'const SECURITY_LISTING_REGISTRY = Object.freeze({',
@@ -245,6 +249,37 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
     [...GATE_SPOT_VERIFIED_WRAPPERS].sort(),
     'Gate Spot exact-wrapper identity drift between client and server',
   );
+  const gateLegacySource = sourceBetween(
+    html,
+    'const GATE_SPOT_EXACT_LEGACY_PAIRS = Object.freeze({',
+    'const GATE_SPOT_VERIFIED_WRAPPERS = new Set([',
+  );
+  const clientGateLegacyPairs = Object.fromEntries(
+    [...gateLegacySource.matchAll(/([A-Z0-9_]+):Object\.freeze\(\{ base:'([^']+)', quote:'([^']+)', underlying:'([^']+)', category:'([^']+)' \}\)/g)]
+      .map(match => [match[1], { base:match[2], quote:match[3], underlying:match[4], category:match[5] }]),
+  );
+  assert.deepEqual(
+    clientGateLegacyPairs,
+    GATE_SPOT_EXACT_LEGACY_PAIRS,
+    'Gate Spot exact legacy-pair identity drift between client and server',
+  );
+  const gateSpotLoader = sourceBetween(html, 'async function fetchSpotRwaGate(', '// ── Kraken Spot Fetch ──');
+  assert.match(gateSpotLoader, /isExactGateLegacySpotPair\(entry\) && !_isRwaSpotBase\(base, 'gate'\)/);
+  const spotIdentityGate = sourceBetween(html, 'function _isRwaSpotBase(', '// ── Proxy base URLs');
+  assert.match(spotIdentityGate, /const up = base\.toUpperCase\(\);[\s\S]*?if \(venue === 'gate'\) return GATE_SPOT_VERIFIED_WRAPPERS\.has\(up\);[\s\S]*?if \(typeof ASSET_META/,
+    'Gate must resolve its exact wrapper gate before mutable venue metadata or commodity ticker fallbacks');
+  assert.doesNotMatch(spotIdentityGate, /allowedVenues\.includes\('gate'\)/,
+    'a prior refresh must not widen a Gate legacy pair through mutable ASSET_META venues');
+});
+
+test('listing audit cache epoch is internally consistent and leaves no pre-release v1 storage key', async () => {
+  const source = await readFile(new URL('../api/listing-changes.js', import.meta.url), 'utf8');
+  assert.match(source, /const CACHE_NAMESPACE = 'rwa-listing-audit-v2'/);
+  assert.match(source, /const BUNDLE_KEY = 'audit-bundle-v2'/);
+  assert.equal((source.match(/rwa-listing-audit-v2/g) || []).length, 3);
+  assert.doesNotMatch(source, /rwa-listing-audit-v1|audit-bundle-v1/);
+  assert.match(source, /if \(listingSnapshotIsCacheable\(snapshot\)\) \{[\s\S]*?setPublicCache\(res, 300, 600\)[\s\S]*?Vercel-Cache-Tag[\s\S]*?\} else \{[\s\S]*?setNoStore\(res\)/,
+    'an uninitialized cache epoch must never CDN-cache its empty Warming snapshot');
 });
 
 test('signal history uses idempotent hourly buckets and a bounded seven-day ring', () => {
