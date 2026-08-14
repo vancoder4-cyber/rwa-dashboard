@@ -1654,6 +1654,26 @@ test('Spot cold load streams venue catalogs while optional depth enrichment stay
   assert.match(krakenXStockSource, /info\.aclass_base \|\| ''\)\.toLowerCase\(\) !== 'tokenized_asset'/);
   assert.match(krakenXStockSource, /info\.status \|\| ''\)\.toLowerCase\(\) !== 'online'/);
   assert.match(krakenXStockSource, /pair: pairInfo\.altname, venueSymbol:pairInfo\.altname/);
+  assert.match(krakenXStockSource, /Ticker\?asset_class=tokenized_asset/);
+  assert.match(krakenXStockSource, /Promise\.allSettled\(\[pairsRequest, tickerRequest\]\)/,
+    'the fixed tokenized catalog and one full ticker snapshot should start together');
+  assert.match(krakenXStockSource, /const t = tickerRows\[pairInfo\.altname\] \|\| \{\}/,
+    'Kraken xStocks must join only the exact case-sensitive official altname');
+  assert.match(krakenXStockSource, /volume24h \* vwap24h/);
+  assert.match(krakenXStockSource, /last, chg:null, vol:volumeUsd/);
+  assert.doesNotMatch(krakenXStockSource, /pairKey\.includes|\.startsWith\(|\bt\.o\b|volume24h \* last|vol24 \* last/,
+    'Kraken xStocks must not use fuzzy aliases, UTC-day open, or last-price volume estimation');
+
+  const krakenCoreSource = sourceBetween(
+    html,
+    'async function fetchSpotRwaKraken(',
+    '// ── Kraken xStocks',
+  );
+  assert.match(krakenCoreSource, /Object\.prototype\.hasOwnProperty\.call\(results, alias\)/);
+  assert.match(krakenCoreSource, /volume24h \* vwap24h/);
+  assert.match(krakenCoreSource, /last, chg:null, vol:volumeUsd/);
+  assert.doesNotMatch(krakenCoreSource, /pairKey\.startsWith|\bt\.o\b|volume24h \* last|vol24 \* last/,
+    'legacy Kraken RWA rows follow the same exact-alias and rolling-volume semantics');
 
   const settleSource = sourceBetween(
     html,

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { collectVerifiedSpotListingSourceObservations } from './listing-sources.js';
 import { normalizeSignalIdentity } from './security-identity.js';
-import { fetchJsonWithPolicy, mapWithConcurrency } from './upstream.js';
+import { fetchJsonWithPolicy } from './upstream.js';
 
 export const SPOT_ANOMALY_FORMULA_VERSION = 'rwa-spot-volume-price-anomaly-1.0';
 export const SPOT_ANOMALY_HISTORY_NAMESPACE = 'rwa-signal-spot-volume-price-history-v1';
@@ -251,10 +251,15 @@ function krakenTickerFields(ticker) {
 }
 
 async function fetchKrakenTickerPayload(rows, tokenized, deadlineAt, maximumMs = 5_000) {
-  const pairs = rows.map(row => row.venueSymbol).join(',');
-  const assetClass = tokenized ? '&asset_class=tokenized_asset' : '';
+  const pairs = rows.map(row => row.marketQuerySymbol || row.venueSymbol).join(',');
+  // Kraken can return the complete tokenized-asset ticker universe in one
+  // official response. This avoids many serial batches and, critically, keeps
+  // the case-sensitive lowercase `x` market identity intact.
+  const query = tokenized
+    ? 'asset_class=tokenized_asset'
+    : `pair=${encodeURIComponent(pairs)}`;
   const payload = await fetchJsonWithPolicy(
-    `${KRAKEN_BASE}/Ticker?pair=${encodeURIComponent(pairs)}${assetClass}`,
+    `${KRAKEN_BASE}/Ticker?${query}`,
     { headers: { Accept: 'application/json' } },
     boundedMarketPolicy(deadlineAt, maximumMs),
   );
@@ -268,7 +273,11 @@ function krakenAliasIndex(rows) {
   const index = new Map();
   const duplicates = new Set();
   for (const row of rows) {
-    const aliases = [row.venueSymbol, ...(Array.isArray(row.marketAliases) ? row.marketAliases : [])];
+    const aliases = [
+      row.marketQuerySymbol,
+      row.venueSymbol,
+      ...(Array.isArray(row.marketAliases) ? row.marketAliases : []),
+    ];
     for (const alias of aliases.map(normalizedUpper).filter(Boolean)) {
       if (index.has(alias) && index.get(alias) !== row.venueSymbol) duplicates.add(alias);
       else index.set(alias, row.venueSymbol);
@@ -278,46 +287,48 @@ function krakenAliasIndex(rows) {
   return index;
 }
 
+export function resolveKrakenTickerPayload(rows, payload, { tokenized = false } = {}) {
+  const result = new Map();
+  if (!payload || typeof payload !== 'object') return result;
+  if (tokenized) {
+    for (const row of rows) {
+      // The tokenized SPV internal key is not an alias of the tradable xStock
+      // market and may carry different values. Join only the exact official,
+      // case-preserved AssetPairs altname.
+      const querySymbol = String(row?.marketQuerySymbol || '').trim();
+      if (querySymbol && Object.prototype.hasOwnProperty.call(payload, querySymbol)) {
+        result.set(row.venueSymbol, krakenTickerFields(payload[querySymbol]));
+      }
+    }
+    return result;
+  }
+
+  const aliases = krakenAliasIndex(rows);
+  for (const [upstreamSymbol, ticker] of Object.entries(payload)) {
+    const venueSymbol = aliases.get(normalizedUpper(upstreamSymbol));
+    if (venueSymbol && !result.has(venueSymbol)) {
+      result.set(venueSymbol, krakenTickerFields(ticker));
+    }
+  }
+  return result;
+}
+
 async function krakenMarket(_baseUrl, catalog, deadlineAt) {
   const result = new Map();
   const groups = [
     { tokenized: false, rows: catalog.filter(row => row.marketDataProfile !== 'kraken-tokenized') },
     { tokenized: true, rows: catalog.filter(row => row.marketDataProfile === 'kraken-tokenized') },
-  ];
-  for (const group of groups) {
-    const chunks = [];
-    for (let index = 0; index < group.rows.length; index += 15) chunks.push(group.rows.slice(index, index + 15));
-    const settled = await mapWithConcurrency(chunks, 5, async chunk => {
-      try { return { chunk, payload: await fetchKrakenTickerPayload(chunk, group.tokenized, deadlineAt) }; }
-      catch { return { chunk, payload: null }; }
+  ].filter(group => group.rows.length);
+  const settled = await Promise.allSettled(groups.map(async group => ({
+    group,
+    payload:await fetchKrakenTickerPayload(group.rows, group.tokenized, deadlineAt, 10_000),
+  })));
+  for (const response of settled) {
+    if (response.status !== 'fulfilled') continue;
+    const resolved = resolveKrakenTickerPayload(response.value.group.rows, response.value.payload, {
+      tokenized:response.value.group.tokenized,
     });
-    for (const batch of settled) {
-      if (!batch.payload) continue;
-      const aliases = krakenAliasIndex(batch.chunk);
-      for (const [upstreamSymbol, ticker] of Object.entries(batch.payload)) {
-        const venueSymbol = aliases.get(normalizedUpper(upstreamSymbol));
-        if (venueSymbol) result.set(venueSymbol, krakenTickerFields(ticker));
-      }
-    }
-
-    // Kraken may return an internal pair key instead of the official altname.
-    // Retry only unresolved identities one-by-one: a one-row official response
-    // maps deterministically to the exact requested catalog instrument without
-    // substring or ticker-similarity matching.
-    const remainingForRecovery = deadlineAt - Date.now();
-    const missing = remainingForRecovery >= 750
-      ? group.rows.filter(row => !result.has(row.venueSymbol)).slice(0, 10)
-      : [];
-    const recovered = await mapWithConcurrency(missing, 8, async row => {
-      try {
-        const payload = await fetchKrakenTickerPayload([row], group.tokenized, deadlineAt, 2_500);
-        const entries = Object.values(payload);
-        return entries.length === 1 ? [row.venueSymbol, krakenTickerFields(entries[0])] : null;
-      } catch {
-        return null;
-      }
-    });
-    for (const entry of recovered.filter(Boolean)) result.set(entry[0], entry[1]);
+    for (const [venueSymbol, fields] of resolved) result.set(venueSymbol, fields);
   }
   return new Map(catalog.map(row => [row.venueSymbol, result.get(row.venueSymbol) || marketFields(null, null, null, null)]));
 }
@@ -347,6 +358,7 @@ function normalizeCatalogListing(row) {
     quote,
     name: row?.name || null,
     marketDataProfile: row?.marketDataProfile || null,
+    marketQuerySymbol: String(row?.marketQuerySymbol || '').trim() || null,
     marketAliases: Array.isArray(row?.marketAliases) ? row.marketAliases : [],
   };
 }

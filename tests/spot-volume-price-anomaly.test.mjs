@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  SPOT_ANOMALY_COLLECTION_BUDGET_MS,
   SPOT_ANOMALY_HISTORY_DAYS,
   SPOT_ANOMALY_SOURCE_NAMES,
   buildSpotVolumePriceAnomalies,
@@ -10,6 +11,7 @@ import {
   isSpotAnomalyHistoryComparable,
   mergeSpotDailyHistory,
   normalizeSpotDailyHistory,
+  resolveKrakenTickerPayload,
   spotDailyHistoryBytes,
 } from '../api/_lib/spot-volume-price-anomaly.js';
 
@@ -268,6 +270,111 @@ test('Spot history rejects a valid-shaped Runtime Cache item above 1.75 MB', () 
     () => normalizeSpotDailyHistory(oversized, CAPTURED_AT),
     error => error instanceof RangeError && /exceeds 1750000 bytes/.test(error.message),
   );
+});
+
+test('Kraken ticker resolver accepts only deterministic official aliases and rejects same-suffix lookalikes', () => {
+  const ticker = (baseVolume, vwap) => ({ v:['0', String(baseVolume)], p:['0', String(vwap)], o:'1' });
+  const tokenizedRows = [
+    {
+      venueSymbol:'AAPLXUSD', marketQuerySymbol:'AAPLxUSD',
+      marketAliases:['AAPLxUSD', 'AAPLx/USD'],
+    },
+    {
+      // `SNxUSD` is the case-sensitive tokenized wrapper for underlying SN;
+      // uppercase `SNXUSD` is also an ordinary Crypto pair name.
+      venueSymbol:'SNXUSD', marketQuerySymbol:'SNxUSD',
+      marketAliases:['SNxUSD', 'SNx/USD'],
+    },
+  ];
+  const tokenized = resolveKrakenTickerPayload(tokenizedRows, {
+    AAPLxUSD:ticker(100, 6_000),
+    AAPLSPVUSD:ticker(999, 9_999),
+    AAPLXUSD:ticker(888, 8_888),
+    SNXUSD:ticker(777, 7_777),
+  }, { tokenized:true });
+
+  assert.equal(tokenized.size, 1);
+  assert.equal(tokenized.get('AAPLXUSD').currentVolumeUsd, 600_000);
+  assert.equal(tokenized.has('SNXUSD'), false,
+    'an uppercase Crypto response key must not satisfy the exact lowercase-x tokenized market key');
+
+  const standardRow = {
+    venueSymbol:'PAXGUSD', marketQuerySymbol:'PAXGUSD',
+    marketAliases:['PAXGZUSD', 'PAXGUSD', 'PAXG/USD'],
+  };
+  for (const officialKey of ['PAXGZUSD', 'PAXGUSD', 'PAXG/USD']) {
+    const standard = resolveKrakenTickerPayload([standardRow], { [officialKey]:ticker(10, 2_000) });
+    assert.equal(standard.get('PAXGUSD').currentVolumeUsd, 20_000,
+      `standard Kraken ticker key ${officialKey} must map through its exact official alias`);
+  }
+
+  const ambiguous = resolveKrakenTickerPayload([
+    { venueSymbol:'ONEUSD', marketAliases:['SHARED'] },
+    { venueSymbol:'TWOUSD', marketAliases:['SHARED'] },
+  ], { SHARED:ticker(1, 1) });
+  assert.equal(ambiguous.size, 0, 'a shared official alias must be quarantined instead of guessed');
+});
+
+test('Kraken resolves the full 166-listing tokenized universe in one bounded official ticker request', async () => {
+  const listings = Array.from({ length:166 }, (_, index) => {
+    const symbol = `R${String(index).padStart(3, '0')}`;
+    return {
+      market:'spot',
+      venue:'kraken',
+      venueSymbol:`${symbol}XUSD`,
+      canonicalSymbol:symbol,
+      category:'equity',
+      identityStatus:'verified',
+      marketDataProfile:'kraken-tokenized',
+      marketQuerySymbol:`${symbol}xUSD`,
+      marketAliases:[`${symbol}xUSD`, `${symbol}x/USD`],
+    };
+  });
+  const result = Object.fromEntries(listings.map((row, index) => [row.marketQuerySymbol, {
+    v:['0', String(100 + index)],
+    p:['0', '6000'],
+    o:'1',
+  }]));
+  const catalogObservations = [{
+    market:'spot', venue:'kraken', status:'full', reason:null, listings,
+  }];
+  const tickerUrls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async input => {
+    const url = String(input);
+    tickerUrls.push(url);
+    if (!url.includes('/Ticker?asset_class=tokenized_asset')) {
+      throw new Error(`Unexpected Kraken test URL: ${url}`);
+    }
+    return new Response(JSON.stringify({ error:[], result }), {
+      status:200,
+      headers:{ 'content-type':'application/json' },
+    });
+  };
+  try {
+    const snapshot = await collectSpotMarketSnapshot('https://dashboard.example', { catalogObservations });
+    assert.equal(SPOT_ANOMALY_COLLECTION_BUDGET_MS, 23_000);
+    assert.equal(tickerUrls.length, 1, '166 tokenized listings must not fan out into per-symbol recovery calls');
+    assert.equal(new URL(tickerUrls[0]).searchParams.get('asset_class'), 'tokenized_asset');
+    assert.equal(new URL(tickerUrls[0]).searchParams.has('pair'), false);
+    assert.equal(snapshot.sources.kraken.status, 'full');
+    assert.equal(snapshot.sources.kraken.listingCount, 166);
+    assert.equal(snapshot.sources.kraken.marketFieldCount, 166);
+    assert.equal(snapshot.sources.kraken.priceFieldCount, 0);
+    assert.equal(snapshot.listings.length, 166);
+    assert.equal(snapshot.listings[0].currentVolumeUsd, 600_000);
+
+    const callsBeforeExpiredDeadline = tickerUrls.length;
+    const expired = await collectSpotMarketSnapshot('https://dashboard.example', {
+      catalogObservations,
+      deadlineAt:Date.now() + 100,
+    });
+    assert.equal(tickerUrls.length, callsBeforeExpiredDeadline,
+      'an exhausted shared deadline must stop before another Kraken request starts');
+    assert.equal(expired.sources.kraken.status, 'unavailable');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('market normalization uses quote turnover, Bitget platform turnover, and no Kraken price proxy', async () => {

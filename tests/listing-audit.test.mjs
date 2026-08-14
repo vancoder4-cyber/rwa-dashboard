@@ -18,6 +18,7 @@ import {
   gateExactLegacySpotListing,
   isDedicatedTradeXyzSource,
   krakenListingCandidate,
+  mergeKrakenOfficialPairEntries,
 } from '../api/_lib/listing-sources.js';
 
 function responseRecorder() {
@@ -237,15 +238,65 @@ test('listing collectors reject global trade.xyz fallback and Kraken same-suffix
   assert.deepEqual(krakenListingCandidate('AAPLSPVUSD', {
     altname:'AAPLxUSD', wsname:'AAPLx/USD', base:'AAPLx', quote:'ZUSD',
     aclass_base:'tokenized_asset', status:'online',
-  }), { venueSymbol:'AAPLXUSD', underlying:'AAPL', category:'equity' });
+  }), { venueSymbol:'AAPLXUSD', marketQuerySymbol:'AAPLxUSD', underlying:'AAPL', category:'equity' });
   assert.deepEqual(krakenListingCandidate('NEWETFSPVUSD', {
     altname:'NEWETFxUSD', wsname:'NEWETFx/USD', base:'NEWETFx', quote:'ZUSD',
     aclass_base:'tokenized_asset', status:'online',
-  }, new Set(['NEWETF'])), { venueSymbol:'NEWETFXUSD', underlying:'NEWETF', category:'etf' });
+  }, new Set(['NEWETF'])), { venueSymbol:'NEWETFXUSD', marketQuerySymbol:'NEWETFxUSD', underlying:'NEWETF', category:'etf' });
   assert.deepEqual(krakenListingCandidate('PAXGUSD', {
     altname:'PAXGUSD', wsname:'PAXG/USD', base:'PAXG', quote:'ZUSD',
     aclass_base:'currency', status:'online',
-  }), { venueSymbol:'PAXGUSD', underlying:'PAXG', category:'commodity' });
+  }), { venueSymbol:'PAXGUSD', marketQuerySymbol:'PAXGUSD', underlying:'PAXG', category:'commodity' });
+});
+
+test('Kraken official pair variants merge deterministically without admitting internal SPV or Crypto aliases', () => {
+  const aapl = {
+    altname:'AAPLxUSD', wsname:'AAPLx/USD', base:'AAPLx', quote:'ZUSD',
+    aclass_base:'tokenized_asset', status:'online',
+  };
+  const merged = mergeKrakenOfficialPairEntries([
+    ['AAPLSPVUSD', aapl],
+    ['AAPLxUSD', aapl],
+    ['SNXUSD', {
+      altname:'SNXUSD', wsname:'SNX/USD', base:'SNX', quote:'ZUSD',
+      aclass_base:'currency', status:'online',
+    }],
+    ['PAXGZUSD', {
+      altname:'PAXGUSD', wsname:'PAXG/USD', base:'PAXG', quote:'ZUSD',
+      aclass_base:'currency', status:'online',
+    }],
+  ]);
+
+  assert.equal(merged.length, 2);
+  const tokenized = merged.find(row => row.venueSymbol === 'AAPLXUSD');
+  assert.equal(tokenized.marketQuerySymbol, 'AAPLxUSD');
+  assert.equal(tokenized.marketDataProfile, 'kraken-tokenized');
+  assert.deepEqual(new Set(tokenized.marketAliases), new Set(['AAPLxUSD', 'AAPLx/USD']));
+  assert.equal(tokenized.marketAliases.includes('AAPLSPVUSD'), false,
+    'the internal SPV object key is not the tradable xStock ticker identity');
+
+  const standard = merged.find(row => row.venueSymbol === 'PAXGUSD');
+  assert.deepEqual(new Set(standard.marketAliases), new Set(['PAXGZUSD', 'PAXGUSD', 'PAXG/USD']));
+  assert.equal(merged.some(row => row.venueSymbol === 'SNXUSD'), false,
+    'an ordinary Crypto pair ending in X must not become a tokenized security');
+
+  const reversed = mergeKrakenOfficialPairEntries([
+    ['PAXGZUSD', {
+      altname:'PAXGUSD', wsname:'PAXG/USD', base:'PAXG', quote:'ZUSD',
+      aclass_base:'currency', status:'online',
+    }],
+    ['SNXUSD', {
+      altname:'SNXUSD', wsname:'SNX/USD', base:'SNX', quote:'ZUSD',
+      aclass_base:'currency', status:'online',
+    }],
+    ['AAPLxUSD', aapl],
+    ['AAPLSPVUSD', aapl],
+  ]);
+  assert.deepEqual(
+    reversed.map(row => ({ ...row, marketAliases:[...row.marketAliases].sort() })).sort((a, b) => a.venueSymbol.localeCompare(b.venueSymbol)),
+    merged.map(row => ({ ...row, marketAliases:[...row.marketAliases].sort() })).sort((a, b) => a.venueSymbol.localeCompare(b.venueSymbol)),
+    'catalog response order must not change the admitted identities or their official aliases',
+  );
 });
 
 test('Gate listing audit admits only the two exact live legacy commodity pairs', () => {

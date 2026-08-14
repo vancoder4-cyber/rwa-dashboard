@@ -886,6 +886,7 @@ test('missing numeric fields remain unavailable through aggregation and sorting'
   assert.match(html, /compareNullableNumbers\(a\.vol, b\.vol, -1\)/);
   const topThirtyRender = html.slice(html.indexOf('function renderTop30Volume'), html.indexOf('// TRADITIONAL MARKET + OPTIONS ACTIVITY'));
   assert.equal((topThirtyRender.match(/<tbody>\$\{rows\}<\/tbody>/g) || []).length, 1);
-  assert.match(html, /last:null, chg:null, vol:null, hi:null, lo:null, bid:null, ask:null/);
-  assert.match(html, /fieldStatus:\{ last:'unavailable', change:'unavailable', volume:'unavailable'/);
+  assert.match(html, /const last = numberOrNull\(t\?\.c\?\.\[0\]\)/);
+  assert.match(html, /last:last !== null \? 'full' : 'unavailable'/);
+  assert.match(html, /change:'unavailable'/);
 });

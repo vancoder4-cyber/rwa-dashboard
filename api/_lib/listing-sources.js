@@ -91,20 +91,85 @@ export function krakenListingCandidate(pairName, pair, officialEtfSet = ETF_UNDE
   const wsParts = normalized(pair?.wsname).split('/');
   const quote = normalizedUpper(wsParts[1] || pair?.quote).replace(/^[XZ](?=USD|USDT)/, '');
   if (!['USD', 'USDT'].includes(quote)) return null;
-  const venueSymbol = normalizedUpper(pair?.altname || pairName);
+  const tokenized = normalized(pair?.aclass_base).toLowerCase() === 'tokenized_asset';
+  // Kraken's tokenized-asset suffix is a case-sensitive lowercase `x` in
+  // request parameters (for example `AAPLxUSD`). Keep that official spelling
+  // separately from the dashboard's case-normalized listing identity.
+  const marketQuerySymbol = tokenized
+    ? normalized(pair?.altname)
+    : normalized(pair?.altname || pairName);
+  const venueSymbol = normalizedUpper(marketQuerySymbol);
   if (!venueSymbol) return null;
   const rawBase = normalized(wsParts[0] || pair?.base);
-  if (normalized(pair?.aclass_base).toLowerCase() === 'tokenized_asset' && /x$/i.test(rawBase)) {
+  if (tokenized && /x$/i.test(rawBase)) {
+    if (normalizedUpper(normalized(pair?.wsname).replace('/', '')) !== venueSymbol) return null;
     const underlying = normalizedUpper(rawBase.replace(/x$/i, ''));
     if (!underlying) return null;
     return {
       venueSymbol,
+      marketQuerySymbol,
       underlying,
       category:officialEtfSet.has(underlying) || ETF_UNDERLYING_SET.has(underlying) ? 'etf' : 'equity',
     };
   }
   const legacy = KRAKEN_EXACT_LEGACY_RWA[normalizedUpper(rawBase)];
-  return legacy ? { venueSymbol, ...legacy } : null;
+  return legacy ? { venueSymbol, marketQuerySymbol, ...legacy } : null;
+}
+
+export function mergeKrakenOfficialPairEntries(pairEntries, officialEtfSet = ETF_UNDERLYING_SET) {
+  const bySymbol = new Map();
+  const identityConflicts = new Set();
+  for (const [pairName, pair] of Array.isArray(pairEntries) ? pairEntries : []) {
+    const candidate = krakenListingCandidate(pairName, pair, officialEtfSet);
+    if (!candidate) continue;
+    const marketDataProfile = normalized(pair?.aclass_base).toLowerCase() === 'tokenized_asset'
+      ? 'kraken-tokenized'
+      : 'kraken-standard';
+    const wsname = normalized(pair?.wsname);
+    // Tokenized catalogs expose both the market altname (`AAPLxUSD`) and an
+    // internal SPV key (`AAPLSPVUSD`). They can have different ticker values,
+    // so only the official market altname/wsname identity may join that row.
+    // Legacy standard pairs retain their exact official pair key aliases.
+    const officialAliases = (marketDataProfile === 'kraken-tokenized'
+      ? [normalized(pair?.altname), wsname, wsname.replace('/', '')]
+      : [normalized(pairName), normalized(pair?.altname), wsname, wsname.replace('/', '')]
+    ).filter(Boolean);
+    const existing = bySymbol.get(candidate.venueSymbol);
+    if (existing && (
+      existing.underlying !== candidate.underlying ||
+      existing.category !== candidate.category ||
+      existing.marketDataProfile !== marketDataProfile
+    )) {
+      identityConflicts.add(candidate.venueSymbol);
+      bySymbol.delete(candidate.venueSymbol);
+      continue;
+    }
+    if (identityConflicts.has(candidate.venueSymbol)) continue;
+    if (existing) {
+      for (const alias of officialAliases) existing.marketAliases.add(alias);
+      continue;
+    }
+    bySymbol.set(candidate.venueSymbol, {
+      ...candidate,
+      marketDataProfile,
+      marketAliases:new Set(officialAliases),
+    });
+  }
+
+  // An alias shared by two distinct official listings is not safe evidence for
+  // either listing. Remove it from the join surface rather than guessing.
+  const aliasOwners = new Map();
+  for (const entry of bySymbol.values()) {
+    for (const alias of entry.marketAliases) {
+      const key = normalizedUpper(alias);
+      if (!aliasOwners.has(key)) aliasOwners.set(key, new Set());
+      aliasOwners.get(key).add(entry.venueSymbol);
+    }
+  }
+  return [...bySymbol.values()].map(entry => ({
+    ...entry,
+    marketAliases:[...entry.marketAliases].filter(alias => aliasOwners.get(normalizedUpper(alias))?.size === 1),
+  }));
 }
 
 function listing(market, venue, venueSymbol, canonicalSymbol, category, extras = {}) {
@@ -123,6 +188,7 @@ function listing(market, venue, venueSymbol, canonicalSymbol, category, extras =
   // these additive fields; identity still comes exclusively from the fields
   // above.
   if (extras.marketDataProfile) row.marketDataProfile = normalized(extras.marketDataProfile);
+  if (extras.marketQuerySymbol) row.marketQuerySymbol = normalized(extras.marketQuerySymbol);
   if (Array.isArray(extras.marketAliases)) {
     row.marketAliases = [...new Set(extras.marketAliases.map(normalizedUpper).filter(Boolean))];
   }
@@ -391,27 +457,18 @@ async function collectKrakenSpot(baseUrl, deadlineAt = null) {
     throw new TypeError('Official U.S. ETF identity directory unavailable');
   }
   const officialEtfSet = new Set(directoryPayload.etfs);
-  const bySymbol = new Map();
-  for (const [pairName, pair] of [
+  const mergedEntries = mergeKrakenOfficialPairEntries([
     ...Object.entries(standardPayload.result),
     ...Object.entries(tokenizedPayload.result),
-  ]) {
-    const candidate = krakenListingCandidate(pairName, pair, officialEtfSet);
-    if (candidate) bySymbol.set(candidate.venueSymbol, {
-      ...candidate,
-      pairName,
-      marketDataProfile: normalized(pair?.aclass_base).toLowerCase() === 'tokenized_asset'
-        ? 'kraken-tokenized'
-        : 'kraken-standard',
-    });
-  }
+  ], officialEtfSet);
   const rows = [];
-  for (const entry of bySymbol.values()) {
+  for (const entry of mergedEntries) {
     const identity = normalizeSignalIdentity(entry.underlying, entry.category, { venue: 'kraken' });
     if (!identity) continue;
     rows.push(listing('spot', 'kraken', entry.venueSymbol, identity.symbol, identity.category, {
       marketDataProfile: entry.marketDataProfile,
-      marketAliases: [entry.venueSymbol, entry.pairName],
+      marketQuerySymbol: entry.marketQuerySymbol,
+      marketAliases: entry.marketAliases,
       identityEvidence: entry.category === 'commodity'
         ? 'exact audited Kraken RWA asset in the live official AssetPairs catalog'
         : 'Kraken official tokenized_asset AssetPairs catalog',

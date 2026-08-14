@@ -10317,6 +10317,13 @@ async function fetchSpotRwaGate(generation = spotRefreshGeneration) {
 
 // ── Kraken Spot Fetch ──
 async function fetchSpotRwaKraken(generation = spotRefreshGeneration) {
+  // Start the tokenized catalog and its one all-market ticker request in
+  // parallel with the legacy catalog. Identity is still admitted only after
+  // the official tokenized AssetPairs response is validated below.
+  const xStocksPromise = _fetchKrakenXStocks().catch(error => {
+    console.warn('[Spot] Kraken xStocks error:', error.message);
+    return [];
+  });
   // Step 1: Discover all pairs
   const pairsRes = await fetchSpotResource(`${KRAKEN_SPOT_BASE}/AssetPairs`);
   if (!pairsRes.ok) throw new Error(`HTTP ${pairsRes.status}`);
@@ -10324,9 +10331,10 @@ async function fetchSpotRwaKraken(generation = spotRefreshGeneration) {
   if (pairsJson.error && pairsJson.error.length) throw new Error(pairsJson.error[0]);
   const allPairs = pairsJson.result || {};
 
-  const rwaPairNames = [];
-  const pairToBase = {};
+  const rwaPairs = new Map();
+  const conflictedVenueSymbols = new Set();
   for (const [pairName, info] of Object.entries(allPairs)) {
+    if (String(info.status || '').toLowerCase() !== 'online') continue;
     const wsParts = String(info.wsname || '').split('/');
     const quote = (wsParts[1] || info.quote || '').replace(/^(ZUSD|ZUSDT)$/i, m => m.slice(1)).toUpperCase();
     if (quote !== 'USD' && quote !== 'USDT' && quote !== 'ZUSD') continue;
@@ -10337,53 +10345,76 @@ async function fetchSpotRwaKraken(generation = spotRefreshGeneration) {
     base = legacyKrakenBase[base] || base;
     if (!base) base = pairName.replace(/(USD|USDT|ZUSD)$/i, '').toUpperCase();
     if (!_isRwaSpotBase(base, 'kraken')) continue;
-    rwaPairNames.push(pairName);
-    pairToBase[pairName] = base;
+    const marketSymbol = String(info.altname || pairName).trim();
+    if (!marketSymbol) continue;
+    const venueSymbol = marketSymbol.toUpperCase();
+    if (conflictedVenueSymbols.has(venueSymbol)) continue;
+    const aliases = [marketSymbol, pairName, info.wsname, String(info.wsname || '').replace('/','')]
+      .map(alias => String(alias || '').trim()).filter(Boolean);
+    const existing = rwaPairs.get(venueSymbol);
+    if (existing && existing.base !== base) {
+      // One public market identity cannot safely represent two underlyings.
+      conflictedVenueSymbols.add(venueSymbol);
+      rwaPairs.delete(venueSymbol);
+      continue;
+    }
+    if (existing) aliases.forEach(alias => existing.aliases.add(alias));
+    else rwaPairs.set(venueSymbol, { base, marketSymbol, venueSymbol, aliases:new Set(aliases) });
   }
-  if (rwaPairNames.length === 0) return [];
+  if (rwaPairs.size === 0) return xStocksPromise;
 
-  // Step 2: Fetch tickers in batches of 20
+  // Step 2: Fetch the three exact legacy RWA tickers. Kraken can return an
+  // internal REST key, so resolve only official AssetPairs aliases—never by
+  // ticker prefix/suffix. `o` is the UTC-day open, not a rolling-24h open.
   const assets = [];
-  for (let i = 0; i < rwaPairNames.length; i += 20) {
-    const chunk = rwaPairNames.slice(i, i + 20);
+  const aliasOwners = new Map();
+  for (const pairInfo of rwaPairs.values()) {
+    for (const alias of pairInfo.aliases) {
+      if (!aliasOwners.has(alias)) aliasOwners.set(alias,new Set());
+      aliasOwners.get(alias).add(pairInfo.venueSymbol);
+    }
+  }
+  const exactPairs = [...rwaPairs.values()].map(pairInfo => ({
+    ...pairInfo,
+    aliases:new Set([...pairInfo.aliases].filter(alias => aliasOwners.get(alias)?.size === 1)),
+  }));
+  for (let i = 0; i < exactPairs.length; i += 20) {
+    const chunk = exactPairs.slice(i, i + 20);
     try {
-      const tickerRes = await fetchSpotResource(`${KRAKEN_SPOT_BASE}/Ticker?pair=${chunk.join(',')}`);
+      const tickerRes = await fetchSpotResource(`${KRAKEN_SPOT_BASE}/Ticker?pair=${encodeURIComponent(chunk.map(pair => pair.marketSymbol).join(','))}`);
       if (!tickerRes.ok) continue;
       const tickerJson = await tickerRes.json();
       if (tickerJson.error && tickerJson.error.length) continue;
       const results = tickerJson.result || {};
-      for (const [pairKey, t] of Object.entries(results)) {
-        // Resolve base — try direct match first, then fuzzy
-        let base = pairToBase[pairKey];
-        if (!base) {
-          for (const [origPair, b] of Object.entries(pairToBase)) {
-            if (pairKey.startsWith(b) || origPair === pairKey) { base = b; break; }
-          }
-        }
-        if (!base) continue;
-        const last = numberOrNull(t.c?.[0]);
-        const open = firstNumber(t.o, last);
-        const vol24 = numberOrNull(t.v?.[1]);
+      for (const pairInfo of chunk) {
+        const tickerKey = [...pairInfo.aliases].find(alias => Object.prototype.hasOwnProperty.call(results, alias));
+        const t = tickerKey ? results[tickerKey] : null;
+        const last = numberOrNull(t?.c?.[0]);
+        const volume24h = numberOrNull(t?.v?.[1]);
+        const vwap24h = numberOrNull(t?.p?.[1]);
+        const volumeUsd = volume24h !== null && vwap24h !== null ? volume24h * vwap24h : null;
+        const high = numberOrNull(t?.h?.[1]);
+        const low = numberOrNull(t?.l?.[1]);
+        const bid = numberOrNull(t?.b?.[0]);
+        const ask = numberOrNull(t?.a?.[0]);
         assets.push({
-          coin: base, pair: pairKey, venueSymbol:pairKey,
-          last,
-          chg: open > 0 && last !== null ? ((last - open) / open * 100) : null,
-          vol: vol24 !== null && last !== null ? vol24 * last : null,
-          hi: numberOrNull(t.h?.[1]),
-          lo: numberOrNull(t.l?.[1]),
-          bid: numberOrNull(t.b?.[0]),
-          ask: numberOrNull(t.a?.[0]),
+          coin:pairInfo.base, pair:pairInfo.marketSymbol, venueSymbol:pairInfo.venueSymbol,
+          last, chg:null, vol:volumeUsd, hi:high, lo:low, bid, ask,
+          isListed:true, isActive:true, isPriced:last > 0,
+          fieldStatus:{
+            last:last !== null ? 'full' : 'unavailable',
+            change:'unavailable',
+            volume:volumeUsd !== null ? 'estimated' : 'unavailable',
+            highLow:high !== null && low !== null ? 'full' : 'unavailable',
+            bidAsk:bid !== null && ask !== null ? 'full' : 'unavailable',
+            depth2:'unavailable',
+          },
         });
       }
     } catch (e) { console.warn('[Spot] Kraken ticker batch error:', e); }
   }
-  // ── Also fetch Kraken xStocks (tokenized equities) ──
-  try {
-    const xStocksAssets = await _fetchKrakenXStocks();
-    assets.push(...xStocksAssets);
-  } catch (e) {
-    console.warn('[Spot] Kraken xStocks error:', e.message);
-  }
+  // ── Also include Kraken xStocks (tokenized equities) ──
+  assets.push(...await xStocksPromise);
 
   // Depth is optional enrichment. Catalog/ticker rows are returned first so
   // one slow public order book cannot hold every Spot venue in Loading state.
@@ -10409,90 +10440,91 @@ async function fetchSpotRwaKraken(generation = spotRefreshGeneration) {
 
 // ── Kraken xStocks (tokenized equities) ──
 async function _fetchKrakenXStocks() {
-  // Step 1: Discover all xStocks trading pairs (aclass_base=tokenized_asset)
-  const pairsRes = await fetchSpotResource(`${KRAKEN_SPOT_BASE}/AssetPairs?aclass_base=tokenized_asset`);
+  // Start the official identity catalog and one unfiltered tokenized-market
+  // ticker snapshot together. The catalog remains the sole admission gate;
+  // ticker rows are market data only and can never create an instrument.
+  const pairsRequest = fetchSpotResource(`${KRAKEN_SPOT_BASE}/AssetPairs?aclass_base=tokenized_asset`);
+  const tickerRequest = fetchSpotResource(`${KRAKEN_SPOT_BASE}/Ticker?asset_class=tokenized_asset`);
+  const [pairsResult, tickerResult] = await Promise.allSettled([pairsRequest, tickerRequest]);
+
+  if (pairsResult.status !== 'fulfilled') throw pairsResult.reason;
+  const pairsRes = pairsResult.value;
   if (!pairsRes.ok) throw new Error(`xStocks HTTP ${pairsRes.status}`);
   const pairsJson = await pairsRes.json();
   if (pairsJson.error && pairsJson.error.length) throw new Error(pairsJson.error[0]);
   const allPairs = pairsJson.result || {};
 
-  // Deduplicate: each xStock has two pair entries (e.g. AAPLxUSD + AAPLSPVUSD)
+  // Kraken exposes display and internal aliases for the same catalog entry.
+  // Preserve and deduplicate the raw display altname because pair casing is
+  // significant (AAPLxUSD is not the same request as AAPLXUSD).
   const seen = new Set();
   const xPairs = [];
-  for (const [pairName, info] of Object.entries(allPairs)) {
+  for (const info of Object.values(allPairs)) {
     if (String(info.aclass_base || '').toLowerCase() !== 'tokenized_asset') continue;
     if (String(info.status || '').toLowerCase() !== 'online') continue;
-    const quote = (info.quote || '').replace(/^[XZ]/, '');
+    const quote = String(info.quote || '').replace(/^[XZ]/, '');
     if (quote !== 'USD' && quote !== 'USDT') continue;
-    const base = (info.base || '');
+    const base = String(info.base || '');
     // Kraken's tokenized_asset class also contains non-equity RWAs such as
     // PAXG. Only the explicit trailing-x wrappers are xStocks.
     if (!/x$/i.test(base)) continue;
-    if (seen.has(base)) continue;
-    seen.add(base);
-    // Extract underlying: "AAPLx" → "AAPL", "GOOGLx" → "GOOGL"
+    const altname = String(info.altname || '').trim();
+    if (!altname || seen.has(altname)) continue;
+    // Extract underlying: "AAPLx" → "AAPL", "GOOGLx" → "GOOGL".
     const underlying = base.replace(/x$/i, '').toUpperCase();
-    if (!underlying || underlying.length < 1) continue;
-    xPairs.push({ pairName, base, underlying, altname: info.altname || pairName, status:info.status || '' });
+    if (!underlying) continue;
+    seen.add(altname);
+    xPairs.push({ base, underlying, altname, status:info.status || '' });
   }
   if (xPairs.length === 0) return [];
 
-  // Step 2: Fetch tickers in batches of 15 (with asset_class param)
-  const assets = [];
-  for (let i = 0; i < xPairs.length; i += 15) {
-    const chunk = xPairs.slice(i, i + 15);
+  // Ticker failure must not erase official listings. Kraken returns both raw
+  // display altnames and internal aliases; only an exact raw-altname match is
+  // allowed so the internal SPV market cannot be substituted accidentally.
+  let tickerRows = {};
+  if (tickerResult.status === 'fulfilled' && tickerResult.value.ok) {
     try {
-      const pairStr = chunk.map(p => p.altname).join(',');
-      const tickerRes = await fetchSpotResource(`${KRAKEN_SPOT_BASE}/Ticker?pair=${encodeURIComponent(pairStr)}&asset_class=tokenized_asset`);
-      if (!tickerRes.ok) continue;
-      const tickerJson = await tickerRes.json();
+      const tickerJson = await tickerResult.value.json();
       if (tickerJson.error && tickerJson.error.length) {
-        console.warn('[Spot] Kraken xStocks ticker batch error:', tickerJson.error[0]);
-        continue;
+        console.warn('[Spot] Kraken xStocks ticker error:', tickerJson.error[0]);
+      } else if (tickerJson.result && typeof tickerJson.result === 'object') {
+        tickerRows = tickerJson.result;
       }
-      const results = tickerJson.result || {};
-      for (const [pairKey, t] of Object.entries(results)) {
-        // Find matching pair info (try exact match, then fuzzy)
-        let pairInfo = chunk.find(p => p.pairName === pairKey || p.altname === pairKey);
-        if (!pairInfo) {
-          pairInfo = chunk.find(p => pairKey.includes(p.base));
-        }
-        if (!pairInfo) continue;
-        const last = numberOrNull(t.c?.[0]);
-        const open = firstNumber(t.o, last);
-        const vol24 = numberOrNull(t.v?.[1]);
-        const tokenCoin = `${pairInfo.underlying}X`;
-        const category = securityCategoryForUnderlying(pairInfo.underlying, 'equity');
-        registerSpotAssetMeta(tokenCoin, pairInfo.underlying, 'xStocks', category, 'kraken');
-        assets.push({
-          coin: tokenCoin, pair: pairInfo.altname, venueSymbol:pairInfo.altname, underlyingSymbol: pairInfo.underlying,
-          last,
-          chg: open > 0 && last !== null ? ((last - open) / open * 100) : null,
-          vol: vol24 !== null && last !== null ? vol24 * last : null,
-          hi: numberOrNull(t.h?.[1]),
-          lo: numberOrNull(t.l?.[1]),
-          bid: numberOrNull(t.b?.[0]),
-          ask: numberOrNull(t.a?.[0]),
-          xstock: true, isListed: true, isActive: true, isPriced: last > 0,
-        });
-      }
-    } catch (e) { console.warn('[Spot] Kraken xStocks ticker batch error:', e); }
+    } catch (error) {
+      console.warn('[Spot] Kraken xStocks ticker payload unavailable:', error);
+    }
+  } else if (tickerResult.status === 'fulfilled') {
+    console.warn(`[Spot] Kraken xStocks ticker HTTP ${tickerResult.value.status}; keeping official listings without market fields`);
+  } else {
+    console.warn('[Spot] Kraken xStocks ticker request unavailable; keeping official listings without market fields:', tickerResult.reason);
   }
 
-  // AssetPairs is the official listed catalog. Keep entries that currently
-  // have no ticker response so Listed / Active / Priced remain distinct.
-  const discoveredTokens = new Set(assets.map(a => a.coin));
-  xPairs.forEach(pairInfo => {
+  const assets = xPairs.map(pairInfo => {
+    const t = tickerRows[pairInfo.altname] || {};
+    const last = numberOrNull(t.c?.[0]);
+    const volume24h = numberOrNull(t.v?.[1]);
+    const vwap24h = numberOrNull(t.p?.[1]);
+    const volumeUsd = volume24h !== null && vwap24h !== null ? volume24h * vwap24h : null;
+    const high = numberOrNull(t.h?.[1]);
+    const low = numberOrNull(t.l?.[1]);
+    const bid = numberOrNull(t.b?.[0]);
+    const ask = numberOrNull(t.a?.[0]);
     const tokenCoin = `${pairInfo.underlying}X`;
-    if (discoveredTokens.has(tokenCoin)) return;
     const category = securityCategoryForUnderlying(pairInfo.underlying, 'equity');
     registerSpotAssetMeta(tokenCoin, pairInfo.underlying, 'xStocks', category, 'kraken');
-    assets.push({
+    return {
       coin: tokenCoin, pair: pairInfo.altname, venueSymbol:pairInfo.altname, underlyingSymbol: pairInfo.underlying,
-      last:null, chg:null, vol:null, hi:null, lo:null, bid:null, ask:null,
-      xstock:true, isListed:true, isActive:String(pairInfo.status).toLowerCase() === 'online', isPriced:false,
-      fieldStatus:{ last:'unavailable', change:'unavailable', volume:'unavailable', highLow:'unavailable', bidAsk:'unavailable', depth2:'unavailable' },
-    });
+      last, chg:null, vol:volumeUsd, hi:high, lo:low, bid, ask,
+      xstock:true, isListed:true, isActive:String(pairInfo.status).toLowerCase() === 'online', isPriced:last > 0,
+      fieldStatus:{
+        last:last !== null ? 'full' : 'unavailable',
+        change:'unavailable',
+        volume:volumeUsd !== null ? 'estimated' : 'unavailable',
+        highLow:high !== null && low !== null ? 'full' : 'unavailable',
+        bidAsk:bid !== null && ask !== null ? 'full' : 'unavailable',
+        depth2:'unavailable',
+      },
+    };
   });
 
   console.log(`[Spot] Kraken xStocks: ${assets.length} tokenized equities discovered`);
