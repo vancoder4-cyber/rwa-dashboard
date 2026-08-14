@@ -264,12 +264,17 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
     'Gate Spot exact legacy-pair identity drift between client and server',
   );
   const gateSpotLoader = sourceBetween(html, 'async function fetchSpotRwaGate(', '// ── Kraken Spot Fetch ──');
-  assert.match(gateSpotLoader, /isExactGateLegacySpotPair\(entry\) && !_isRwaSpotBase\(base, 'gate'\)/);
+  assert.match(gateSpotLoader, /const exactLegacy = isExactGateLegacySpotPair\(entry\)[\s\S]*?if \(!exactLegacy && !_isRwaSpotBase\(base, 'gate'\)\) continue/);
+  assert.match(gateSpotLoader, /const gateUnderlying = exactLegacy\?\.underlying \|\|[\s\S]*?category:gateCategory \|\| undefined/,
+    'Gate exact legacy rows must carry their canonical underlying and category into the client data row');
   const spotIdentityGate = sourceBetween(html, 'function _isRwaSpotBase(', '// ── Proxy base URLs');
   assert.match(spotIdentityGate, /const up = base\.toUpperCase\(\);[\s\S]*?if \(venue === 'gate'\) return GATE_SPOT_VERIFIED_WRAPPERS\.has\(up\);[\s\S]*?if \(typeof ASSET_META/,
     'Gate must resolve its exact wrapper gate before mutable venue metadata or commodity ticker fallbacks');
   assert.doesNotMatch(spotIdentityGate, /allowedVenues\.includes\('gate'\)/,
     'a prior refresh must not widen a Gate legacy pair through mutable ASSET_META venues');
+  const spotVenueGrid = sourceBetween(html, 'function renderSpotVenueGrid()', 'function renderSpotArbRank()');
+  assert.match(spotVenueGrid, /const cat = _spotAssetCategory\(a\)/,
+    'Spot venue category totals must use the same asset-specific identity as tables and joins');
 });
 
 test('listing audit cache epoch is internally consistent and leaves no pre-release v1 storage key', async () => {

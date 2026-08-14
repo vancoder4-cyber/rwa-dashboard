@@ -9285,11 +9285,12 @@ async function fetchSpotRwaGate(generation = spotRefreshGeneration) {
   for (const entry of catalog) {
     const pair = entry.id || '';
     const base = String(entry.base || pair.replace(/_(USDT|USD)$/i, '')).toUpperCase();
-    if (!isExactGateLegacySpotPair(entry) && !_isRwaSpotBase(base, 'gate')) continue;
+    const exactLegacy = isExactGateLegacySpotPair(entry) ? GATE_SPOT_EXACT_LEGACY_PAIRS[pair.toUpperCase()] : null;
+    if (!exactLegacy && !_isRwaSpotBase(base, 'gate')) continue;
     const t = tickerMap[pair] || {};
-    const gateUnderlying = TOKENIZED_ETF_WRAPPERS[base] || _arbUnderlyingKey(base);
+    const gateUnderlying = exactLegacy?.underlying || TOKENIZED_ETF_WRAPPERS[base] || _arbUnderlyingKey(base);
+    const gateCategory = exactLegacy?.category || (gateUnderlying !== base ? securityCategoryForUnderlying(gateUnderlying) : '');
     if (gateUnderlying !== base) {
-      const gateCategory = securityCategoryForUnderlying(gateUnderlying);
       registerSpotAssetMeta(base, gateUnderlying, base.endsWith('ON') ? 'Ondo Finance' : 'xStocks', gateCategory, 'gate');
     }
     const last = numberOrNull(t.last);
@@ -9297,6 +9298,7 @@ async function fetchSpotRwaGate(generation = spotRefreshGeneration) {
     const baseVolume = numberOrNull(t.base_volume);
     assets.push({
       coin: base, pair, underlyingSymbol:gateUnderlying !== base ? gateUnderlying : undefined,
+      category:gateCategory || undefined,
       last,
       chg: numberOrNull(t.change_percentage),
       vol: quoteVolume ?? (baseVolume !== null && last !== null ? baseVolume * last : null),
@@ -10171,8 +10173,8 @@ const STATIC_SPOT_ASSET_KEYS = new Set(Object.keys(ASSET_META));
 // catalogs on 2026-08-07; the two legacy commodity pairs were reviewed on
 // 2026-08-14. Unknown suffix or metal-like tickers remain fail-closed.
 const GATE_SPOT_EXACT_LEGACY_PAIRS = Object.freeze({
-  PAXG_USDT:Object.freeze({ base:'PAXG', quote:'USDT', underlying:'PAXG', category:'commodity' }),
-  XAUT_USDT:Object.freeze({ base:'XAUT', quote:'USDT', underlying:'XAUT', category:'commodity' }),
+  PAXG_USDT:Object.freeze({ base:'PAXG', quote:'USDT', underlying:'XAU', category:'commodity' }),
+  XAUT_USDT:Object.freeze({ base:'XAUT', quote:'USDT', underlying:'XAU', category:'commodity' }),
 });
 const GATE_SPOT_VERIFIED_WRAPPERS = new Set([
   'SPCXX','CRCLX','HOODON','SLVON','NVDAX','COINON','ACNON','PLTRON','SPYX','MSFTON',
@@ -10732,8 +10734,7 @@ function renderSpotVenueGrid() {
     // category breakdown
     const cats = {};
     assets.forEach(a => {
-      const underlying = _arbUnderlyingKey(a.coin);
-      const cat = KNOWN_CATEGORIES[underlying] || KNOWN_CATEGORIES[a.coin] || inferCategory(underlying);
+      const cat = _spotAssetCategory(a);
       cats[cat] = (cats[cat]||0) + 1;
     });
     const feeSrc = fees.estimated ? 'estimated' : v === 'bitget' ? 'api' : 'default';

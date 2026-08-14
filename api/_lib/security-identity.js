@@ -120,8 +120,8 @@ export const GATE_SPOT_VERIFIED_WRAPPERS = Object.freeze([
 // commodity review scoped to exact live pair/base/quote tuples, never to a
 // bare metal ticker or a generic quote family.
 export const GATE_SPOT_EXACT_LEGACY_PAIRS = Object.freeze({
-  PAXG_USDT: Object.freeze({ base:'PAXG', quote:'USDT', underlying:'PAXG', category:'commodity' }),
-  XAUT_USDT: Object.freeze({ base:'XAUT', quote:'USDT', underlying:'XAUT', category:'commodity' }),
+  PAXG_USDT: Object.freeze({ base:'PAXG', quote:'USDT', underlying:'XAU', category:'commodity' }),
+  XAUT_USDT: Object.freeze({ base:'XAUT', quote:'USDT', underlying:'XAU', category:'commodity' }),
 });
 
 // Audited Binance bStock wrapper snapshot (2026-08-07). A trailing B is never
