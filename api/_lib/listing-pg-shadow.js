@@ -80,7 +80,9 @@ function stableArtifactPayload(sourceRun, batch) {
   return {
     schemaVersion: LISTING_NORMALIZED_ARTIFACT_FORMAT,
     artifactKind: 'normalized',
-    generatedAt: batch.observedAt,
+    // Content-address the logical daily catalog, not the physical retry time.
+    // The exact capture timestamp remains in ingest.raw_artifact.captured_at.
+    generatedAt: batch.bucketAt,
     bucketAt: batch.bucketAt,
     environment: batch.environment,
     deploymentSha: batch.deploymentSha,
