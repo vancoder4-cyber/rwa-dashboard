@@ -25,6 +25,97 @@
    - Monday at 10:00 Asia/Shanghai: full venue catalogs, identity collisions, listing lifecycle, classification/tags, OKX SWAP/X-Perp and UTS/gold composition, Traditional candidate/ranking rules, previous-session selection and comparison coverage, false `NEW` detection, deterministic tie-breaks, adjusted-options handling, reference pricing and historical coverage.
    - Scheduled reviews are read-only. They report P0/P1/P2 findings and must not modify, push or deploy without user confirmation.
 
+## Database Phase 0 / Phase 1 operations
+
+The target model is documented in `DATABASE_ARCHITECTURE.md`; page-level inputs, formulas and current persistence are cataloged in `DATA_CATALOG_AND_FORMULAS.md`. `RWA_DATA_RULES.md` remains the identity/admission authority.
+
+### Phase 0 — foundation only
+
+Phase 0 provisions Neon/PostgreSQL connectivity, checksum-locked migrations, least-privilege roles, server-only feature switches, monitoring and the immutable raw-archive contract. It does **not** enable a product write or read path.
+
+Current foundation files:
+
+- `api/_lib/database.js` reads the server-only pooled `DATABASE_URL` lazily for runtime use. Migrations prefer `DATABASE_URL_UNPOOLED` and fall back to `DATABASE_URL` only when intentionally configured. Neither value may reach browser code, API output or logs.
+- `db/migrations/*.sql` is the only schema-change path. Applied version, SHA-256 checksum and statement count are recorded in `ops.schema_migration`; an applied checksum mismatch is a hard stop.
+- `scripts/migrate-db.mjs --dry-run` parses and checks migration ordering/checksums without opening a database connection. Running without `--dry-run` is an external write and requires the intended environment and explicit release authorization.
+
+Before applying a migration:
+
+1. confirm the target is the intended Preview/staging branch or production database; never infer this from a local `.env` file;
+2. run the dry-run and database/migration unit tests;
+3. confirm the migration is additive/transactional, has no default catch-all partition, and preserves stable UUID/version foreign keys rather than ticker joins;
+4. apply with the migration owner, not the runtime writer;
+5. verify migration ledger checksum, extensions, constraints, indexes and role allow/deny probes;
+6. verify a synthetic raw artifact can be conditionally created, checksum-read and restored while secrets/headers are absent;
+7. rerun the normal Preview release gate and prove all page/API payloads are byte/contract equivalent with product database writes disabled.
+
+Minimum role boundary:
+
+| Role | Allowed | Explicitly denied |
+|---|---|---|
+| Migration owner | Versioned DDL/migration ledger | Application/runtime use |
+| `rwa_catalog_shadow_writer` (NOLOGIN group) | Only the explicitly granted Phase 1 identity/ingest/catalog-event tables and required sequences | DDL, market fact writes, rule changes, blanket future-table grants |
+| Future fact writer | Not created or enabled in Phase 0/1 | Any connection/use until a later phase is approved |
+| `rwa_analytics_reader` (NOLOGIN group) | Read-only identity/ingest/fact/analytics/publication tables | DML/DDL |
+| `rwa_alert_dispatcher` (NOLOGIN group) | Read alert state; update delivery/outbox; insert delivery attempts | Identity, fact, analytics, rule or destination mutation |
+| Break-glass | Not an application role; any future use must be time-bounded and audited | Routine Cron/application use |
+
+Migration `0002` grants the migration owner membership in `rwa_catalog_shadow_writer`; the shadow transaction immediately applies `SET LOCAL ROLE` plus short statement/lock timeouts. This is the current additive bridge, not the final read-path credential model. Before any database read cutover, provision a dedicated least-privilege login and prove that the owner connection is no longer used by the application.
+
+Safe defaults are `PG_WRITE_MODE=off` and `RAW_ARCHIVE_MODE=off`; both are server-only. `DATABASE_URL`, `DATABASE_URL_UNPOOLED` or `BLOB_READ_WRITE_TOKEN` being present never enables a writer. Phase 1 may enable only the reviewed catalog shadow path; upstream raw-body capture remains off until later collector instrumentation is separately approved.
+
+Mode semantics are independent:
+
+- `PG_WRITE_MODE=off|shadow|required`: off performs no PostgreSQL mutation; shadow logs/returns a diagnostic failure but preserves the current Runtime Cache writer; a required failure in the pre-cache catalog transaction prevents the Runtime Cache baseline from advancing.
+- `RAW_ARCHIVE_MODE=off|shadow|required`: despite the legacy variable name, this phase controls only `normalized-catalog-v1` private-object upload. Off records a pending/skipped manifest when PostgreSQL is enabled, shadow records archive failure without blocking the current writer, and required fails before Runtime Cache advances. It never enables upstream raw-body capture.
+- after the Runtime Cache write succeeds or fails, PostgreSQL mode (when enabled) records a separate `runtime-cache-listing-audit` sink result; it does not infer that outcome from database or Blob success. That post-write record is not a distributed transaction: if recording it fails after a successful cache write, the cache cannot be rolled back and reconciliation must report the missing sink evidence.
+
+Rollback is to disable the affected switch and restore the prior application configuration. Do not delete shadow rows or rewrite migration history during rollback.
+
+Migration and read-only verification commands:
+
+```bash
+npm run db:migrate -- --dry-run
+npm run db:migrate
+npm run db:migrate   # must report only [skip] on the second run
+npm run audit:db
+```
+
+Run migrations with `DATABASE_URL_UNPOOLED` whenever it is available. `audit:db` emits only a non-secret database fingerprint, migration checksums, role/extension results and aggregate row counts; it fails on checksum drift or privilege expansion. Never print or commit the connection URL.
+
+### Phase 1 — ten official catalogs, shadow-write only
+
+Phase 1 attaches an additive sink to the existing authenticated daily Listing Audit writer. Its scope is exactly the ten keys in `api/_lib/listing-audit.js`: five Perpetual catalogs (trade.xyz, Bitget, Gate, Binance, OKX) and five Spot catalogs (Bitget, Gate, Kraken, Binance, OKX).
+
+For every UTC cycle, persist separately:
+
+- collection cycle/attempt and one source run per expected catalog;
+- deterministic `normalized-catalog-v1` artifact manifest and checksum, built from the already verified/reviewed catalog observation—not the upstream HTTP response body;
+- already-admitted asset/instrument versions and per-instrument official-catalog evidence; `identity.alias_version` remains an empty schema skeleton in this phase;
+- exact accepted source-run catalog membership and listing lifecycle event;
+- unresolved `review-required` candidates in `identity.review_case` only; they do not create an accepted identity, instrument or membership;
+- independent database/archive sink outcomes alongside the unchanged Runtime Cache result; a sink must never be inferred successful from another sink.
+
+During Phase 1:
+
+- `/api/listing-changes`, `/api/signal-snapshot`, `/api/health` and every page continue reading the existing Runtime Cache/CDN path;
+- a database or archive error pages the shadow pipeline but does not rewrite the existing writer result or create a false production outage during the observation window;
+- database success cannot hide a failed Runtime Cache writer;
+- Partial/Unavailable catalogs cannot manufacture an absent/delisted membership;
+- Phase 1 does not archive upstream raw response bodies and must not label `normalized-catalog-v1` as raw; `ingest.raw_artifact` is a generic manifest table whose raw-body role is reserved for a later phase;
+- no price, volume, OI, funding, order-book, Top Trader, Reference, Traditional activity, aggregate, Radar anomaly or publication payload is continuously written;
+- no accepted identity/instrument/membership row may admit an identity rejected, quarantined or left review-required by the existing server gate.
+
+Promotion beyond shadow mode requires at least 14 consecutive daily cycles with all ten exact source runs and zero unexplained differences in accepted/rejected counts, identity conflicts, membership fingerprints, review-case isolation, drift quarantine, repeated-day removals and emitted lifecycle events. Replaying each `normalized-catalog-v1` artifact must reproduce the stored accepted fingerprint. Disabling either shadow sink must leave all existing APIs and UI unchanged.
+
+### Database incident severity
+
+- **P0**: a database migration/write changes or blocks the current production read/Cron path; identity leakage; lost immutable evidence; wrong environment migration; missing future fact partition after a later fact phase.
+- **P1**: catalog reconciliation mismatch, duplicate lifecycle event, pool saturation, normalized-artifact checksum/replay failure, migration checksum mismatch or shadow sink errors over two scheduled cycles.
+- **P2**: non-blocking index/partition tuning, archive query ergonomics or cost optimization.
+
+Phase 0/1 schema presence is not authorization to start market-fact ingestion or database reads. Those require a separately reviewed phase with formula conservation, replay, capacity and rollback proof.
+
 ## Vercel usage guardrails
 
 The main resource risk is request fan-out, not response payload size. One browser refresh must never create one Vercel request per asset.

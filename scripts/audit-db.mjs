@@ -1,0 +1,105 @@
+import { createHash } from 'node:crypto';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { getMigrationDatabaseSql } from '../api/_lib/database.js';
+import { loadMigrations } from '../db/migration-utils.js';
+
+const SCRIPT_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
+const MIGRATION_DIRECTORY = path.resolve(SCRIPT_DIRECTORY, '../db/migrations');
+const EXPECTED_ROLES = [
+  'rwa_catalog_shadow_writer',
+  'rwa_analytics_reader',
+  'rwa_alert_dispatcher',
+];
+
+function fingerprintConnection() {
+  const raw = String(process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL || '').trim();
+  if (!raw) return null;
+  const url = new URL(raw);
+  return createHash('sha256')
+    .update(`${url.hostname}${url.pathname}`)
+    .digest('hex')
+    .slice(0, 12);
+}
+
+function fail(message) {
+  throw new Error(`Database audit failed: ${message}`);
+}
+
+const sql = getMigrationDatabaseSql();
+const localMigrations = await loadMigrations(MIGRATION_DIRECTORY);
+const [ledger, extensions, roles, privileges, counts, latestCycle] = await Promise.all([
+  sql.query('SELECT version, name, checksum, statement_count FROM ops.schema_migration ORDER BY version'),
+  sql.query("SELECT extname FROM pg_extension WHERE extname IN ('pgcrypto', 'btree_gist') ORDER BY extname"),
+  sql.query('SELECT rolname, rolcanlogin FROM pg_roles WHERE rolname = ANY($1::text[]) ORDER BY rolname', [EXPECTED_ROLES]),
+  sql.query(`
+    SELECT
+      has_table_privilege('rwa_catalog_shadow_writer', 'identity.source', 'INSERT') AS writer_catalog_insert,
+      has_table_privilege('rwa_catalog_shadow_writer', 'ingest.catalog_membership', 'INSERT') AS writer_membership_insert,
+      has_table_privilege('rwa_catalog_shadow_writer', 'fact.listing_observation_hourly', 'INSERT') AS writer_fact_insert,
+      has_table_privilege('rwa_catalog_shadow_writer', 'alert.event', 'INSERT') AS writer_alert_insert,
+      has_table_privilege('rwa_analytics_reader', 'analytics.catalog_change_event', 'SELECT') AS reader_analytics_select,
+      has_table_privilege('rwa_analytics_reader', 'identity.source', 'INSERT') AS reader_identity_insert,
+      has_table_privilege('rwa_alert_dispatcher', 'alert.delivery', 'UPDATE') AS dispatcher_delivery_update,
+      has_table_privilege('rwa_alert_dispatcher', 'identity.source', 'INSERT') AS dispatcher_identity_insert
+  `),
+  sql.query(`
+    SELECT
+      (SELECT count(*)::int FROM identity.source) AS sources,
+      (SELECT count(*)::int FROM identity.asset) AS assets,
+      (SELECT count(*)::int FROM identity.instrument) AS instruments,
+      (SELECT count(*)::int FROM ingest.collection_cycle) AS cycles,
+      (SELECT count(*)::int FROM ingest.source_run) AS source_runs,
+      (SELECT count(*)::int FROM ingest.catalog_membership) AS memberships,
+      (SELECT count(*)::int FROM ingest.raw_artifact) AS artifacts,
+      (SELECT count(*)::int FROM analytics.catalog_change_event) AS listing_events,
+      (SELECT count(*)::int FROM identity.review_case WHERE status = 'open') AS open_reviews
+  `),
+  sql.query(`
+    SELECT cycle.bucket_at, cycle.status,
+      count(DISTINCT run.source_id)::int AS source_count,
+      count(DISTINCT membership.instrument_version_id)::int AS membership_count,
+      count(DISTINCT artifact.artifact_id)::int AS artifact_count,
+      count(DISTINCT sink.sink_name)::int AS sink_count
+    FROM ingest.collection_cycle AS cycle
+    LEFT JOIN ingest.collection_attempt AS attempt ON attempt.cycle_id = cycle.cycle_id
+    LEFT JOIN ingest.source_run AS run ON run.attempt_id = attempt.attempt_id
+    LEFT JOIN ingest.catalog_membership AS membership ON membership.source_run_id = run.source_run_id
+    LEFT JOIN ingest.raw_artifact AS artifact ON artifact.source_run_id = run.source_run_id
+    LEFT JOIN ingest.sink_commit AS sink ON sink.attempt_id = attempt.attempt_id
+    WHERE cycle.job_name = 'rwa-listing-audit'
+      AND cycle.pipeline_version = 'rwa-listing-catalog-pg-shadow/v1'
+    GROUP BY cycle.cycle_id
+    ORDER BY cycle.bucket_at DESC
+    LIMIT 1
+  `),
+]);
+
+if (ledger.length !== localMigrations.length) fail('migration count does not match local files');
+for (const migration of localMigrations) {
+  const applied = ledger.find(row => row.version === migration.version);
+  if (!applied || applied.checksum !== migration.checksum || Number(applied.statement_count) !== migration.statements.length) {
+    fail(`migration ${migration.version} checksum or statement count differs`);
+  }
+}
+if (extensions.map(row => row.extname).join(',') !== 'btree_gist,pgcrypto') fail('required extensions are unavailable');
+if (roles.length !== EXPECTED_ROLES.length || roles.some(role => role.rolcanlogin)) fail('least-privilege roles are missing or LOGIN-enabled');
+
+const privilege = privileges[0] || {};
+if (!privilege.writer_catalog_insert || !privilege.writer_membership_insert) fail('catalog writer lacks required Phase 1 grants');
+if (privilege.writer_fact_insert || privilege.writer_alert_insert) fail('catalog writer can mutate a later-phase table');
+if (!privilege.reader_analytics_select || privilege.reader_identity_insert) fail('analytics reader grants are invalid');
+if (!privilege.dispatcher_delivery_update || privilege.dispatcher_identity_insert) fail('alert dispatcher grants are invalid');
+
+const result = {
+  status: 'pass',
+  databaseFingerprint: fingerprintConnection(),
+  migrations: ledger.map(row => ({ version: row.version, checksum: row.checksum, statements: Number(row.statement_count) })),
+  extensions: extensions.map(row => row.extname),
+  roles: roles.map(row => ({ name: row.rolname, canLogin: row.rolcanlogin })),
+  counts: counts[0],
+  latestListingCycle: latestCycle[0] || null,
+};
+
+process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

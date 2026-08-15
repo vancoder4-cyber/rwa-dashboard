@@ -5,9 +5,13 @@
     "check:inline": "node scripts/check-inline-js.mjs",
     "audit:data": "node scripts/audit-data.mjs",
     "audit:health": "node scripts/audit-health.mjs",
-    "audit:listings": "node scripts/audit-listings.mjs"
+    "audit:listings": "node scripts/audit-listings.mjs",
+    "db:migrate": "node scripts/migrate-db.mjs",
+    "audit:db": "node scripts/audit-db.mjs"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
+    "@vercel/blob": "^2.8.0",
     "@vercel/functions": "3.9.0"
   }
 }

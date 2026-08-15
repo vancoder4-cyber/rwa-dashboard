@@ -6,6 +6,11 @@ import {
 } from './_lib/listing-audit.js';
 import { collectListingSourceObservations } from './_lib/listing-sources.js';
 import {
+  listingAuditPersistenceChecksum,
+  recordListingAuditRuntimeCacheCommit,
+  runOptionalListingAuditPgWrite,
+} from './_lib/listing-pg-shadow.js';
+import {
   setNoStore,
   setPublicCache,
 } from './_lib/upstream.js';
@@ -181,13 +186,13 @@ export function listingSnapshotIsCacheable(snapshot) {
   return Number.isFinite(Date.parse(String(snapshot?.generatedAt || '')));
 }
 
-export async function runListingAudit(req, res) {
+export async function runListingAudit(req, res, dependencies = {}) {
   if (listingAuditRunning) {
     setNoStore(res);
     return res.status(409).json({ error: 'Listing audit already in progress' });
   }
   listingAuditRunning = true;
-  const cache = getCache({ namespace: CACHE_NAMESPACE });
+  const cache = dependencies.cache || getCache({ namespace: CACHE_NAMESPACE });
   let previousBundle;
   try {
     previousBundle = await cache.get(BUNDLE_KEY);
@@ -202,8 +207,17 @@ export async function runListingAudit(req, res) {
   }
 
   try {
-    const observations = await collectListingSourceObservations(deploymentBaseUrl(req));
-    const merged = mergeListingAudit(hydrateListingAuditState(previousBundle?.state), observations, new Date());
+    const observations = await (dependencies.collectObservations || collectListingSourceObservations)(deploymentBaseUrl(req));
+    const now = dependencies.now ? new Date(dependencies.now()) : new Date();
+    const merged = mergeListingAudit(hydrateListingAuditState(previousBundle?.state), observations, now);
+    // Both durable sinks are server-only and default off. They run before the
+    // Runtime Cache mutation so a required-mode failure cannot advance the
+    // operational baseline; shadow failures remain diagnostic-only.
+    const durableWrite = await (dependencies.durableWrite || runOptionalListingAuditPgWrite)({
+      observations,
+      merged,
+      observedAt: merged.snapshot.generatedAt,
+    });
     const snapshot = responseSnapshot(merged.snapshot);
     // Events are persisted once in state and injected into the public snapshot
     // at read time. Persisting them in both branches materially reduces the
@@ -217,7 +231,39 @@ export async function runListingAudit(req, res) {
     }
     // State and the public snapshot are one cache value, so a partial write can
     // never expose a snapshot that disagrees with the next comparison state.
-    await cache.set(BUNDLE_KEY, bundle, cacheOptions('RWA daily listing audit bundle'));
+    const bundleChecksum = listingAuditPersistenceChecksum(bundle);
+    const recordRuntimeCacheCommit = dependencies.recordRuntimeCacheCommit || recordListingAuditRuntimeCacheCommit;
+    let runtimeCacheCommit;
+    try {
+      await cache.set(BUNDLE_KEY, bundle, cacheOptions('RWA daily listing audit bundle'));
+    } catch (cacheWriteError) {
+      try {
+        await recordRuntimeCacheCommit({
+          observedAt: merged.snapshot.generatedAt,
+          status: 'failed',
+          rowCount: snapshot.counts.activeListings,
+          checksum: bundleChecksum,
+          errorSummary: cacheWriteError,
+        });
+      } catch (commitError) {
+        console.error('[listing-audit] failed to record Runtime Cache failure', commitError);
+      }
+      throw cacheWriteError;
+    }
+    try {
+      runtimeCacheCommit = await recordRuntimeCacheCommit({
+        observedAt: merged.snapshot.generatedAt,
+        status: 'stored',
+        rowCount: snapshot.counts.activeListings,
+        checksum: bundleChecksum,
+      });
+    } catch (commitError) {
+      // The operational Runtime Cache baseline is already committed and cannot
+      // be rolled back atomically with PostgreSQL. Keep serving that success;
+      // the primary database transaction left this sink pending for audit.
+      console.error('[listing-audit] failed to record Runtime Cache success', commitError);
+      runtimeCacheCommit = { status: 'failed', error: String(commitError?.message || commitError) };
+    }
 
     const summary = {
       status: snapshot.status,
@@ -230,6 +276,8 @@ export async function runListingAudit(req, res) {
         venueSymbol: event.venueSymbol,
         identityStatus: event.identityStatus,
       })),
+      durableWrite,
+      runtimeCacheCommit,
     };
     if (snapshot.status === 'full' || snapshot.status === 'warming') {
       console.log('[listing-audit]', JSON.stringify(summary));
