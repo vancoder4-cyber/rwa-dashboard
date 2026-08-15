@@ -314,6 +314,14 @@ test('transaction queries are least-privilege, idempotent, exact-case, and inclu
   }, batch, artifacts);
 
   assert.equal(queries.length, calls.length);
+  for (const call of calls) {
+    const referenced = [...new Set([...call.text.matchAll(/\$(\d+)/g)].map(match => Number(match[1])))].sort((a, b) => a - b);
+    assert.deepEqual(
+      referenced,
+      Array.from({ length: call.params.length }, (_unused, index) => index + 1),
+      `SQL parameters must be contiguous: ${call.text.slice(0, 80)}`,
+    );
+  }
   assert.match(calls[0].text, /^SET LOCAL ROLE rwa_catalog_shadow_writer$/);
   assert.match(calls[1].text, /statement_timeout = '15s'/);
   assert.match(calls[2].text, /lock_timeout = '3s'/);

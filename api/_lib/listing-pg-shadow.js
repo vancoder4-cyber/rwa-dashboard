@@ -1001,7 +1001,7 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
     sql.query(
       `UPDATE identity.instrument_version AS current
        SET valid_to = incoming.observed_at
-       FROM jsonb_to_recordset($5::jsonb) AS incoming(
+       FROM jsonb_to_recordset($4::jsonb) AS incoming(
          source_key text, normalized_venue_symbol text, event_type text,
          effective_day date, observed_at timestamptz
        )
@@ -1018,7 +1018,7 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
          AND current.identity_status = 'verified'
          AND current.valid_to IS NULL
          AND current.valid_from < incoming.observed_at`,
-      [...common, json(events)],
+      [batch.jobName, batch.pipelineVersion, batch.bucketAt, json(events)],
     ),
     sql.query(
       `INSERT INTO ingest.sink_commit
