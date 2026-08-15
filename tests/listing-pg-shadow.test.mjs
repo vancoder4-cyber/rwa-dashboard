@@ -352,7 +352,8 @@ test('transaction queries are least-privilege, idempotent, exact-case, and inclu
 test('same UTC bucket and catalog produce stable natural keys, artifacts, and checksums', () => {
   const input = baselineInput();
   const left = buildListingAuditPgBatch(input);
-  const right = buildListingAuditPgBatch(input);
+  const retryInput = baselineInput(fullObservations(), '2026-08-15T02:30:00.000Z');
+  const right = buildListingAuditPgBatch(retryInput);
   assert.equal(left.bucketAt, right.bucketAt);
   assert.equal(left.checksum, right.checksum);
   assert.deepEqual(
