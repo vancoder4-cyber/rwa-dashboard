@@ -148,6 +148,42 @@ Migration `0002_phase1_facts_alerting.sql` creates the typed tables below as an 
 
 Do not put unrelated measurements in a generic `value` column. Units belong in typed columns and validated method metadata. Missing is `NULL`; a true observed zero is `0`.
 
+#### 4.3.1 Phase 2 bitemporal and append-only revision contract
+
+The future rolling 14-day market-history overlap is a **Phase 2 prerequisite**, not a Phase 1 capability. Phase 1 observes one current daily official-catalog snapshot per source and shadow-writes identity/membership/lifecycle evidence. It does not fetch overlapping price, volume, OI, funding, reference or Traditional history and must not be cited as proof that market-history restatements have already been detected.
+
+Four times must remain distinct:
+
+| Time | Meaning | Example |
+|---|---|---|
+| Event time | When the source says the market event occurred | Candle close, funding settlement or completed exchange session |
+| Valid time | The interval for which the normalized value applies | One UTC hour, one rolling-24h anchor date or one official trading session |
+| Captured time | When the collector received the source representation | `ingest.raw_artifact.captured_at` / source-run observation time |
+| System time | When the normalized revision was committed | Append-only `recorded_at`; never substituted for event/valid time |
+
+The existing `0002` fact tables are empty skeletons and their current unique keys are not a revision ledger. Before any Phase 2 writer starts, an additive migration must introduce a typed revision relation for each enabled fact family (or an equivalently constrained shared revision header plus typed child tables) with at least:
+
+- `revision_id uuid` primary key and an `observation_key` derived from `source_id`, exact `instrument_version_id`, dataset/grain, event/valid boundary, unit/currency and immutable method version—never a bare ticker;
+- `revision_no`, `supersedes_revision_id`, `source_run_id`, optional input artifact, `captured_at`, `recorded_at`, source/method/formula version and normalized payload checksum;
+- family-specific typed measurement columns and status fields; unrelated prices, volumes, counts and rates must not be collapsed into one generic value column;
+- unique `(observation_key, revision_no)` and idempotency on `(observation_key, normalized_payload_sha256)` so an identical re-fetch records collection evidence but not a false revision;
+- no update/delete path for an accepted revision. A correction appends the next revision and preserves the first representation and every intermediate value.
+
+A read-only revision summary view must expose, for every typed measurement, `first_value`, `latest_value`, `revision_count = GREATEST(COUNT(*) - 1, 0)`, `latest_minus_first`, `latest_minus_previous`, and a percentage delta when the comparison denominator is non-zero. A method, unit, currency, identity or grain change starts a new observation series/version; it is not disguised as a restatement of the old series.
+
+The fixed server-side overlap for an enabled market-history collector is `[latest completed boundary - 14 calendar days, latest completed boundary]`. It is re-read on every scheduled collection. Traditional data includes only official completed sessions inside that calendar interval; weekends/holidays are not fabricated, and “14 days” is not silently reinterpreted as 14 sessions. Older repairs use an explicit authenticated backfill/replay job with a separate run reason and never expand a public request parameter.
+
+Initial Phase 2 drift policy must be versioned with the collector method and calibrated in shadow mode. Until source-specific evidence justifies tighter limits, use these conservative release gates:
+
+| Comparison within the same source/method/version | Normal restatement | Review-required | Anomalous drift / non-passing |
+|---|---|---|---|
+| Price, mark, close or reference price | Absolute relative delta `<= 0.5%` and no unit/status transition | `> 0.5%` and `<= 2%` | `> 2%` |
+| Volume, OI, notional, shares or contracts | Absolute relative delta `<= 1%` | `> 1%` and `<= 5%` | `> 5%` |
+| Funding/rate/ratio | Change no greater than declared source precision | Above source precision but `<= 1` basis point in the normalized rate | `> 1` basis point, sign contradiction or invalid ratio arithmetic |
+| Revised observation keys in one source overlap | `<= 1%` of comparable keys | `> 1%` and `<= 5%`, and no more than 50 keys | `> 5%` or more than 50 keys |
+
+For a zero first value, percentage drift is Unavailable and a versioned field-specific absolute threshold is mandatory. `NULL → value` is a normal late completion only when the first status was explicitly incomplete and the source-specific settlement SLA has not expired; otherwise it is review-required. `value → NULL`, identity/unit/method/grain changes under the same observation key, a revision older than the authorized overlap without a backfill run, or any attempt to overwrite/delete the first value is anomalous regardless of percentage. These are data-quality gates, not changes to the dashboard's signal thresholds or RWA admission rules.
+
 ### 4.4 `analytics` schema
 
 | Table | Primary key | Grain and purpose | Write phase |
@@ -292,7 +328,7 @@ Scope:
 - A database/archive failure is visible in shadow sink health, but during the observation window it must not turn a successful current Runtime Cache publication into a false production outage. Conversely, database success must not hide a failed current writer.
 - Do not write continuous market facts, signal histories, derived rankings or alert deliveries.
 
-Acceptance gates for at least 14 consecutive successful daily cycles:
+Acceptance gates for at least 14 consecutive successful daily cycles. This means 14 distinct scheduled UTC-day buckets; a same-day retry does not advance the count, and a missing/non-passing bucket breaks the streak. It is a catalog shadow-write acceptance window, not the rolling 14-day market-history overlap defined for Phase 2:
 
 1. all ten expected source runs exist once per UTC cycle with no duplicate active membership rows;
 2. exact source accepted/rejected counts and membership fingerprints reconcile with the Runtime Cache listing-audit inputs;
@@ -305,7 +341,7 @@ Acceptance gates for at least 14 consecutive successful daily cycles:
 
 ### Later phases — separate approvals
 
-- Phase 2: exact listing market-fact dual-write and replay comparison.
+- Phase 2: exact listing market-fact dual-write, fixed 14-calendar-day overlap collection, append-only revision ledger and replay comparison. No writer starts until the bitemporal keys, typed revision tables/views, drift policy and backfill isolation above are migrated and tested.
 - Phase 3: PostgreSQL-derived aggregates and signal evaluations in shadow mode.
 - Phase 4: versioned publication snapshots and read cutover behind a rollback flag.
 - Phase 5: durable alert incidents, subscriptions, outbox and delivery.
@@ -318,6 +354,7 @@ Each later phase requires its own capacity measurement, formula-by-formula conse
 - Normalized-artifact success, database success, Runtime Cache success and publication success are separate sink states. Do not compress them into one boolean. A later upstream-raw sink receives its own independent state.
 - Retry idempotency keys are deterministic from dataset family, source, UTC bucket and method version.
 - The current Phase 1 daily writer deliberately reuses `attempt_no=1` and idempotently upserts that attempt/source-run bundle for same-day retries. Preserving every physical retry as a distinct immutable attempt is a later operational enhancement and must precede any claim of full attempt history.
+- Market-fact corrections in Phase 2 are append-only revisions ordered by captured/system time while preserving their original event/valid time. “Latest” is a view over immutable revisions, never an in-place replacement; first/latest values, revision count and deltas must remain reproducible from source/method/version evidence.
 - Full requires the expected source/listing denominator and all required fields. Partial allows a valid subset; Estimated describes method, not completeness; Unavailable means no defensible value. These meanings are unchanged from `RWA_DATA_RULES.md:141-169`.
 - A database outage before read cutover must degrade only the shadow pipeline. After a future read cutover, last-good publication may be served with explicit age/status only within its product-specific hard TTL.
 - The database is not allowed to turn `NULL` into zero, `Unavailable` into Neutral, Warming into no-anomaly, or a liquidation proxy into reported liquidation.

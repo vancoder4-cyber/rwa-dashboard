@@ -24,6 +24,9 @@ Identity admission remains governed by [`RWA_DATA_RULES.md`](./RWA_DATA_RULES.md
 | Hour bucket | Idempotent UTC hour used by general Radar and OI proxy history |
 | Daily anchor | One idempotent UTC-date record containing a rolling-24h observation; not described as exchange UTC-day volume |
 | Completed session | Official completed Nasdaq/OCC trading session selected by the Traditional producer |
+| Event / valid time | Source market time and the interval/session to which a value applies; neither is the database write time |
+| Captured / system time | When the collector received a representation and when its immutable normalized revision was committed |
+| Revision | A changed value for the same exact source/instrument/grain/event-valid boundary and method version; it appends evidence instead of replacing the first value |
 
 Official venue product metadata is the identity authority. Names, ticker resemblance, prices, reference prices and cross-venue matches are discovery or validation signals only. The current identity implementation is concentrated in `api/_lib/security-identity.js`, `api/_lib/listing-sources.js` and the venue collectors; listing-audit normalization is at `api/_lib/listing-audit.js:30-69`.
 
@@ -476,6 +479,21 @@ It is recomputed from fresh current Browser state, has no durable history and is
 
 The four Signal histories are separate and the authenticated writer returns HTTP 200 only when all required stores report `stored`. Existing write/503 semantics must remain unchanged through Phase 0/1. Source health and database reconciliation records may be added as shadow operational telemetry, but they cannot change page status before a separately approved read cutover.
 
+### 8.1 Historical revision coverage and the future 14-day overlap
+
+Current persistence does **not** provide a market-history revision ledger:
+
+| Current product | Retry/history behavior now | What cannot be claimed |
+|---|---|---|
+| Phase 1 Competitor Listings | One current official catalog observation per source/day, plus accepted membership and lifecycle evidence | It does not re-fetch or compare 14 days of price/volume/OI/funding/reference/Traditional history |
+| General Radar and OI Runtime Cache | A retry in the same UTC hour replaces that cache bucket | The first value, intermediate revisions, revision count and delta are not retained |
+| Perp and Spot daily anomaly anchors | A same-UTC-day retry replaces the compact daily bucket | This is idempotent last-good history, not append-only source-restatement history |
+| Funding, Top 30, Reference and Traditional endpoints | CDN/current response behavior described above | CDN revalidation is not durable correction evidence |
+
+Phase 2 must use the bitemporal, append-only design in `DATABASE_ARCHITECTURE.md` before exact market-fact dual-write begins. For the same exact observation key and source/method/version, an identical normalized re-fetch is idempotent; a changed representation appends a revision. Read views expose typed `first_value`, `latest_value`, `revision_count` (changes after the first), latest/first delta and latest/previous delta. Event/valid time remains fixed while captured/system time identifies when each representation was seen.
+
+The rolling overlap is a fixed server-side 14-calendar-day market-history request ending at the latest completed boundary. It is separate from the 14 successful Daily Check catalog cycles in `OPERATIONS.md`. The initial normal/review/anomalous thresholds are versioned operational data-quality rules in `DATABASE_ARCHITECTURE.md`; they do not alter any current Radar, volume, price, OI or funding formula in this registry. Phase 1 has no market-history overlap writer, so its success cannot be used to assert that historical source revisions have been validated.
+
 ## 9. Target layer mapping
 
 | Data layer | Current examples | Target storage | Phase 0/1 permission |
@@ -483,7 +501,7 @@ The four Signal histories are separate and the authenticated writer returns HTTP
 | External metadata/raw archive | Official catalog/market payloads and traditional source files | Object archive + `ingest.raw_artifact` manifest | Raw-body contract/schema in Phase 0; no upstream raw body in Phase 1; collector instrumentation later |
 | Normalized catalog artifact | Deterministic accepted/reviewed observation representation | `ingest.raw_artifact` manifest with kind `normalized`; optional private content-addressed object | Ten manifests/checksums per complete PostgreSQL-shadow cycle; object upload only when its independent server switch is enabled |
 | Normalized identity/catalog | Security identity, exact venue listing membership | `identity.*`, `ingest.source_run`, `ingest.catalog_membership` | Ten catalogs only in Phase 1 |
-| Normalized market facts | Listing price/volume/OI/funding/depth, traditional/reference observations | `fact.*` | Schema skeleton only |
+| Normalized market facts | Listing price/volume/OI/funding/depth, traditional/reference observations | Typed `fact.*` plus Phase 2 append-only revision relations/views | Schema skeleton only; no overlap writer in Phase 0/1 |
 | Derived analytics | Canonical hourly aggregate, daily anchors, ranks, cohorts | `analytics.*` | Schema skeleton only |
 | Signals | Radar scores, anomaly triggers, listing lifecycle events | Market signals later use `analytics.signal_result` / `alert.*`; catalog lifecycle uses `analytics.catalog_change_event` | Only verified catalog lifecycle events may shadow-write; market signals do not |
 | Publication | API snapshot payload/checksum/latest pointer | `publication.*` plus CDN | Schema skeleton only; current APIs unchanged |

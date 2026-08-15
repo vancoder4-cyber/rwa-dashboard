@@ -21,7 +21,7 @@
    - A failing run must be reviewed before promoting another production deployment.
 
 4. **Codex scheduled reviews**
-   - Daily at 09:10 Asia/Shanghai: production status, live data contracts, deployment state, recent errors, all ten Spot/Perpetual official catalog states and any new/re-listed assets detected in the rolling seven-day window.
+   - Daily at 09:10 Asia/Shanghai: production status, live data contracts, deployment state, recent errors, all ten Spot/Perpetual official catalog states and any new/re-listed assets detected in the rolling seven-day window. It also runs the production `audit:catalog-shadow` read-only reconciliation, reports the successful Phase 1 UTC-cycle streak as `n/14`, and reminds the owner when `readyForPhase2=true`; that reminder authorizes a Phase 2 design review only, never a writer or read cutover.
    - Monday at 10:00 Asia/Shanghai: full venue catalogs, identity collisions, listing lifecycle, classification/tags, OKX SWAP/X-Perp and UTS/gold composition, Traditional candidate/ranking rules, previous-session selection and comparison coverage, false `NEW` detection, deterministic tie-breaks, adjusted-options handling, reference pricing and historical coverage.
    - Scheduled reviews are read-only. They report P0/P1/P2 findings and must not modify, push or deploy without user confirmation.
 
@@ -79,9 +79,10 @@ npm run db:migrate -- --dry-run
 npm run db:migrate
 npm run db:migrate   # must report only [skip] on the second run
 npm run audit:db
+vercel env run -e production --scope vancoder4-cybers-projects -- npm run audit:catalog-shadow
 ```
 
-Run migrations with `DATABASE_URL_UNPOOLED` whenever it is available. `audit:db` emits only a non-secret database fingerprint, migration checksums, role/extension results and aggregate row counts; it fails on checksum drift or privilege expansion. Never print or commit the connection URL.
+Run migrations with `DATABASE_URL_UNPOOLED` whenever it is available. `audit:db` emits only a non-secret database fingerprint, migration checksums, role/extension results and aggregate row counts; it fails on checksum drift or privilege expansion. `audit:catalog-shadow` is read-only: it reconciles the latest bounded PostgreSQL catalog cycles with the public listing snapshot, returns Warming with exit code zero before 14 successful UTC cycles, and returns a nonzero exit only for a reconciliation failure. Never print or commit the connection URL.
 
 ### Phase 1 — ten official catalogs, shadow-write only
 
@@ -108,10 +109,33 @@ During Phase 1:
 
 Promotion beyond shadow mode requires at least 14 consecutive daily cycles with all ten exact source runs and zero unexplained differences in accepted/rejected counts, identity conflicts, membership fingerprints, review-case isolation, drift quarantine, repeated-day removals and emitted lifecycle events. Replaying each `normalized-catalog-v1` artifact must reproduce the stored accepted fingerprint. Disabling either shadow sink must leave all existing APIs and UI unchanged.
 
+#### Daily Check 14-cycle gate versus Phase 2 rolling overlap
+
+These are two different controls and must never be reported as one:
+
+- **Daily Check acceptance** is 14 consecutive, distinct scheduled UTC-day buckets for the ten-source official-catalog shadow writer. Every bucket must pass source-set/count/fingerprint/review/event/sink reconciliation. A same-day retry updates evidence for that bucket but does not count as another successful cycle; a missing or non-passing scheduled bucket breaks the streak. This proves catalog shadow consistency only.
+- **Rolling 14-day overlap** is a future Phase 2 market-history collector behavior. On each run it re-fetches the fixed 14-calendar-day interval ending at the latest completed boundary and compares exact source/instrument/grain/method versions. Phase 1 neither performs this fetch nor validates historical price, volume, OI, funding, reference or Traditional restatements.
+
+Daily Check must publish the current streak length, first/last qualifying UTC bucket, ten-source completeness, reconciliation differences and the reason a streak reset. It must not show “14-day history verified” when only the catalog-cycle gate passed.
+
+#### Phase 2 prerequisites for revision-aware market history
+
+Before any exact market-fact writer or rolling-overlap Cron is enabled:
+
+1. migrate the event/valid-time and captured/system-time contract plus typed append-only revision relations described in `DATABASE_ARCHITECTURE.md`;
+2. prove stable observation keys use source, exact `instrument_version_id`, grain/boundary, unit/currency and method version—never ticker alone;
+3. expose reproducible first/latest values, `revision_count`, first-to-latest and previous-to-latest deltas without updating or deleting accepted revisions;
+4. use a fixed server-side 14-calendar-day interval and a separately authenticated backfill path for older repairs; browsers cannot choose either window;
+5. version the normal/review/anomalous restatement thresholds, including zero/null handling, source precision and batch revision-rate gates;
+6. test identical replay, small normal restatement, gray-zone review, anomalous drift, late completion, `value → NULL`, method/unit/identity change, old backfill and Partial/Unavailable source behavior;
+7. shadow-run long enough to reconcile every revision and prove that disabling the writer leaves current Runtime Cache/CDN/API/UI behavior unchanged.
+
+An identical re-fetch creates collection evidence but no revision. A changed value appends; it never silently overwrites the first value. Normal restatements remain queryable and do not page. Review-range deltas open a data-quality case. Anomalous row or batch drift is non-passing/P1, freezes promotion of that dataset and requires source-evidence review; identity/unit/method drift under the same key or destructive history mutation is P0.
+
 ### Database incident severity
 
-- **P0**: a database migration/write changes or blocks the current production read/Cron path; identity leakage; lost immutable evidence; wrong environment migration; missing future fact partition after a later fact phase.
-- **P1**: catalog reconciliation mismatch, duplicate lifecycle event, pool saturation, normalized-artifact checksum/replay failure, migration checksum mismatch or shadow sink errors over two scheduled cycles.
+- **P0**: a database migration/write changes or blocks the current production read/Cron path; identity leakage; lost immutable evidence; wrong environment migration; missing future fact partition after a later fact phase; a market-history revision is overwritten/deleted or a method/unit/identity change is accepted under the old observation key.
+- **P1**: catalog reconciliation mismatch, duplicate lifecycle event, pool saturation, normalized-artifact checksum/replay failure, migration checksum mismatch, shadow sink errors over two scheduled cycles, or a future Phase 2 row/batch restatement exceeds its versioned anomalous-drift threshold.
 - **P2**: non-blocking index/partition tuning, archive query ergonomics or cost optimization.
 
 Phase 0/1 schema presence is not authorization to start market-fact ingestion or database reads. Those require a separately reviewed phase with formula conservation, replay, capacity and rollback proof.
