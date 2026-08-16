@@ -8,9 +8,14 @@ import {
   DATABASE_URL_ENV_KEY,
   DATABASE_URL_UNPOOLED_ENV_KEY,
   DATABASE_TRANSACTION_TIMEOUT_MS,
+  PREVIEW_DATABASE_URL_ENV_KEY,
+  PREVIEW_DATABASE_URL_UNPOOLED_ENV_KEY,
+  databaseConnectionString,
   databaseConfigured,
+  databaseEnvironmentKeys,
   getDatabaseSql,
   getMigrationDatabaseSql,
+  migrationDatabaseConnectionString,
   migrationDatabaseConfigured,
   resetDatabaseClientForTests,
 } from '../api/_lib/database.js';
@@ -227,9 +232,15 @@ test('Neon clients remain lazy and migrations prefer the unpooled URL', () => {
   assert.equal(DATABASE_TRANSACTION_TIMEOUT_MS, 25_000);
   const originalPooled = process.env[DATABASE_URL_ENV_KEY];
   const originalUnpooled = process.env[DATABASE_URL_UNPOOLED_ENV_KEY];
+  const originalPreviewPooled = process.env[PREVIEW_DATABASE_URL_ENV_KEY];
+  const originalPreviewUnpooled = process.env[PREVIEW_DATABASE_URL_UNPOOLED_ENV_KEY];
+  const originalVercelEnv = process.env.VERCEL_ENV;
   try {
+    delete process.env.VERCEL_ENV;
     delete process.env[DATABASE_URL_ENV_KEY];
     delete process.env[DATABASE_URL_UNPOOLED_ENV_KEY];
+    delete process.env[PREVIEW_DATABASE_URL_ENV_KEY];
+    delete process.env[PREVIEW_DATABASE_URL_UNPOOLED_ENV_KEY];
     resetDatabaseClientForTests();
     assert.equal(databaseConfigured(), false);
     assert.equal(migrationDatabaseConfigured(), false);
@@ -242,11 +253,39 @@ test('Neon clients remain lazy and migrations prefer the unpooled URL', () => {
     assert.equal(migrationDatabaseConfigured(), true);
     assert.equal(typeof getDatabaseSql(), 'function');
     assert.equal(typeof getMigrationDatabaseSql(), 'function');
+
+    process.env.VERCEL_ENV = 'preview';
+    resetDatabaseClientForTests();
+    assert.deepEqual(databaseEnvironmentKeys(), {
+      pooled: PREVIEW_DATABASE_URL_ENV_KEY,
+      unpooled: PREVIEW_DATABASE_URL_UNPOOLED_ENV_KEY,
+    });
+    assert.equal(databaseConnectionString(), null);
+    assert.equal(migrationDatabaseConnectionString(), null);
+    assert.equal(databaseConfigured(), false);
+    assert.equal(migrationDatabaseConfigured(), false);
+    assert.throws(() => getDatabaseSql(), /PREVIEW_NEON_DATABASE_URL is required/);
+    assert.throws(() => getMigrationDatabaseSql(), /PREVIEW_NEON_DATABASE_URL_UNPOOLED or PREVIEW_NEON_DATABASE_URL is required/);
+
+    process.env[PREVIEW_DATABASE_URL_ENV_KEY] = 'postgresql://preview:password@ep-preview-pooled.example.invalid/database?sslmode=require';
+    process.env[PREVIEW_DATABASE_URL_UNPOOLED_ENV_KEY] = 'postgresql://preview:password@ep-preview-direct.example.invalid/database?sslmode=require';
+    assert.equal(databaseConfigured(), true);
+    assert.equal(migrationDatabaseConfigured(), true);
+    assert.equal(databaseConnectionString(), process.env[PREVIEW_DATABASE_URL_ENV_KEY]);
+    assert.equal(migrationDatabaseConnectionString(), process.env[PREVIEW_DATABASE_URL_UNPOOLED_ENV_KEY]);
+    assert.equal(typeof getDatabaseSql(), 'function');
+    assert.equal(typeof getMigrationDatabaseSql(), 'function');
   } finally {
     if (originalPooled === undefined) delete process.env[DATABASE_URL_ENV_KEY];
     else process.env[DATABASE_URL_ENV_KEY] = originalPooled;
     if (originalUnpooled === undefined) delete process.env[DATABASE_URL_UNPOOLED_ENV_KEY];
     else process.env[DATABASE_URL_UNPOOLED_ENV_KEY] = originalUnpooled;
+    if (originalPreviewPooled === undefined) delete process.env[PREVIEW_DATABASE_URL_ENV_KEY];
+    else process.env[PREVIEW_DATABASE_URL_ENV_KEY] = originalPreviewPooled;
+    if (originalPreviewUnpooled === undefined) delete process.env[PREVIEW_DATABASE_URL_UNPOOLED_ENV_KEY];
+    else process.env[PREVIEW_DATABASE_URL_UNPOOLED_ENV_KEY] = originalPreviewUnpooled;
+    if (originalVercelEnv === undefined) delete process.env.VERCEL_ENV;
+    else process.env.VERCEL_ENV = originalVercelEnv;
     resetDatabaseClientForTests();
   }
 });
@@ -258,6 +297,8 @@ test('package exposes only an explicit migration command and safe example modes'
   assert.match(packageJson.dependencies['@neondatabase/serverless'], /^\^1\./);
   assert.match(envExample, /^DATABASE_URL=$/m);
   assert.match(envExample, /^DATABASE_URL_UNPOOLED=$/m);
+  assert.match(envExample, /^PREVIEW_NEON_DATABASE_URL=$/m);
+  assert.match(envExample, /^PREVIEW_NEON_DATABASE_URL_UNPOOLED=$/m);
   assert.match(envExample, /^BLOB_READ_WRITE_TOKEN=$/m);
   assert.match(envExample, /^PG_WRITE_MODE=off$/m);
   assert.match(envExample, /^RAW_ARCHIVE_MODE=off$/m);
