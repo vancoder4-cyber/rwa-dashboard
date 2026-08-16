@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { getMigrationDatabaseSql } from '../api/_lib/database.js';
+import { getMigrationDatabaseSql, migrationDatabaseConnectionString } from '../api/_lib/database.js';
 import { loadMigrations } from '../db/migration-utils.js';
 
 const SCRIPT_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
@@ -14,7 +14,7 @@ const EXPECTED_ROLES = [
 ];
 
 function fingerprintConnection() {
-  const raw = String(process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL || '').trim();
+  const raw = migrationDatabaseConnectionString();
   if (!raw) return null;
   const url = new URL(raw);
   return createHash('sha256')
