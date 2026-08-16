@@ -160,6 +160,42 @@ An identical re-fetch creates collection evidence but no revision. A changed val
 
 Phase 0/1 schema presence is not authorization to start market-fact ingestion or database reads. Those require a separately reviewed phase with formula conservation, replay, capacity and rollback proof.
 
+### Database-coupled change and Preview-to-Production workflow
+
+Every pull request must include a database-impact declaration. Use the smallest applicable class:
+
+| Change class | Required database work in the same release |
+|---|---|
+| Documentation/UI only; no persisted contract changes | State `no database change`; still prove no writer/read contract changed |
+| Collector, formula or contract change with an existing writer | Update the writer, immutable method/formula/cohort version, reconciliation and fixtures together; state whether existing rows remain comparable |
+| Additive schema change | Add a new numbered migration, dry-run it, apply it to Preview, rerun it to prove checksum/idempotent skip, and audit roles/constraints before enabling the writer |
+| Replay/backfill or retention/partition change | Add an authenticated bounded job, capacity estimate, immutable lineage and pause/resume/rollback plan; never let a browser select the repair window |
+| Read cutover or destructive contract change | Use expand → dual-write/reconcile → feature-flagged read → later contract cleanup; require a separate production decision and rollback proof |
+
+An empty skeleton does not satisfy this contract. If the changed product is not yet database-backed, document `no persisted representation yet` and leave its database writer/read switch off until the relevant phase is approved.
+
+Release environments are paired and fail closed:
+
+- feature/PR deployments use the isolated Preview Neon resource and Preview-only credentials;
+- the production deployment uses only the Production Neon resource and Production credentials;
+- database fingerprints must differ, and neither environment may fall back to the other's connection variables;
+- normalized artifacts retain their environment-scoped object path; Preview evidence is never promoted or counted as Production evidence.
+
+For a database-coupled release, execute this order:
+
+1. Put code, migrations, formula/data registry updates, operations changes and tests in the same feature commit.
+2. Run `npm test`, `npm run check:inline`, `node scripts/migrate-db.mjs --dry-run` and `git diff --check`.
+3. Resolve the intended Preview database through Preview environment variables and record only its non-secret fingerprint. Abort if it matches Production.
+4. Apply Preview migrations; run them a second time and require every applied migration to report a checksum-matched skip. Run `npm run audit:db`.
+5. Deploy that source commit to Preview. Initialize only the explicitly enabled Preview writer, then run `audit:data`, `audit:listings`, `audit:health` and `audit:catalog-shadow` plus the browser/cache checks below.
+6. Freeze the reviewed source commit and migration checksum set. Do not modify an applied migration after this point.
+7. Before Production, verify the Production database fingerprint/restore policy and apply the same additive migrations with the migration owner. A migration failure stops the release before the Production rebuild or domain change.
+8. Promote the reviewed Preview source or merge the reviewed commit through the configured Git workflow. Vercel performs a Production rebuild from that source using Production environment variables; do not assume Preview runtime state or credentials move with it.
+9. Verify the Production source commit, database fingerprint, migration checksums, writer flags and publication-lease contract. Repeat all production audits and inspect 5xx/timeout logs.
+10. Roll back the application or disable the new writer/reader flag on failure. Keep additive migrations and accepted append-only evidence; repair schema/data with a new forward migration or replay rather than rewriting the ledger.
+
+The Daily Check database section records the deployed source commit, database fingerprint, applied migration versions/checksums, latest distinct UTC catalog bucket, ten-source and three-sink status, publication-lease state, readiness capability/operations counters and any reset reason. It must also repeat `marketFactsChecked=false` and `rollingMarketHistoryVerified=false` until a Phase 2 market-fact writer and revision reconciliation are actually enabled.
+
 ## Vercel usage guardrails
 
 The main resource risk is request fan-out, not response payload size. One browser refresh must never create one Vercel request per asset.
@@ -219,7 +255,7 @@ Before production promotion:
 8. Browser-check venue counts, Spot Reference status, Funding History and target lifecycle/tag fixes. Verify `US-listed / 美股` in Perpetual venue + By Asset and Spot overview + All Assets + venue tables; every filtered parent row must carry the US tag, while MINIMAX/SAMSUNG/PAXG and category-1 Crypto collisions remain absent. Category and Market filters must combine with AND, and aggregate tags must not change with venue order. Top 30 must exclude every incomplete current-day/current-hour candle, require the complete current contract denominator for Full, and label any missing listing/history or `24h×30` fallback Partial/Estimated. Verify stale Spot/Perp snapshots do not enter opportunity ranking and fully missing KPI/aggregate fields render Unavailable rather than zero. For Traditional, verify 50 rows initially, More expands to at most 100, row 51–100 quotes are not truncated, and rank arrows/`NEW` match the API comparison session. For Signal Radar, verify five source states, snapshot/persistence status are distinct, Warming never reads as Normal, More expands from 50 to at most 100, and a row opens the same canonical Asset Intelligence Drawer. Verify the independent perpetual-volume monitor covers the full verified universe, keys rows by `category:canonical`, labels every ratio/baseline Estimated, applies HIGH `>=2`, MEDIUM `>=1.5 and <2`, DOWN `<=0.4`, and suppresses ratios whenever source coverage, volume fields, seven-day anchors or the exact listing-cohort fingerprint are incomplete. Verify the Spot volume/price board keeps exact `spot:venue:venueSymbol` rows, applies the `$500,000` hard filter before `volume >= 3x OR price gain >= 15%`, allows price-only alerts while history is Warming, keeps Kraken price Unavailable, preserves separate quote listings, and shows only exact `category:canonical` Perp contracts. A Partial five-Spot-source snapshot must not say “No anomalies.” Verify OI Positioning & Large-Liquidation Proxy also evaluates the full verified Perp universe before returning Top 100, uses three completed `d-3/d-2/d-1` 23:00 UTC closes, applies `volume > $1m` and `peak-current OI > $2m` as strict boundaries, and preserves exact listing cohorts. Cross-listing OI, closes, peak/drop and signals must read Estimated even when coverage is Full. Binance ratios must use the exact displayed contract and fresh official timestamp; exact `0.95/1.05` is Neutral, but missing/failed/contradictory data is Unavailable. Confirm the copy calls the drop a proxy—not reported liquidation—and does not infer which side was liquidated. In Competitor New Listings, verify the ten Perpetual/Spot sources, rolling 7-day default and 30-day switch, exact venue-symbol `Included` status, and that review-required Gate candidates cannot open the Drawer. Validate the `history` retention object; when `truncated=true`, the banner and empty state must say Partial, counts must be lower bounds, and both `/api/health` and `audit:listings` must be non-passing.
    On a cache-busted cold page, click Spot immediately: the shell must be interactive without waiting for Perpetuals, successful venues must appear progressively, and core listing/price rows must render before any depth enrichment finishes.
 9. Switch `EN → 中文 → EN`; confirm the OKX venue, loading state, X-Perp copy and Top 30 loading sentence translate while ticker, venue identity and current page/filter state remain unchanged.
-10. Push the verified commit, promote the same Preview artifact, then repeat both audits, `/api/health`, baseline assertions and same-URL cache checks on production.
+10. Push the verified commit and promote its reviewed Preview source. Vercel rebuilds that source for Production with Production environment variables; verify the resulting Production source commit and database fingerprint, then repeat both audits, `/api/health`, baseline assertions and same-URL cache checks.
 11. Check production 5xx logs and document any platform-only warning separately.
 12. After 30–60 minutes and again after 24 hours, compare Edge Requests and top-route distribution with the pre-release baseline. Gate/OKX client traffic should scale with refreshes/cache keys, never with the number of assets.
 

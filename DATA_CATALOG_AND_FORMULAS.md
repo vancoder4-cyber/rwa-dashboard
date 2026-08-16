@@ -532,7 +532,13 @@ Any change to a formula, threshold, grain or comparable cohort must include all 
 4. updated status, observed/expected and Warming behavior;
 5. migration/replay statement for prior history—never silently compare incompatible distributions;
 6. updates to this registry, `RWA_DATA_RULES.md` and `OPERATIONS.md` where relevant;
-7. Preview audit and explicit confirmation that no bare-ticker join or Crypto collision entered the result.
+7. a database-impact declaration naming the target fact/revision relation and observation key, or explicitly stating `no persisted representation yet`;
+8. writer/read state, formula/method/cohort version, retention/partition impact, and identical-versus-changed re-fetch behavior;
+9. any additive migration, backfill/replay and old/new compatibility plan; an existing database writer must be updated in the same release, while a not-yet-backed feature keeps its writer disabled;
+10. isolated Preview migration/audit evidence followed by Production migration checksum, database fingerprint and post-release reconciliation;
+11. explicit confirmation that no bare-ticker join or Crypto collision entered the result.
+
+An application formula and its persisted representation are one versioned contract. A release must not change the application calculation while silently continuing to write the old database meaning under the same method or formula version. Conversely, creating an empty table does not authorize a writer or imply historical coverage. Read cutover follows expand, dual-write/reconcile and explicit approval; rollback disables the new writer/reader and uses a forward migration rather than deleting accepted revisions.
 
 ## 11. Code-location index
 

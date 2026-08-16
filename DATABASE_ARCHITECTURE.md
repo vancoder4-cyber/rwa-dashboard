@@ -398,6 +398,26 @@ P0 risks: identity leakage, wrong units, lost audit evidence, a future partition
 - Read cutover requires a Preview comparison and an explicit production decision; it is not implied by successful shadow writing.
 - Every schema migration, feature-switch change, reconciliation override and manual identity resolution is append-only audited.
 
+### 10.1 Database-coupled change contract
+
+Every product or collector change must declare its database impact in the same pull request. This applies when the change affects an admitted identity, persisted field, unit/currency, observation grain or boundary, source/method/cohort version, formula input/output, retention, partition key, writer, reader or reconciliation rule. The declaration must identify:
+
+1. the affected source dataset and exact database relation, or explicitly state `no persisted representation yet`;
+2. whether the release needs an additive migration, writer change, replay/backfill, formula or method version bump, partition/capacity change, or read-path change;
+3. compatibility of old application/new schema and new application/old schema;
+4. the Preview migration, dual-write/reconciliation and Production verification evidence;
+5. a rollback that disables the new writer/reader or rolls back the application without editing an applied migration or deleting accepted evidence.
+
+`db/migrations/*.sql` is the only schema-change path. Applied migration files are immutable and checksum-locked; corrections use a new forward migration. Runtime startup and request handlers never apply schema changes automatically. Expand-contract changes are split across releases: add compatible schema first, migrate/replay and verify it second, switch readers only after explicit approval, and remove obsolete structures only in a later release after rollback compatibility expires.
+
+If a feature remains Runtime Cache/CDN/browser-only, its change record must say so and must not imply that an empty Phase 0/1 skeleton is receiving data. A database writer may start only after its typed relation, stable exact identity key, method/version contract, retention/partition policy, replay behavior and failure semantics have all passed the phase-specific Preview gate.
+
+### 10.2 Environment and release isolation
+
+Preview and Production use physically separate Neon resources/databases and separate migration ledgers. Preview credentials must fail closed to the Preview resource and must never fall back to Production; Production uses only Production credentials. A database fingerprint, environment label and migration checksum set are release evidence, but connection strings are never printed or copied into logs.
+
+The release unit is one reviewed source commit plus its migration set, documentation, tests and feature-switch plan. Preview applies and verifies that commit against the Preview database first. Production then rebuilds the same reviewed source with Production environment variables, applies only the already-reviewed migrations to the Production database, and repeats reconciliation. Preview catalog history is not copied into Production, and a successful Preview bucket never counts as Production readiness evidence.
+
 ## 11. Authoritative design references
 
 - [PostgreSQL: Declarative Partitioning](https://www.postgresql.org/docs/current/ddl-partitioning.html) informs monthly/quarterly time-range partitions, simple immutable bounds, partition pruning and creating future partitions before the boundary.
