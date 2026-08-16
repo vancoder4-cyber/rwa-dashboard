@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import {
   LISTING_SOURCE_KEYS,
@@ -9,9 +9,16 @@ export const LISTING_PG_JOB_NAME = 'rwa-listing-audit';
 export const LISTING_PG_PIPELINE_VERSION = 'rwa-listing-catalog-pg-shadow/v1';
 export const LISTING_PG_ENDPOINT_KEY = 'official-catalog';
 export const LISTING_NORMALIZED_ARTIFACT_FORMAT = 'normalized-catalog-v1';
+export const LISTING_PG_STALE_RETRY_ERROR_CODE = 'STALE_TRUSTED_LISTING_RETRY';
+export const LISTING_PG_IDENTITY_DOWNGRADE_ERROR_CODE = 'UNTRUSTED_CATALOG_IDENTITY_DOWNGRADE';
+export const LISTING_PG_VERIFIED_IDENTITY_CONFLICT_ERROR_CODE = 'CONFLICTING_VERIFIED_CATALOG_IDENTITY';
+export const LISTING_PG_PUBLICATION_LEASE_LOST_ERROR_CODE = 'LISTING_AUDIT_PUBLICATION_LEASE_LOST';
+export const LISTING_PG_PUBLICATION_LEASE_KEY = 'listing-audit-runtime-cache';
+export const LISTING_PG_PUBLICATION_LEASE_SECONDS = 180;
 
 const PG_WRITE_MODES = new Set(['off', 'shadow', 'required']);
 const TRUSTED_SOURCE_STATUSES = new Set(['warming', 'full']);
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DATABASE_CATEGORY = Object.freeze({
   equity: 'equity',
   etf: 'etf',
@@ -32,6 +39,61 @@ function compareExact(left, right) {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+function sortedUniqueStrings(values) {
+  return [...new Set((Array.isArray(values) ? values : []).map(normalized).filter(Boolean))].sort(compareExact);
+}
+
+function sameStrings(left, right) {
+  const a = sortedUniqueStrings(left);
+  const b = sortedUniqueStrings(right);
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+export function classifyListingAuditSourceRunWritePolicy(sourceRun) {
+  const errorCodes = sortedUniqueStrings(sourceRun?.errorCodes);
+  const reviewCaseCount = Array.isArray(sourceRun?.reviewCases) ? sourceRun.reviewCases.length : 0;
+  const rejectedRowCount = Array.isArray(sourceRun?.rejectedRows) ? sourceRun.rejectedRows.length : 0;
+  const pendingRemovalCount = Number.isInteger(sourceRun?.pendingRemovalCount) && sourceRun.pendingRemovalCount >= 0
+    ? sourceRun.pendingRemovalCount
+    : null;
+  const pendingRemoval = sourceRun?.catalogStatus === 'partial' && sourceRun?.mergedStatus === 'partial' &&
+    errorCodes.includes('CATALOG_PARTIAL') && pendingRemovalCount !== null && pendingRemovalCount > 0;
+  const reviewIsolation = sourceRun?.identityStatus === 'partial' && reviewCaseCount > 0 &&
+    rejectedRowCount === 0 && sourceRun?.rejectedListingCount === reviewCaseCount &&
+    errorCodes.includes('SOURCE_IDENTITY_PARTIAL') && errorCodes.includes('IDENTITY_REVIEW_REQUIRED');
+  const expectedErrors = sortedUniqueStrings([
+    ...(pendingRemoval ? ['CATALOG_PARTIAL'] : []),
+    ...(reviewIsolation ? ['SOURCE_IDENTITY_PARTIAL', 'IDENTITY_REVIEW_REQUIRED'] : []),
+  ]);
+  const catalogTrusted = pendingRemoval ||
+    (sourceRun?.catalogStatus === 'full' && ['full', 'warming'].includes(sourceRun?.mergedStatus));
+  const identityTrusted = reviewIsolation ||
+    (sourceRun?.identityStatus === 'full' && reviewCaseCount === 0 &&
+      rejectedRowCount === 0 && sourceRun?.rejectedListingCount === 0);
+  const expectedStatus = pendingRemoval || reviewIsolation ? 'partial' : 'full';
+  const countsConserve = Number.isInteger(sourceRun?.listingCount) && sourceRun.listingCount > 0 &&
+    Number.isInteger(sourceRun?.admittedListingCount) && sourceRun.admittedListingCount >= 0 &&
+    Number.isInteger(sourceRun?.rejectedListingCount) && sourceRun.rejectedListingCount >= 0 &&
+    sourceRun.listingCount === sourceRun.admittedListingCount + sourceRun.rejectedListingCount &&
+    Array.isArray(sourceRun?.memberships) && sourceRun.memberships.length === sourceRun.admittedListingCount;
+  const trustedLatest = sourceRun?.endpointKey === LISTING_PG_ENDPOINT_KEY && sourceRun?.rawStatus === 'full' &&
+    sourceRun?.trustedForMembership === true && catalogTrusted && identityTrusted && countsConserve &&
+    sourceRun?.status === expectedStatus && sameStrings(errorCodes, expectedErrors);
+  const reasonCodes = [];
+  if (sourceRun?.rawStatus !== 'full') reasonCodes.push('RAW_CATALOG_NOT_FULL');
+  if (!catalogTrusted) reasonCodes.push('CATALOG_OBSERVATION_UNTRUSTED');
+  if (!identityTrusted) reasonCodes.push('IDENTITY_OBSERVATION_UNTRUSTED');
+  if (!countsConserve) reasonCodes.push('SOURCE_COUNTS_DO_NOT_CONSERVE');
+  if (!sameStrings(errorCodes, expectedErrors)) reasonCodes.push('UNEXPECTED_SOURCE_ERRORS');
+  return Object.freeze({
+    trustedLatest,
+    disposition: trustedLatest ? 'latest-trusted' : 'preserve-last-good',
+    pendingRemoval,
+    reviewIsolation,
+    reasonCodes: sortedUniqueStrings(reasonCodes),
+  });
+}
+
 function isoTimestamp(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) throw new TypeError('A valid listing audit timestamp is required');
@@ -44,6 +106,18 @@ function sha256(value) {
 
 function safeError(error) {
   return normalized(error?.message || error || 'unknown error').slice(0, 500);
+}
+
+function persistenceConsistencyError(error) {
+  let current = error;
+  for (let depth = 0; current && depth < 5; depth += 1) {
+    const message = String(current?.message || current);
+    if (message.includes(LISTING_PG_STALE_RETRY_ERROR_CODE)) return LISTING_PG_STALE_RETRY_ERROR_CODE;
+    if (message.includes(LISTING_PG_IDENTITY_DOWNGRADE_ERROR_CODE)) return LISTING_PG_IDENTITY_DOWNGRADE_ERROR_CODE;
+    if (message.includes(LISTING_PG_VERIFIED_IDENTITY_CONFLICT_ERROR_CODE)) return LISTING_PG_VERIFIED_IDENTITY_CONFLICT_ERROR_CODE;
+    current = current?.cause;
+  }
+  return null;
 }
 
 function sourceKeyForDatabase(sourceKey) {
@@ -100,6 +174,8 @@ function stableArtifactPayload(sourceRun, batch) {
       rawStatus: sourceRun.rawStatus,
       mergedStatus: sourceRun.mergedStatus,
       trustedForMembership: sourceRun.trustedForMembership,
+      writeDisposition: sourceRun.writeDisposition,
+      pendingRemovalCount: sourceRun.pendingRemovalCount,
       reason: sourceRun.reason,
     },
     counts: {
@@ -207,6 +283,10 @@ function buildSourceRun(sourceKey, rawObservation, summary, mergedState, observe
   const rawStatus = normalized(rawObservation?.status || 'unavailable').toLowerCase();
   const catalogObserved = (TRUSTED_SOURCE_STATUSES.has(mergedStatus) || mergedStatus === 'partial') && rawStatus === 'full';
   const expectedListingKeys = new Set(mergedState?.sources?.[sourceKey]?.listingKeys || []);
+  const pendingRemovalKeys = Object.keys(mergedState?.sources?.[sourceKey]?.pendingRemovals || {}).sort(compareExact);
+  const pendingRemovalVenueSymbols = pendingRemovalKeys.map(key =>
+    normalized(mergedState?.known?.[key]?.venueSymbol || key.slice(`${sourceKey}:`.length)).toUpperCase(),
+  ).filter(Boolean).sort(compareExact);
   const normalizedListingKeys = new Set(normalizedRows.map(row => row.listingKey));
   const reconciled = catalogObserved
     ? rejectedRows.length === 0 &&
@@ -231,12 +311,12 @@ function buildSourceRun(sourceKey, rawObservation, summary, mergedState, observe
   const errorCodes = [];
   if (catalogSourceStatus === 'partial') errorCodes.push('CATALOG_PARTIAL');
   if (catalogSourceStatus === 'unavailable') errorCodes.push('CATALOG_UNAVAILABLE');
-  if (catalogSourceStatus === 'full' && !identityComplete) errorCodes.push('SOURCE_IDENTITY_PARTIAL');
+  if (catalogObserved && !identityComplete) errorCodes.push('SOURCE_IDENTITY_PARTIAL');
   if (rawStatus !== 'full') errorCodes.push('UPSTREAM_UNAVAILABLE');
   if (reviewRows.length) errorCodes.push('IDENTITY_REVIEW_REQUIRED');
   if (rejectedRows.length) errorCodes.push('IDENTITY_NORMALIZATION_REJECTED');
 
-  return {
+  const sourceRun = {
     listingSourceKey: sourceKey,
     sourceKey: sourceKeyForDatabase(sourceKey),
     market,
@@ -251,6 +331,8 @@ function buildSourceRun(sourceKey, rawObservation, summary, mergedState, observe
       : 'unavailable',
     dataStatus: 'not-applicable',
     trustedForMembership: catalogObserved,
+    pendingRemovalCount: pendingRemovalKeys.length,
+    pendingRemovalVenueSymbols,
     listingCount: rawRows.length,
     admittedListingCount: verifiedRows.length,
     rejectedListingCount: reviewRows.length + rejectedRows.length,
@@ -262,6 +344,8 @@ function buildSourceRun(sourceKey, rawObservation, summary, mergedState, observe
       mergedStatus,
       baseline: mergedStatus === 'warming',
       withheldFromMembership: normalizedRows.length - verifiedRows.length,
+      pendingRemovalCount: pendingRemovalKeys.length,
+      pendingRemovalVenueSymbols,
       observedAt,
     },
     normalizedRows: normalizedRows
@@ -288,6 +372,12 @@ function buildSourceRun(sourceKey, rawObservation, summary, mergedState, observe
     rejectedRows: rejectedRows.sort((left, right) =>
       compareExact(left.officialProductKey, right.officialProductKey)),
   };
+  const writePolicy = classifyListingAuditSourceRunWritePolicy(sourceRun);
+  sourceRun.writePolicy = writePolicy;
+  sourceRun.writeDisposition = writePolicy.disposition;
+  sourceRun.metadata.writeDisposition = writePolicy.disposition;
+  sourceRun.metadata.writePolicyReasons = writePolicy.reasonCodes;
+  return sourceRun;
 }
 
 export function resolvePgWriteMode(env = process.env) {
@@ -348,6 +438,7 @@ export function buildListingAuditPgBatch({ observations, merged, observedAt, env
   if (batch.sourceRuns.length !== LISTING_SOURCE_KEYS.length) {
     throw new TypeError('Listing Audit PostgreSQL batch must contain all ten sources');
   }
+  batch.trustedLatestSourceCount = batch.sourceRuns.filter(row => row.writePolicy?.trustedLatest).length;
   const fullSourceRuns = batch.sourceRuns.filter(row => row.status === 'full').length;
   batch.status = fullSourceRuns === batch.sourceRuns.length
     ? 'complete'
@@ -376,6 +467,8 @@ export function buildListingAuditPgBatch({ observations, merged, observedAt, env
         trustedForMembership: sourceRun.trustedForMembership,
       },
     };
+    sourceRun.metadata.artifactSha256 = digest;
+    sourceRun.metadata.artifactCapturedAt = generatedAt;
   }
   batch.events = (Array.isArray(merged.newEvents) ? merged.newEvents : [])
     .filter(event => event?.identityStatus === 'verified')
@@ -406,7 +499,11 @@ export function buildListingAuditPgBatch({ observations, merged, observedAt, env
     })
     .sort((left, right) =>
       compareExact(`${left.sourceKey}:${left.normalizedVenueSymbol}:${left.eventType}`, `${right.sourceKey}:${right.normalizedVenueSymbol}:${right.eventType}`));
-  batch.checksum = sha256(batch.sourceRuns.map(row => `${row.sourceKey}:${row.artifact.sha256}`).join('\n'));
+  batch.checksum = sha256(batch.sourceRuns
+    .slice()
+    .sort((left, right) => compareExact(left.sourceKey, right.sourceKey))
+    .map(row => `${row.sourceKey}:${row.artifact.sha256}`)
+    .join('\n'));
   return batch;
 }
 
@@ -519,11 +616,14 @@ function sourceRunRows(batch) {
     rejected_listing_count: row.rejectedListingCount,
     error_codes: row.errorCodes,
     metadata: row.metadata,
+    replace_snapshot: row.writePolicy?.trustedLatest === true,
   }));
 }
 
 function membershipRows(batch) {
-  return batch.sourceRuns.flatMap(sourceRun => sourceRun.memberships.map(row => ({
+  return batch.sourceRuns
+    .filter(sourceRun => sourceRun.writePolicy?.trustedLatest === true)
+    .flatMap(sourceRun => sourceRun.memberships.map(row => ({
     source_key: sourceRun.sourceKey,
     official_product_key: row.officialProductKey,
     asset_key: row.assetKey,
@@ -558,7 +658,10 @@ function membershipRows(batch) {
 }
 
 function eventRows(batch) {
-  return batch.events.map(row => ({
+  const trustedSourceKeys = new Set(batch.sourceRuns
+    .filter(sourceRun => sourceRun.writePolicy?.trustedLatest === true)
+    .map(sourceRun => sourceRun.sourceKey));
+  return batch.events.filter(row => trustedSourceKeys.has(row.sourceKey)).map(row => ({
     source_key: row.sourceKey,
     normalized_venue_symbol: row.normalizedVenueSymbol,
     event_type: row.eventType,
@@ -569,12 +672,24 @@ function eventRows(batch) {
 }
 
 function reviewRows(batch) {
-  return batch.sourceRuns.flatMap(sourceRun => sourceRun.reviewCases.map(row => ({
+  return batch.sourceRuns
+    .filter(sourceRun => sourceRun.writePolicy?.trustedLatest === true)
+    .flatMap(sourceRun => sourceRun.reviewCases.map(row => ({
     source_key: sourceRun.sourceKey,
     official_product_key: row.officialProductKey,
     payload: row.payload,
     reason_codes: row.reasonCodes,
   })));
+}
+
+function replacementSourceRows(batch) {
+  return batch.sourceRuns
+    .filter(sourceRun => sourceRun.writePolicy?.trustedLatest === true)
+    .map(sourceRun => ({
+      source_key: sourceRun.sourceKey,
+      pending_venue_symbols: sourceRun.pendingRemovalVenueSymbols,
+      artifact_sha256: sourceRun.artifact.sha256,
+    }));
 }
 
 export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
@@ -584,6 +699,7 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
   const memberships = membershipRows(batch);
   const reviews = reviewRows(batch);
   const events = eventRows(batch);
+  const replacementSources = replacementSourceRows(batch);
   const artifacts = archivedArtifacts.map(row => ({
     source_key: row.sourceKey,
     environment: batch.environment,
@@ -622,6 +738,12 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
     sql.query(`SET LOCAL statement_timeout = '15s'`),
     sql.query(`SET LOCAL lock_timeout = '3s'`),
     sql.query(
+      `SELECT pg_advisory_xact_lock(hashtextextended(
+         $1 || chr(31) || $2 || chr(31) || $3::text, 0
+       )) AS catalog_retry_lock`,
+      [batch.jobName, batch.pipelineVersion, batch.bucketAt],
+    ),
+    sql.query(
       `INSERT INTO identity.source (source_key, market, venue, data_domain, catalog_authority, enabled)
        SELECT x.source_key, x.market, x.venue, x.data_domain, 'official', true
        FROM jsonb_to_recordset($1::jsonb) AS x(source_key text, market text, venue text, data_domain text)
@@ -633,6 +755,71 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
          enabled = true,
          updated_at = clock_timestamp()`,
       [json(sources)],
+    ),
+    sql.query(
+      `SELECT CASE WHEN EXISTS (
+         SELECT 1
+         FROM ingest.collection_attempt AS attempt
+         JOIN ingest.collection_cycle AS cycle ON cycle.cycle_id = attempt.cycle_id
+         LEFT JOIN ingest.sink_commit AS archive_sink
+           ON archive_sink.attempt_id = attempt.attempt_id
+          AND archive_sink.sink_name = 'blob-normalized-catalog'
+         LEFT JOIN ingest.sink_commit AS runtime_sink
+           ON runtime_sink.attempt_id = attempt.attempt_id
+          AND runtime_sink.sink_name = 'runtime-cache-listing-audit'
+         WHERE cycle.job_name = $1
+           AND cycle.pipeline_version = $2
+           AND cycle.bucket_at = $3::timestamptz
+           AND attempt.attempt_no = $4
+           AND (
+             GREATEST(attempt.completed_at, COALESCE(runtime_sink.committed_at, attempt.completed_at)) > $5::timestamptz
+             OR (GREATEST(attempt.completed_at, COALESCE(runtime_sink.committed_at, attempt.completed_at)) = $5::timestamptz AND
+               archive_sink.checksum IS NOT NULL AND archive_sink.checksum <> $6)
+           )
+       ) THEN ingest.reject_stale_catalog_retry() ELSE 1 END AS retry_order_guard`,
+      [...common, batch.observedAt, batch.checksum],
+    ),
+    sql.query(
+      `SELECT CASE WHEN EXISTS (
+         SELECT 1
+         FROM jsonb_to_recordset($1::jsonb) AS incoming(
+           source_key text, official_product_key text
+         )
+         JOIN identity.source AS source ON source.source_key = incoming.source_key
+         JOIN identity.instrument AS instrument
+           ON instrument.source_id = source.source_id
+          AND instrument.official_product_key = incoming.official_product_key
+         JOIN identity.instrument_version AS current
+           ON current.instrument_id = instrument.instrument_id
+          AND current.valid_to IS NULL
+          AND current.identity_status = 'verified'
+       ) THEN ingest.reject_catalog_identity_downgrade() ELSE 1 END AS identity_downgrade_guard`,
+      [json(reviews)],
+    ),
+    sql.query(
+      `SELECT CASE WHEN EXISTS (
+         SELECT 1
+         FROM jsonb_to_recordset($1::jsonb) AS incoming(
+           source_key text, official_product_key text, asset_key text,
+           category text, canonical_underlying text
+         )
+         JOIN identity.source AS source ON source.source_key = incoming.source_key
+         JOIN identity.instrument AS instrument
+           ON instrument.source_id = source.source_id
+          AND instrument.official_product_key = incoming.official_product_key
+         JOIN identity.instrument_version AS current
+           ON current.instrument_id = instrument.instrument_id
+          AND current.valid_to IS NULL
+          AND current.identity_status = 'verified'
+         JOIN identity.asset_version AS current_asset_version
+           ON current_asset_version.asset_version_id = current.asset_version_id
+         JOIN identity.asset AS current_asset
+           ON current_asset.asset_id = current_asset_version.asset_id
+         WHERE current_asset.asset_key <> incoming.asset_key
+           OR current_asset_version.category <> incoming.category
+           OR current_asset_version.canonical_underlying <> incoming.canonical_underlying
+       ) THEN ingest.reject_verified_catalog_identity_conflict() ELSE 1 END AS verified_identity_guard`,
+      [json(memberships)],
     ),
     sql.query(
       `INSERT INTO ingest.collection_cycle
@@ -684,44 +871,107 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
        )
        JOIN identity.source AS source ON source.source_key = x.source_key
        ON CONFLICT (attempt_id, source_id, endpoint_key) DO UPDATE SET
-         completed_at = GREATEST(ingest.source_run.completed_at, EXCLUDED.completed_at),
+         completed_at = CASE
+           WHEN EXCLUDED.metadata->>'writeDisposition' = 'latest-trusted' THEN EXCLUDED.completed_at
+           ELSE ingest.source_run.completed_at
+         END,
          status = CASE
-           WHEN ingest.source_run.status = 'full' OR EXCLUDED.status = 'full' THEN 'full'
-           WHEN ingest.source_run.status = 'partial' OR EXCLUDED.status = 'partial' THEN 'partial'
-           ELSE 'unavailable'
+           WHEN EXCLUDED.metadata->>'writeDisposition' = 'latest-trusted' THEN EXCLUDED.status
+           ELSE ingest.source_run.status
          END,
          catalog_status = CASE
-           WHEN ingest.source_run.catalog_status = 'full' OR EXCLUDED.catalog_status = 'full' THEN 'full'
-           WHEN ingest.source_run.catalog_status = 'partial' OR EXCLUDED.catalog_status = 'partial' THEN 'partial'
-           ELSE 'unavailable'
+           WHEN EXCLUDED.metadata->>'writeDisposition' = 'latest-trusted' THEN EXCLUDED.catalog_status
+           ELSE ingest.source_run.catalog_status
          END,
          identity_status = CASE
-           WHEN ingest.source_run.identity_status = 'full' OR EXCLUDED.identity_status = 'full' THEN 'full'
-           WHEN ingest.source_run.identity_status = 'partial' OR EXCLUDED.identity_status = 'partial' THEN 'partial'
-           ELSE 'unavailable'
+           WHEN EXCLUDED.metadata->>'writeDisposition' = 'latest-trusted' THEN EXCLUDED.identity_status
+           ELSE ingest.source_run.identity_status
          END,
          data_status = 'not-applicable',
          listing_count = CASE
-           WHEN ingest.source_run.status = 'full' AND EXCLUDED.status <> 'full' THEN ingest.source_run.listing_count
-           ELSE EXCLUDED.listing_count
+           WHEN EXCLUDED.metadata->>'writeDisposition' = 'latest-trusted' THEN EXCLUDED.listing_count
+           ELSE ingest.source_run.listing_count
          END,
          admitted_listing_count = CASE
-           WHEN ingest.source_run.status = 'full' AND EXCLUDED.status <> 'full' THEN ingest.source_run.admitted_listing_count
-           ELSE EXCLUDED.admitted_listing_count
+           WHEN EXCLUDED.metadata->>'writeDisposition' = 'latest-trusted' THEN EXCLUDED.admitted_listing_count
+           ELSE ingest.source_run.admitted_listing_count
          END,
          rejected_listing_count = CASE
-           WHEN ingest.source_run.status = 'full' AND EXCLUDED.status <> 'full' THEN ingest.source_run.rejected_listing_count
-           ELSE EXCLUDED.rejected_listing_count
+           WHEN EXCLUDED.metadata->>'writeDisposition' = 'latest-trusted' THEN EXCLUDED.rejected_listing_count
+           ELSE ingest.source_run.rejected_listing_count
          END,
          error_codes = CASE
-           WHEN ingest.source_run.status = 'full' AND EXCLUDED.status <> 'full' THEN ingest.source_run.error_codes
-           ELSE EXCLUDED.error_codes
+           WHEN EXCLUDED.metadata->>'writeDisposition' = 'latest-trusted' THEN EXCLUDED.error_codes
+           ELSE ingest.source_run.error_codes
          END,
          metadata = CASE
-           WHEN ingest.source_run.status = 'full' AND EXCLUDED.status <> 'full' THEN ingest.source_run.metadata
-           ELSE EXCLUDED.metadata
+           WHEN EXCLUDED.metadata->>'writeDisposition' = 'latest-trusted' THEN EXCLUDED.metadata
+           ELSE ingest.source_run.metadata
          END`,
       [...common, batch.observedAt, json(runs)],
+    ),
+    sql.query(
+      `WITH source_summary AS (
+         SELECT count(*)::int AS source_count,
+           (count(*) FILTER (WHERE run.status = 'full'))::int AS full_count,
+           (count(*) FILTER (WHERE run.status = 'unavailable'))::int AS unavailable_count,
+           NULLIF(string_agg(
+             CASE WHEN run.status = 'full' THEN NULL
+               ELSE source.source_key || ':' || COALESCE(array_to_string(run.error_codes, ','), run.status)
+             END,
+             '; ' ORDER BY source.source_key COLLATE "C"
+           ), '') AS error_summary
+         FROM ingest.source_run AS run
+         JOIN identity.source AS source ON source.source_id = run.source_id
+         WHERE run.attempt_id = (${attemptLookup})
+           AND run.endpoint_key = '${LISTING_PG_ENDPOINT_KEY}'
+       )
+       UPDATE ingest.collection_attempt AS attempt
+       SET status = CASE
+           WHEN summary.source_count = ${LISTING_SOURCE_KEYS.length} AND summary.full_count = ${LISTING_SOURCE_KEYS.length} THEN 'complete'
+           WHEN summary.source_count = ${LISTING_SOURCE_KEYS.length} AND summary.unavailable_count = ${LISTING_SOURCE_KEYS.length} THEN 'failed'
+           ELSE 'partial'
+         END,
+         error_summary = summary.error_summary
+       FROM source_summary AS summary
+       WHERE attempt.attempt_id = (${attemptLookup})`,
+      common,
+    ),
+    sql.query(
+      `UPDATE ingest.collection_cycle AS cycle
+       SET status = attempt.status,
+         completed_at = attempt.completed_at
+       FROM ingest.collection_attempt AS attempt
+       WHERE attempt.attempt_id = (${attemptLookup})
+         AND cycle.cycle_id = attempt.cycle_id`,
+      common,
+    ),
+    sql.query(
+      `DELETE FROM identity.evidence AS evidence
+       USING identity.source AS source,
+         ingest.source_run AS source_run,
+         jsonb_to_recordset($5::jsonb) AS incoming(source_key text)
+       WHERE source.source_key = incoming.source_key
+         AND source_run.source_id = source.source_id
+         AND source_run.endpoint_key = '${LISTING_PG_ENDPOINT_KEY}'
+         AND source_run.attempt_id = (${attemptLookup})
+         AND evidence.source_run_id = source_run.source_run_id
+         AND evidence.source_id = source.source_id
+         AND evidence.evidence_kind = 'official-catalog'`,
+      [...common, json(replacementSources)],
+    ),
+    sql.query(
+      `DELETE FROM ingest.catalog_membership AS membership
+       USING identity.source AS source,
+         ingest.source_run AS source_run,
+         jsonb_to_recordset($5::jsonb) AS incoming(source_key text)
+       WHERE source.source_key = incoming.source_key
+         AND source_run.source_id = source.source_id
+         AND source_run.endpoint_key = '${LISTING_PG_ENDPOINT_KEY}'
+         AND source_run.attempt_id = (${attemptLookup})
+         AND membership.source_run_id = source_run.source_run_id
+         AND membership.source_id = source.source_id`,
+      [...common, json(replacementSources)],
     ),
     sql.query(
       `INSERT INTO identity.asset (asset_key)
@@ -874,6 +1124,63 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
       [json(reviews), batch.observedAt],
     ),
     sql.query(
+      `UPDATE identity.review_case AS review
+       SET status = 'verified',
+         resolved_asset_id = asset_version.asset_id,
+         resolved_instrument_id = instrument.instrument_id,
+         decided_at = $2::timestamptz,
+         decision_note = 'Auto-verified by a later trusted exact official catalog observation'
+       FROM jsonb_to_recordset($1::jsonb) AS incoming(
+         source_key text, official_product_key text
+       )
+       JOIN identity.source AS source ON source.source_key = incoming.source_key
+       JOIN identity.instrument AS instrument
+         ON instrument.source_id = source.source_id
+        AND instrument.official_product_key = incoming.official_product_key
+       JOIN identity.instrument_version AS instrument_version
+         ON instrument_version.instrument_id = instrument.instrument_id
+        AND instrument_version.valid_to IS NULL
+        AND instrument_version.identity_status = 'verified'
+       JOIN identity.asset_version AS asset_version
+         ON asset_version.asset_version_id = instrument_version.asset_version_id
+       WHERE review.source_id = source.source_id
+         AND review.candidate_official_product_key = incoming.official_product_key
+         AND review.status = 'open'
+         AND NOT EXISTS (
+           SELECT 1 FROM identity.review_case AS decided
+           WHERE decided.source_id = review.source_id
+             AND decided.candidate_official_product_key = review.candidate_official_product_key
+             AND decided.status = 'verified'
+             AND decided.review_case_id <> review.review_case_id
+         )`,
+      [json(memberships), batch.observedAt],
+    ),
+    sql.query(
+      `UPDATE identity.review_case AS review
+       SET status = 'superseded',
+         decided_at = $3::timestamptz,
+         decision_note = 'Superseded by a later trusted exact official catalog observation'
+       FROM jsonb_to_recordset($1::jsonb) AS replacement(
+         source_key text, pending_venue_symbols text[]
+       )
+       JOIN identity.source AS source ON source.source_key = replacement.source_key
+       WHERE review.source_id = source.source_id
+         AND review.status = 'open'
+         AND NOT (
+           COALESCE(review.candidate_payload->>'normalizedVenueSymbol', '') =
+           ANY(COALESCE(replacement.pending_venue_symbols, ARRAY[]::text[]))
+         )
+         AND NOT EXISTS (
+           SELECT 1
+           FROM jsonb_to_recordset($2::jsonb) AS current_review(
+             source_key text, official_product_key text
+           )
+           WHERE current_review.source_key = source.source_key
+             AND current_review.official_product_key = review.candidate_official_product_key
+         )`,
+      [json(replacementSources), json(reviews), batch.observedAt],
+    ),
+    sql.query(
       `INSERT INTO ingest.raw_artifact
          (source_run_id, environment, deployment_sha, artifact_kind, artifact_role,
           artifact_format, storage_provider, object_uri, sha256, content_type,
@@ -994,10 +1301,7 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
          LIMIT 1
        ) AS previous_source_run ON true
        ON CONFLICT (source_id, instrument_version_id, event_type, effective_day)
-       DO UPDATE SET
-         current_source_run_id = EXCLUDED.current_source_run_id,
-         observed_at = EXCLUDED.observed_at,
-         evidence = EXCLUDED.evidence`,
+       DO NOTHING`,
       [...common, json(events)],
     ),
     sql.query(
@@ -1023,43 +1327,67 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
       [batch.jobName, batch.pipelineVersion, batch.bucketAt, json(events)],
     ),
     sql.query(
+      `WITH actual_counts AS (
+         SELECT
+           (SELECT count(*)::int
+              FROM ingest.catalog_membership AS membership
+              JOIN ingest.source_run AS run ON run.source_run_id = membership.source_run_id
+             WHERE run.attempt_id = (${attemptLookup})) AS membership_count,
+           (SELECT count(*)::int
+              FROM analytics.catalog_change_event AS event
+             WHERE event.detection_cycle_id = (${cycleLookup})) AS lifecycle_count
+       ), actual_checksum AS (
+         SELECT CASE
+           WHEN count(*) = ${LISTING_SOURCE_KEYS.length}
+             AND bool_and((run.metadata->>'artifactSha256') ~ '^[0-9a-f]{64}$')
+           THEN encode(digest(string_agg(
+             source.source_key || ':' || (run.metadata->>'artifactSha256'),
+             E'\\n' ORDER BY source.source_key COLLATE "C"
+           ), 'sha256'), 'hex')
+           ELSE NULL
+         END AS checksum
+         FROM ingest.source_run AS run
+         JOIN identity.source AS source ON source.source_id = run.source_id
+         WHERE run.attempt_id = (${attemptLookup})
+           AND run.endpoint_key = '${LISTING_PG_ENDPOINT_KEY}'
+       ), stored AS (
+         INSERT INTO ingest.sink_commit
+           (attempt_id, sink_name, status, row_count, checksum, committed_at, error_summary)
+         SELECT (${attemptLookup}), 'postgres-catalog-shadow', 'stored',
+           actual_counts.membership_count + actual_counts.lifecycle_count,
+           actual_checksum.checksum,
+           $5::timestamptz, NULL
+         FROM actual_counts CROSS JOIN actual_checksum
+         ON CONFLICT (attempt_id, sink_name) DO UPDATE SET
+           status = 'stored',
+           row_count = EXCLUDED.row_count,
+           checksum = EXCLUDED.checksum,
+           committed_at = EXCLUDED.committed_at,
+           error_summary = NULL
+         RETURNING sink_name, row_count, checksum
+       )
+       SELECT stored.sink_name, stored.row_count, stored.checksum,
+         actual_counts.membership_count, actual_counts.lifecycle_count
+       FROM stored CROSS JOIN actual_counts`,
+      [...common, batch.observedAt],
+    ),
+    sql.query(
       `INSERT INTO ingest.sink_commit
          (attempt_id, sink_name, status, row_count, checksum, committed_at, error_summary)
        SELECT (${attemptLookup}), incoming.sink_name, incoming.status,
-         incoming.row_count, incoming.checksum, $5::timestamptz,
+         incoming.row_count, incoming.checksum,
+         CASE WHEN incoming.status = 'pending' THEN NULL ELSE $5::timestamptz END,
          incoming.error_summary
        FROM jsonb_to_recordset($6::jsonb) AS incoming(
          sink_name text, status text, row_count integer, checksum text, error_summary text
        )
        ON CONFLICT (attempt_id, sink_name) DO UPDATE SET
-         status = CASE
-           WHEN ingest.sink_commit.status = 'stored' OR EXCLUDED.status = 'stored' THEN 'stored'
-           ELSE EXCLUDED.status
-         END,
-         row_count = CASE
-           WHEN ingest.sink_commit.status = 'stored' AND EXCLUDED.status <> 'stored' THEN ingest.sink_commit.row_count
-           ELSE EXCLUDED.row_count
-         END,
-         checksum = CASE
-           WHEN ingest.sink_commit.status = 'stored' AND EXCLUDED.status <> 'stored' THEN ingest.sink_commit.checksum
-           ELSE EXCLUDED.checksum
-         END,
-         committed_at = CASE
-           WHEN ingest.sink_commit.status = 'stored' AND EXCLUDED.status <> 'stored' THEN ingest.sink_commit.committed_at
-           ELSE EXCLUDED.committed_at
-         END,
-         error_summary = CASE
-           WHEN ingest.sink_commit.status = 'stored' OR EXCLUDED.status = 'stored' THEN NULL
-           ELSE EXCLUDED.error_summary
-         END`,
+         status = EXCLUDED.status,
+         row_count = EXCLUDED.row_count,
+         checksum = EXCLUDED.checksum,
+         committed_at = EXCLUDED.committed_at,
+         error_summary = EXCLUDED.error_summary`,
       [...common, batch.observedAt, json([
-        {
-          sink_name: 'postgres-catalog-shadow',
-          status: 'stored',
-          row_count: memberships.length + events.length,
-          checksum: batch.checksum,
-          error_summary: null,
-        },
         {
           sink_name: 'blob-normalized-catalog',
           status: artifacts.length === 0 || artifacts.every(row => row.archive_status === 'pending')
@@ -1098,14 +1426,229 @@ export async function writeListingAuditPgBatch(batch, archivedArtifacts, { runTr
     sql => buildListingAuditPgQueries(sql, batch, archivedArtifacts),
     { isolationLevel: 'Serializable' },
   );
+  const postgresSink = (Array.isArray(results) ? results.flat() : [])
+    .find(row => row?.sink_name === 'postgres-catalog-shadow');
   return {
     queryCount: Array.isArray(results) ? results.length : null,
     sourceRunCount: batch.sourceRuns.length,
-    membershipCount: membershipRows(batch).length,
+    membershipCount: Number.isInteger(postgresSink?.membership_count)
+      ? postgresSink.membership_count
+      : null,
+    lifecycleCount: Number.isInteger(postgresSink?.lifecycle_count)
+      ? postgresSink.lifecycle_count
+      : null,
+    postgresRowCount: Number.isInteger(postgresSink?.row_count) ? postgresSink.row_count : null,
     reviewCaseCount: reviewRows(batch).length,
     artifactCount: archivedArtifacts.length,
-    checksum: batch.checksum,
+    checksum: postgresSink?.checksum || batch.checksum,
   };
+}
+
+function leaseResultRow(results) {
+  return (Array.isArray(results) ? results.flat() : [])
+    .find(row => row && (row.lease_key || row.leaseKey));
+}
+
+function validLeaseChecksum(value) {
+  const checksum = normalized(value).toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(checksum)) {
+    throw new TypeError('Listing Audit publication lease requires a SHA-256 payload checksum');
+  }
+  return checksum;
+}
+
+function validLeaseOwnerToken(value = randomUUID()) {
+  const ownerToken = normalized(value);
+  if (!UUID_PATTERN.test(ownerToken)) {
+    throw new TypeError('Listing Audit publication lease owner token must be a UUID');
+  }
+  return ownerToken;
+}
+
+async function publicationLeaseTransaction(runTransaction, buildQueries) {
+  let transaction = runTransaction;
+  if (!transaction) {
+    const database = await import('./database.js');
+    transaction = database.runDatabaseTransaction;
+  }
+  return transaction(buildQueries, { isolationLevel:'Serializable' });
+}
+
+export async function acquireListingAuditPublicationLease({ observedAt, checksum }, {
+  env = process.env,
+  ownerToken = randomUUID(),
+  runTransaction = null,
+} = {}) {
+  const pgMode = resolvePgWriteMode(env);
+  const capturedAt = isoTimestamp(observedAt);
+  const payloadChecksum = validLeaseChecksum(checksum);
+  const token = validLeaseOwnerToken(ownerToken);
+  if (pgMode === 'off') {
+    return {
+      mode:pgMode,
+      acquired:true,
+      status:'off',
+      leaseKey:LISTING_PG_PUBLICATION_LEASE_KEY,
+      ownerToken:null,
+      observedAt:capturedAt,
+      checksum:payloadChecksum,
+      expiresAt:null,
+    };
+  }
+  const results = await publicationLeaseTransaction(runTransaction, sql => [
+    sql.query(`SET LOCAL ROLE rwa_catalog_shadow_writer`),
+    sql.query(`SET LOCAL statement_timeout = '15s'`),
+    sql.query(`SET LOCAL lock_timeout = '3s'`),
+    sql.query(
+      `WITH claimed AS (
+         INSERT INTO ingest.catalog_publication_lease
+           (lease_key, owner_token, observed_at, payload_checksum,
+            acquired_at, lease_expires_at, released_at, last_release_status, updated_at)
+         VALUES ($1, $2::uuid, $3::timestamptz, $4,
+           clock_timestamp(), clock_timestamp() + ($5::int * interval '1 second'),
+           NULL, NULL, clock_timestamp())
+         ON CONFLICT (lease_key) DO UPDATE SET
+           owner_token = EXCLUDED.owner_token,
+           observed_at = EXCLUDED.observed_at,
+           payload_checksum = EXCLUDED.payload_checksum,
+           acquired_at = clock_timestamp(),
+           lease_expires_at = clock_timestamp() + ($5::int * interval '1 second'),
+           released_at = NULL,
+           last_release_status = NULL,
+           updated_at = clock_timestamp()
+         WHERE ingest.catalog_publication_lease.lease_expires_at <= clock_timestamp()
+           AND (
+             EXCLUDED.observed_at > ingest.catalog_publication_lease.observed_at
+             OR (
+               EXCLUDED.observed_at = ingest.catalog_publication_lease.observed_at
+               AND EXCLUDED.payload_checksum = ingest.catalog_publication_lease.payload_checksum
+             )
+           )
+         RETURNING lease_key, owner_token::text, observed_at, payload_checksum,
+           lease_expires_at, true AS acquired, 'acquired'::text AS lease_status
+       )
+       SELECT * FROM claimed
+       UNION ALL
+       SELECT existing.lease_key, existing.owner_token::text, existing.observed_at,
+         existing.payload_checksum, existing.lease_expires_at, false AS acquired,
+         CASE
+           WHEN existing.lease_expires_at > clock_timestamp() THEN 'busy'
+           WHEN existing.observed_at > $3::timestamptz THEN 'stale'
+           WHEN existing.observed_at = $3::timestamptz
+             AND existing.payload_checksum <> $4 THEN 'conflict'
+           ELSE 'rejected'
+         END AS lease_status
+       FROM ingest.catalog_publication_lease AS existing
+       WHERE existing.lease_key = $1
+         AND NOT EXISTS (SELECT 1 FROM claimed)
+       LIMIT 1`,
+      [
+        LISTING_PG_PUBLICATION_LEASE_KEY,
+        token,
+        capturedAt,
+        payloadChecksum,
+        LISTING_PG_PUBLICATION_LEASE_SECONDS,
+      ],
+    ),
+  ]);
+  const row = leaseResultRow(results);
+  if (!row) throw new Error('Listing Audit publication lease did not return an outcome');
+  const acquired = row.acquired === true || row.acquired === 't' || row.acquired === 1;
+  return {
+    mode:pgMode,
+    acquired,
+    status:normalized(row.lease_status || row.leaseStatus || (acquired ? 'acquired' : 'rejected')),
+    leaseKey:LISTING_PG_PUBLICATION_LEASE_KEY,
+    ownerToken:acquired ? token : null,
+    observedAt:capturedAt,
+    checksum:payloadChecksum,
+    expiresAt:row.lease_expires_at || row.leaseExpiresAt || null,
+  };
+}
+
+export async function renewListingAuditPublicationLease(lease, {
+  env = process.env,
+  runTransaction = null,
+} = {}) {
+  const pgMode = resolvePgWriteMode(env);
+  if (pgMode === 'off' || lease?.mode === 'off') return { ...lease, renewed:true, status:'off' };
+  const ownerToken = validLeaseOwnerToken(lease?.ownerToken);
+  const observedAt = isoTimestamp(lease?.observedAt);
+  const checksum = validLeaseChecksum(lease?.checksum);
+  const results = await publicationLeaseTransaction(runTransaction, sql => [
+    sql.query(`SET LOCAL ROLE rwa_catalog_shadow_writer`),
+    sql.query(`SET LOCAL statement_timeout = '15s'`),
+    sql.query(`SET LOCAL lock_timeout = '3s'`),
+    sql.query(
+      `UPDATE ingest.catalog_publication_lease
+       SET lease_expires_at = clock_timestamp() + ($5::int * interval '1 second'),
+         updated_at = clock_timestamp()
+       WHERE lease_key = $1
+         AND owner_token = $2::uuid
+         AND observed_at = $3::timestamptz
+         AND payload_checksum = $4
+         AND lease_expires_at > clock_timestamp()
+       RETURNING lease_key, owner_token::text, observed_at, payload_checksum,
+         lease_expires_at, true AS renewed`,
+      [
+        LISTING_PG_PUBLICATION_LEASE_KEY,
+        ownerToken,
+        observedAt,
+        checksum,
+        LISTING_PG_PUBLICATION_LEASE_SECONDS,
+      ],
+    ),
+  ]);
+  const row = leaseResultRow(results);
+  if (!row) throw new Error(LISTING_PG_PUBLICATION_LEASE_LOST_ERROR_CODE);
+  return {
+    ...lease,
+    renewed:true,
+    status:'renewed',
+    expiresAt:row.lease_expires_at || row.leaseExpiresAt || null,
+  };
+}
+
+export async function releaseListingAuditPublicationLease(lease, {
+  status = 'failed',
+  checksum: publishedChecksum = null,
+  env = process.env,
+  runTransaction = null,
+} = {}) {
+  const pgMode = resolvePgWriteMode(env);
+  if (pgMode === 'off' || lease?.mode === 'off') return { mode:'off', released:true, status:'off' };
+  if (!['published', 'failed'].includes(status)) {
+    throw new TypeError('Listing Audit publication lease release status must be published or failed');
+  }
+  const ownerToken = validLeaseOwnerToken(lease?.ownerToken);
+  const observedAt = isoTimestamp(lease?.observedAt);
+  const checksum = validLeaseChecksum(lease?.checksum);
+  const finalChecksum = status === 'published'
+    ? validLeaseChecksum(publishedChecksum || checksum)
+    : checksum;
+  const results = await publicationLeaseTransaction(runTransaction, sql => [
+    sql.query(`SET LOCAL ROLE rwa_catalog_shadow_writer`),
+    sql.query(`SET LOCAL statement_timeout = '15s'`),
+    sql.query(`SET LOCAL lock_timeout = '3s'`),
+    sql.query(
+      `UPDATE ingest.catalog_publication_lease
+       SET payload_checksum = CASE WHEN $5 = 'published' THEN $6 ELSE payload_checksum END,
+         lease_expires_at = GREATEST(acquired_at, clock_timestamp()),
+         released_at = clock_timestamp(),
+         last_release_status = $5,
+         last_published_at = CASE WHEN $5 = 'published' THEN $3::timestamptz ELSE last_published_at END,
+         last_published_checksum = CASE WHEN $5 = 'published' THEN $6 ELSE last_published_checksum END,
+         updated_at = clock_timestamp()
+       WHERE lease_key = $1
+         AND owner_token = $2::uuid
+         AND observed_at = $3::timestamptz
+         AND payload_checksum = $4
+       RETURNING lease_key, true AS released`,
+      [LISTING_PG_PUBLICATION_LEASE_KEY, ownerToken, observedAt, checksum, status, finalChecksum],
+    ),
+  ]);
+  const released = Boolean(leaseResultRow(results));
+  return { mode:pgMode, released, status:released ? status : 'owner-mismatch' };
 }
 
 export async function recordListingAuditRuntimeCacheCommit({
@@ -1150,26 +1693,11 @@ export async function recordListingAuditRuntimeCacheCommit({
            AND cycle.pipeline_version = $2
            AND cycle.bucket_at = $3::timestamptz
          ON CONFLICT (attempt_id, sink_name) DO UPDATE SET
-           status = CASE
-             WHEN ingest.sink_commit.status = 'stored' THEN 'stored'
-             ELSE EXCLUDED.status
-           END,
-           row_count = CASE
-             WHEN ingest.sink_commit.status = 'stored' AND EXCLUDED.status <> 'stored' THEN ingest.sink_commit.row_count
-             ELSE EXCLUDED.row_count
-           END,
-           checksum = CASE
-             WHEN ingest.sink_commit.status = 'stored' AND EXCLUDED.status <> 'stored' THEN ingest.sink_commit.checksum
-             ELSE EXCLUDED.checksum
-           END,
-           committed_at = CASE
-             WHEN ingest.sink_commit.status = 'stored' AND EXCLUDED.status <> 'stored' THEN ingest.sink_commit.committed_at
-             ELSE EXCLUDED.committed_at
-           END,
-           error_summary = CASE
-             WHEN ingest.sink_commit.status = 'stored' THEN NULL
-             ELSE EXCLUDED.error_summary
-           END
+           status = EXCLUDED.status,
+           row_count = EXCLUDED.row_count,
+           checksum = EXCLUDED.checksum,
+           committed_at = EXCLUDED.committed_at,
+           error_summary = EXCLUDED.error_summary
          RETURNING sink_commit_id`,
         [
           LISTING_PG_JOB_NAME,
@@ -1237,6 +1765,20 @@ export async function runOptionalListingAuditPgWrite(input, {
     try {
       writeResult = await writeBatch(batch, archivedArtifacts);
     } catch (error) {
+      const consistencyError = persistenceConsistencyError(error);
+      if (consistencyError) {
+        logger?.warn?.('[listing-audit] consistency-conflicting retry rejected before Runtime Cache publication', consistencyError);
+        return {
+          pgMode,
+          archiveMode,
+          status: consistencyError === LISTING_PG_STALE_RETRY_ERROR_CODE ? 'stale' : 'rejected',
+          staleRetry: consistencyError === LISTING_PG_STALE_RETRY_ERROR_CODE,
+          consistencyRejected: true,
+          publishAllowed: false,
+          archiveFailures,
+          error: consistencyError,
+        };
+      }
       if (pgMode === 'required') {
         throw new Error(`Required PostgreSQL listing write failed: ${safeError(error)}`, { cause: error });
       }
@@ -1255,6 +1797,8 @@ export async function runOptionalListingAuditPgWrite(input, {
     pgMode,
     archiveMode,
     status: archiveFailures ? (pgMode === 'off' ? 'failed' : 'partial') : 'stored',
+    staleRetry: false,
+    publishAllowed: true,
     archiveFailures,
     ...(writeResult || {
       sourceRunCount: batch.sourceRuns.length,

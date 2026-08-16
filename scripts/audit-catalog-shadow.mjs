@@ -19,17 +19,36 @@ function fatalReport(error) {
     generatedAt,
     status: 'fail',
     readyForPhase2: false,
+    readyForPhase2DesignReview: false,
     decision: 'Phase 1 daily reconciliation could not run; no Phase 2 writer or read cutover is authorized.',
     scope: {
       phase: 'phase1-catalog-shadow',
       marketFactsChecked: false,
       rollingMarketHistoryVerified: false,
+      phase2DesignElapsedGate: false,
       laterPhaseTablesConfirmedEmpty: false,
+    },
+    capabilities: {
+      phase2DesignReview: {
+        elapsedGate: false,
+        ready: false,
+        status: 'blocked',
+        detail: 'The current catalog reconciliation could not run.',
+      },
+    },
+    handoff: {
+      laterPhaseTables: null,
+      laterPhaseDomainsPresent: null,
+      laterPhaseTablesEmpty: null,
+      presenceOnly: true,
+      status: 'unavailable',
+      blocking: false,
+      detail: 'Later-phase table presence was not available for this informational handoff check.',
     },
     error: safeError(error),
     limitations: [
       'This failure report contains no market-fact verification and does not authorize Phase 2.',
-      'No rolling 14-day market history exists in Phase 1 for this check to reconcile.',
+      'No rolling market history exists in Phase 1 for this check to reconcile.',
     ],
   };
 }

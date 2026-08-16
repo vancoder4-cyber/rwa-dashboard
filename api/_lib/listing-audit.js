@@ -257,13 +257,19 @@ export function mergeListingAudit(previousState, rawObservations, now = new Date
     const warming = !previousSource?.baselineAt;
     const activeIdentityDrift = warming ? [] : currentRows.filter(row => {
       const previousRow = previousByKey.get(row.key);
-      return previousRow && identityFingerprint(previousRow) !== identityFingerprint(row);
+      return previousRow && (
+        identityFingerprint(previousRow) !== identityFingerprint(row) ||
+        (previousRow.identityStatus === 'verified' && row.identityStatus !== 'verified')
+      );
     });
     const observedAddedRows = warming ? [] : currentRows.filter(row => !previousByKey.has(row.key));
     const observedMissingRows = warming ? [] : previousRows.filter(row => !currentByKey.has(row.key));
     const reusedIdentityDrift = warming ? [] : observedAddedRows.filter(row => {
       const known = previous.known?.[row.key];
-      return known?.everSeen && known.active === false && identityFingerprint(known) !== identityFingerprint(row);
+      return known?.everSeen && known.active === false && (
+        identityFingerprint(known) !== identityFingerprint(row) ||
+        (known.identityStatus === 'verified' && row.identityStatus !== 'verified')
+      );
     });
     const identityDrift = [...activeIdentityDrift, ...reusedIdentityDrift];
     const driftRatio = previousRows.length

@@ -34,13 +34,15 @@ test('migration files are ordered, immutable-checksummed, and parse into stateme
   assert.deepEqual(migrations.map(row => row.filename), [
     '0001_phase0_foundation.sql',
     '0002_phase1_facts_alerting.sql',
+    '0003_phase1_catalog_retry_replace.sql',
   ]);
-  assert.deepEqual(migrations.map(row => row.version), ['0001', '0002']);
+  assert.deepEqual(migrations.map(row => row.version), ['0001', '0002', '0003']);
   for (const migration of migrations) {
     assert.match(migration.filename, MIGRATION_FILE_PATTERN);
     assert.match(migration.checksum, /^[0-9a-f]{64}$/);
     assert.equal(migration.checksum, migrationChecksum(migration.sql));
-    assert.ok(migration.statements.length > 10);
+    const minimumStatements = migration.version === '0003' ? 3 : 11;
+    assert.ok(migration.statements.length >= minimumStatements);
     assert.ok(migration.statements.every(statement => statement.trim().length > 0));
   }
 });
@@ -188,6 +190,7 @@ test('Phase 1 facts, cohorts, publication, and alert outbox retain versioned for
 
 test('database roles are NOLOGIN and grants separate catalog, read, and dispatch duties', async () => {
   const phase1 = compactSql(await readFile(path.join(MIGRATION_DIRECTORY, '0002_phase1_facts_alerting.sql'), 'utf8'));
+  const catalogRetry = compactSql(await readFile(path.join(MIGRATION_DIRECTORY, '0003_phase1_catalog_retry_replace.sql'), 'utf8'));
   for (const role of ['rwa_catalog_shadow_writer', 'rwa_analytics_reader', 'rwa_alert_dispatcher']) {
     assert.match(phase1, new RegExp(`CREATE ROLE ${role} NOLOGIN`));
   }
@@ -197,6 +200,27 @@ test('database roles are NOLOGIN and grants separate catalog, read, and dispatch
   assert.match(phase1, /GRANT SELECT ON ALL TABLES[\s\S]*TO rwa_analytics_reader/);
   assert.match(phase1, /GRANT UPDATE ON alert\.delivery, alert\.outbox TO rwa_alert_dispatcher/);
   assert.match(phase1, /GRANT INSERT ON alert\.delivery_attempt TO rwa_alert_dispatcher/);
+  assert.match(catalogRetry, /GRANT DELETE ON identity\.evidence, ingest\.catalog_membership TO rwa_catalog_shadow_writer/);
+  assert.doesNotMatch(catalogRetry, /GRANT DELETE ON (?:ALL TABLES|identity\.asset|identity\.instrument|analytics\.)/);
+  assert.match(catalogRetry, /CREATE TABLE IF NOT EXISTS ingest\.catalog_publication_lease \(/);
+  assert.match(catalogRetry, /lease_key text PRIMARY KEY/);
+  assert.match(catalogRetry, /owner_token uuid NOT NULL/);
+  assert.match(catalogRetry, /payload_checksum char\(64\) NOT NULL/);
+  assert.match(catalogRetry, /lease_expires_at timestamptz NOT NULL/);
+  assert.match(catalogRetry, /last_release_status IN \('published', 'failed'\)/);
+  assert.match(catalogRetry, /CHECK \(lease_expires_at >= acquired_at\)/);
+  assert.match(catalogRetry, /GRANT SELECT, INSERT, UPDATE ON ingest\.catalog_publication_lease TO rwa_catalog_shadow_writer/);
+  assert.doesNotMatch(catalogRetry, /GRANT (?:ALL|DELETE)[^;]*catalog_publication_lease/);
+  for (const [functionName, errorCode] of [
+    ['ingest.reject_stale_catalog_retry', 'STALE_TRUSTED_LISTING_RETRY'],
+    ['ingest.reject_catalog_identity_downgrade', 'UNTRUSTED_CATALOG_IDENTITY_DOWNGRADE'],
+    ['ingest.reject_verified_catalog_identity_conflict', 'CONFLICTING_VERIFIED_CATALOG_IDENTITY'],
+  ]) {
+    const escapedFunctionName = functionName.replace('.', '\\.');
+    assert.match(catalogRetry, new RegExp(`CREATE OR REPLACE FUNCTION ${escapedFunctionName}\\(\\)`));
+    assert.match(catalogRetry, new RegExp(`MESSAGE = '${errorCode}'`));
+    assert.match(catalogRetry, new RegExp(`GRANT EXECUTE ON FUNCTION ${escapedFunctionName}\\(\\) TO rwa_catalog_shadow_writer`));
+  }
 });
 
 test('Neon clients remain lazy and migrations prefer the unpooled URL', () => {
