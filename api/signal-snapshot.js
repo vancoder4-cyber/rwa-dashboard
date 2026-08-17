@@ -114,6 +114,16 @@ function reportedOpenInterestFields(value, method, { estimated = true } = {}) {
   };
 }
 
+function reportedChange24hFields(value, method, { estimated = false } = {}) {
+  const numeric = finiteOrNull(value);
+  const change24hPct = numeric !== null && numeric >= -100 ? numeric : null;
+  return {
+    change24hPct,
+    change24hMethod:change24hPct === null ? null : method,
+    change24hStatus:change24hPct === null ? 'unavailable' : estimated ? 'estimated' : 'full',
+  };
+}
+
 function hasCatalogIdentityWarning(warnings) {
   return (Array.isArray(warnings) ? warnings : []).some(warning =>
     /(?:IDENTITY|INSTRUMENTS_UNAVAILABLE|CATALOG|UPSTREAM_COVERAGE)/i.test(String(warning)));
@@ -217,7 +227,11 @@ export function normalizeOkxSignalSnapshot(payload) {
       ),
       fundingRate: firstNumber(funding.fundingRate, funding.settFundingRate),
       fundingIntervalHours: okxFundingIntervalHours(funding),
-      change24hPct: last !== null && open24h > 0 ? ((last - open24h) / open24h) * 100 : null,
+      ...reportedChange24hFields(
+        last !== null && open24h > 0 ? ((last - open24h) / open24h) * 100 : null,
+        'last-vs-open24h',
+        { estimated:true },
+      ),
     });
   }
 
@@ -355,6 +369,14 @@ async function fetchBinanceTopTraderPositionRows(baseUrl, venueSymbols, nowMs) {
   return normalizeBinanceTopTraderProxySnapshot(payload, venueSymbols, nowMs);
 }
 
+export function oiTriggeredBinanceSymbols(section) {
+  return [...new Set((Array.isArray(section?.states) ? section.states : [])
+    .filter(state => state?.evaluationStatus === 'triggered')
+    .flatMap(state => state?.marketContext?.topTraderPositioning?.positions || [])
+    .map(position => String(position?.venueSymbol || '').trim().toUpperCase())
+    .filter(value => /^[A-Z0-9]{2,40}$/.test(value)))].sort();
+}
+
 function gateListings(payload) {
   const tickerMap = new Map((payload?.tickers || []).map(ticker => [ticker.contract, ticker]));
   const rows = [];
@@ -393,7 +415,10 @@ function gateListings(payload) {
       ),
       fundingRate: firstNumber(ticker.funding_rate, contract.funding_rate),
       fundingIntervalHours: (finiteOrNull(contract.funding_interval) || 28_800) / 3_600,
-      change24hPct: finiteOrNull(ticker.change_percentage),
+      ...reportedChange24hFields(
+        ticker.change_percentage,
+        'official-change-percentage',
+      ),
     });
   }
   return rows;
@@ -469,7 +494,10 @@ async function collectBinance(baseUrl) {
       ...reportedOpenInterestFields(null, 'open-interest-x-mark-price'),
       fundingRate: finiteOrNull(premium.lastFundingRate),
       fundingIntervalHours: intervalMap.get(venueSymbol) || 8,
-      change24hPct: finiteOrNull(ticker.priceChangePercent),
+      ...reportedChange24hFields(
+        ticker.priceChangePercent,
+        'official-price-change-percent',
+      ),
     });
   }
   if (!listings.length) throw new Error('trusted Binance TradFi catalog is empty');
@@ -561,7 +589,10 @@ async function collectBitget() {
       ),
       fundingRate: firstNumber(funding.fundingRate, ticker.fundingRate),
       fundingIntervalHours: firstNumber(funding.fundingRateInterval, contract.fundInterval) || 8,
-      change24hPct: changeFraction === null ? null : changeFraction * 100,
+      ...reportedChange24hFields(
+        changeFraction === null ? null : changeFraction * 100,
+        'official-change24h-fraction',
+      ),
     });
   }
   if (!listings.length) throw new Error('trusted Bitget RWA catalog is empty');
@@ -625,7 +656,11 @@ async function collectTradeXyz(baseUrl) {
       ),
       fundingRate: finiteOrNull(context.funding),
       fundingIntervalHours: 1,
-      change24hPct: previousPrice > 0 && price !== null ? ((price - previousPrice) / previousPrice) * 100 : null,
+      ...reportedChange24hFields(
+        previousPrice > 0 && price !== null ? ((price - previousPrice) / previousPrice) * 100 : null,
+        'mark-vs-prev-day-price',
+        { estimated:true },
+      ),
     });
   }
   if (!listings.length) throw new Error('trusted trade.xyz RWA catalog is empty');
@@ -1044,10 +1079,10 @@ export async function serveSignalSnapshot(req, res, {
       { ...oiBaseOptions, snapshotComparable:false, historyAvailable:false },
     );
   }
-  const triggeredBinanceSymbols = preliminaryOiLiquidation.rows.flatMap(row =>
-    (Array.isArray(row?.listings) ? row.listings : [])
-      .filter(listing => listing?.venue === 'binance')
-      .map(listing => listing.venueSymbol));
+  // Positioning enrichment follows the uncapped recovery-state contract.
+  // Deriving targets from the ranked rows would silently skip a triggered
+  // asset whenever more than 100 alert rows exist in the same snapshot.
+  const triggeredBinanceSymbols = oiTriggeredBinanceSymbols(preliminaryOiLiquidation);
   let oiLiquidationAnomalies = preliminaryOiLiquidation;
   if (triggeredBinanceSymbols.length) {
     try {

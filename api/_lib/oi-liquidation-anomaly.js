@@ -21,6 +21,11 @@ const DAY_MS = 24 * HOUR_MS;
 const HISTORY_VERSION = 1;
 const RESPONSE_ROW_LIMIT = 100;
 const TOP_TRADER_MAX_AGE_MS = 3 * HOUR_MS;
+const PRICE_24H_SELECTION_METHOD = 'largest-current-oi-listing-with-available-change';
+const TOP_TRADER_PROVIDER = 'binance';
+const TOP_TRADER_SCOPE = 'top-20%-by-margin-balance-position-ratio';
+const TOP_TRADER_PERIOD = '1h';
+const MARKET_CONTEXT_VERSION = 'rwa-oi-market-context/v1';
 const CATEGORY_CODES = Object.freeze({
   equity:'e',
   etf:'t',
@@ -112,8 +117,17 @@ function publicListing(listing) {
   const volumeStatus = String(listing?.volumeStatus || '').trim().toLowerCase();
   const openInterestMethod = String(listing?.openInterestMethod || '').trim().toLowerCase();
   const openInterestStatus = String(listing?.openInterestStatus || '').trim().toLowerCase();
+  const change24hMethod = String(listing?.change24hMethod || '').trim().toLowerCase();
+  const change24hStatus = String(listing?.change24hStatus || '').trim().toLowerCase();
   const volume24hUsd = round(nonNegativeOrNull(listing?.volume24hUsd), 2);
   const openInterestUsd = round(nonNegativeOrNull(listing?.openInterestUsd), 2);
+  const rawChange24hPct = finiteOrNull(listing?.change24hPct);
+  const normalizedChange24hPct = rawChange24hPct !== null && rawChange24hPct >= -100
+    ? round(rawChange24hPct, 5)
+    : null;
+  const change24hValid = normalizedChange24hPct !== null && change24hMethod &&
+    acceptedFieldStatus(change24hStatus);
+  const change24hPct = change24hValid ? normalizedChange24hPct : null;
   const identityValid = Boolean(venue && venueSymbol && instrumentType);
   const volumeValid = Boolean(identityValid && volumeMethod &&
     acceptedFieldStatus(volumeStatus) && volume24hUsd !== null);
@@ -133,6 +147,9 @@ function publicListing(listing) {
       openInterestUsd,
       openInterestMethod:openInterestMethod || null,
       openInterestStatus:acceptedFieldStatus(openInterestStatus) ? openInterestStatus : 'unavailable',
+      change24hPct,
+      change24hMethod:change24hValid ? change24hMethod : null,
+      change24hStatus:change24hValid ? change24hStatus : 'unavailable',
     },
   };
 }
@@ -213,7 +230,14 @@ function classifyCurrentAssets(assets) {
     if (reasonCodes.length || currentOpenInterestUsd === null) {
       counts.missingEligibleAssets += 1;
       rows.push({
-        assetKey, symbol, category, classification:'eligible-incomplete', reasonCodes:[...new Set(reasonCodes)],
+        assetKey,
+        symbol,
+        category,
+        listingCount:listings.length,
+        listings,
+        currentOpenInterestUsd:null,
+        classification:'eligible-incomplete',
+        reasonCodes:[...new Set(reasonCodes)],
       });
       continue;
     }
@@ -527,6 +551,100 @@ function unavailableTraderPosition(venueSymbol, reasonCode = 'TOP_TRADER_UNAVAIL
   };
 }
 
+function price24hContext(current, capturedAtMs) {
+  const listings = Array.isArray(current?.listings) ? current.listings : [];
+  const expectedListings = listings.length;
+  const observed = listings.filter(listing => Number.isFinite(listing?.change24hPct) &&
+    listing.change24hPct >= -100 && typeof listing?.change24hMethod === 'string' &&
+    listing.change24hMethod.length > 0 && acceptedFieldStatus(listing?.change24hStatus));
+  const candidates = observed
+    .filter(listing => Number.isFinite(listing?.openInterestUsd) && listing.openInterestUsd >= 0)
+    .sort((left, right) => right.openInterestUsd - left.openInterestUsd ||
+      left.venue.localeCompare(right.venue) || left.venueSymbol.localeCompare(right.venueSymbol));
+  const representativeListing = candidates[0] || null;
+  const aggregateOi = nonNegativeOrNull(current?.currentOpenInterestUsd);
+  const representative = representativeListing ? {
+    venue:representativeListing.venue,
+    venueSymbol:representativeListing.venueSymbol,
+    change24hPct:representativeListing.change24hPct,
+    method:representativeListing.change24hMethod,
+    status:representativeListing.change24hStatus,
+    currentOpenInterestSharePct:aggregateOi > 0
+      ? round((representativeListing.openInterestUsd / aggregateOi) * 100, 5)
+      : null,
+  } : null;
+  const changes = observed.map(listing => listing.change24hPct);
+  const coverageStatus = observed.length === 0
+    ? 'unavailable'
+    : observed.length === expectedListings ? 'full' : 'partial';
+  return {
+    coverageStatus:representative ? coverageStatus : 'unavailable',
+    selectionMethod:PRICE_24H_SELECTION_METHOD,
+    observedListings:observed.length,
+    expectedListings,
+    observedAt:new Date(capturedAtMs).toISOString(),
+    representative,
+    rangePct:{
+      min:changes.length ? round(Math.min(...changes), 5) : null,
+      max:changes.length ? round(Math.max(...changes), 5) : null,
+    },
+    reasonCode:representative
+      ? null
+      : observed.length ? 'PRICE_24H_REPRESENTATIVE_OI_UNAVAILABLE' : 'PRICE_24H_CHANGE_UNAVAILABLE',
+  };
+}
+
+function topTraderPositioningContext(current, evaluationStatus, injected, capturedAtMs) {
+  if (evaluationStatus !== 'triggered') {
+    return {
+      status:'unavailable',
+      provider:TOP_TRADER_PROVIDER,
+      scope:TOP_TRADER_SCOPE,
+      period:TOP_TRADER_PERIOD,
+      positions:[],
+      reasonCode:'OI_DRAWDOWN_NOT_TRIGGERED',
+    };
+  }
+  const binanceSymbols = (Array.isArray(current?.listings) ? current.listings : [])
+    .filter(listing => listing.venue === TOP_TRADER_PROVIDER)
+    .map(listing => listing.venueSymbol);
+  if (!binanceSymbols.length) {
+    return {
+      status:'unavailable',
+      provider:TOP_TRADER_PROVIDER,
+      scope:TOP_TRADER_SCOPE,
+      period:TOP_TRADER_PERIOD,
+      positions:[],
+      reasonCode:'NO_BINANCE_PERP_LISTING',
+    };
+  }
+  const positions = binanceSymbols.map(symbol =>
+    normalizeInjectedTraderPosition(symbol, injected, capturedAtMs));
+  const available = positions.filter(position => position.status === 'full').length;
+  const status = !available ? 'unavailable' : available === positions.length ? 'full' : 'partial';
+  return {
+    status,
+    provider:TOP_TRADER_PROVIDER,
+    scope:TOP_TRADER_SCOPE,
+    period:TOP_TRADER_PERIOD,
+    positions,
+    reasonCode:status === 'full' ? null : 'TOP_TRADER_PARTIAL_OR_UNAVAILABLE',
+  };
+}
+
+function marketContext(current, evaluationStatus, injected, capturedAtMs) {
+  return {
+    version:MARKET_CONTEXT_VERSION,
+    price24h:price24hContext(current, capturedAtMs),
+    topTraderPositioning:topTraderPositioningContext(
+      current,
+      evaluationStatus,
+      injected,
+      capturedAtMs,
+    ),
+  };
+}
+
 function alertPriority(trigger) {
   if (trigger === 'both') return 0;
   if (trigger === 'liquidation_proxy') return 1;
@@ -601,10 +719,16 @@ export function buildOiLiquidationAnomalies(assets, hourlyHistory, capturedAtMs,
   const observedBucket = new Date(utcHour(captured)).toISOString();
   const states = classified.rows
     .filter(row => row.classification === 'eligible-incomplete')
-    .map(row => drawdownState(row, null, observedBucket, {
-      historyAvailable,
-      snapshotComparable,
-    }));
+    .map(row => {
+      const state = drawdownState(row, null, observedBucket, {
+        historyAvailable,
+        snapshotComparable,
+      });
+      return {
+        ...state,
+        marketContext:marketContext(row, state.evaluationStatus, options.topTraderPositions, captured),
+      };
+    });
 
   for (const current of classified.rows.filter(row => row.classification === 'eligible-complete')) {
     const trend = historyAvailable && snapshotComparable
@@ -613,10 +737,14 @@ export function buildOiLiquidationAnomalies(assets, hourlyHistory, capturedAtMs,
     const drawdown = historyAvailable && snapshotComparable
       ? drawdownEvaluation(hourRows, current, captured)
       : { ready:false, peak:null, peakAt:null, drawdown:null, sameCohort:null, reasonCodes:[] };
-    states.push(drawdownState(current, drawdown, observedBucket, {
+    const state = drawdownState(current, drawdown, observedBucket, {
       historyAvailable,
       snapshotComparable,
-    }));
+    });
+    states.push({
+      ...state,
+      marketContext:marketContext(current, state.evaluationStatus, options.topTraderPositions, captured),
+    });
     if (trend.ready) trendReadyAssets += 1;
     if (drawdown.ready) drawdownReadyAssets += 1;
     if (trend.ready && drawdown.ready) readyAssets += 1;
@@ -714,7 +842,8 @@ export function buildOiLiquidationAnomalies(assets, hourlyHistory, capturedAtMs,
       threeDayTrend:'oi_rising requires strictly increasing same-cohort 23:00 UTC hourly closes on each of the three most recent completed UTC days',
       liquidationProxy:'liquidation_proxy requires a same-cohort, gap-free 24-hour series and a current USD OI decline strictly greater than $2,000,000 from that window peak',
       logic:'oi_rising OR liquidation_proxy; both is reported when both conditions hold',
-      topTraderPositions:'For alert rows only, exact Binance perpetual contracts use the latest official 1h Top Trader Long/Short Position Ratio; it describes top-20%-by-margin-balance positions, not liquidation direction',
+      price24h:'State market context selects the exact perpetual listing with the largest current USD OI among listings with an available 24h change; the range and coverage retain cross-listing disagreement and gaps',
+      topTraderPositions:'Triggered drawdown states and alert rows can use exact Binance perpetual contracts with the latest official 1h Top Trader Long/Short Position Ratio; it describes top-20%-by-margin-balance positions, not liquidation direction',
       limitations:'The OI decline is a passive position-reduction/deleveraging proxy, not a trade-by-trade liquidation feed. USD OI also changes with mark price and cannot identify whether longs or shorts were liquidated.',
     },
     sources,

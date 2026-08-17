@@ -29,6 +29,9 @@ function listing({
   volumeStatus = 'full',
   openInterestStatus = 'full',
   openInterestMethod = 'official-open-interest-usd',
+  change24hPct = null,
+  change24hMethod = change24hPct === null ? null : 'official-change-percent',
+  change24hStatus = change24hPct === null ? 'unavailable' : 'full',
 } = {}) {
   return {
     venue,
@@ -40,6 +43,9 @@ function listing({
     openInterestUsd,
     openInterestMethod,
     openInterestStatus,
+    change24hPct,
+    change24hMethod,
+    change24hStatus,
   };
 }
 
@@ -470,6 +476,95 @@ test('missing Binance data is Unavailable and never silently becomes Neutral', (
   const noBinance = build([gateSpec], hourlyHistory([gateSpec]));
   assert.deepEqual(noBinance.rows[0].topTraderPositions, []);
   assert.equal(noBinance.rows[0].overallTraderBias, 'unavailable');
+});
+
+test('state market context selects the available 24h change from the largest current-OI listing', () => {
+  const listings = [
+    listing({ venue:'gate', venueSymbol:'AAPL_USDT', volume24hUsd:500_000.01,
+      openInterestUsd:2_000_000, change24hPct:-2 }),
+    listing({ venue:'binance', venueSymbol:'AAPLUSDT', volume24hUsd:500_000,
+      openInterestUsd:6_000_000, change24hPct:1.234567 }),
+    listing({ venue:'bitget', venueSymbol:'AAPLUSDT', volume24hUsd:500_000,
+      openInterestUsd:1_000_000 }),
+  ];
+  const result = buildOiLiquidationAnomalies(
+    [asset('AAPL', { listings })],
+    null,
+    NOW,
+    { historyAvailable:false },
+  );
+  assert.deepEqual(result.states[0].marketContext.price24h, {
+    coverageStatus:'partial',
+    selectionMethod:'largest-current-oi-listing-with-available-change',
+    observedListings:2,
+    expectedListings:3,
+    observedAt:new Date(NOW).toISOString(),
+    representative:{
+      venue:'binance',
+      venueSymbol:'AAPLUSDT',
+      change24hPct:1.23457,
+      method:'official-change-percent',
+      status:'full',
+      currentOpenInterestSharePct:66.66667,
+    },
+    rangePct:{ min:-2, max:1.23457 },
+    reasonCode:null,
+  });
+  assert.equal(result.states[0].marketContext.topTraderPositioning.status, 'unavailable');
+  assert.equal(
+    result.states[0].marketContext.topTraderPositioning.reasonCode,
+    'OI_DRAWDOWN_NOT_TRIGGERED',
+  );
+});
+
+test('price context rejects an impossible sub-minus-100 percent change instead of publishing it', () => {
+  const bad = listing({ change24hPct:-100.00001 });
+  const result = buildOiLiquidationAnomalies(
+    [asset('AAPL', { listings:[bad] })],
+    null,
+    NOW,
+    { historyAvailable:false },
+  );
+  assert.deepEqual(result.states[0].marketContext.price24h.rangePct, { min:null, max:null });
+  assert.equal(result.states[0].marketContext.price24h.coverageStatus, 'unavailable');
+  assert.equal(result.states[0].marketContext.price24h.observedListings, 0);
+  assert.equal(result.states[0].marketContext.price24h.reasonCode, 'PRICE_24H_CHANGE_UNAVAILABLE');
+});
+
+test('triggered state positioning is explicit for enriched, missing, and non-Binance contracts', () => {
+  const spec = {
+    symbol:'AAPL', currentOi:4_899_999.99,
+    oiAt:oiSchedule([5_000_000, 5_000_000, 7_000_000]),
+  };
+  const history = hourlyHistory([spec]);
+  const short = 1 / 2.1;
+  const enriched = build([spec], history, {
+    topTraderPositions:{
+      AAPLUSDT:[{
+        symbol:'AAPLUSDT',
+        longShortRatio:'1.1',
+        longAccount:String(1 - short),
+        shortAccount:String(short),
+        timestamp:NOW,
+      }],
+    },
+  });
+  assert.equal(enriched.states[0].evaluationStatus, 'triggered');
+  assert.equal(enriched.states[0].marketContext.topTraderPositioning.status, 'full');
+  assert.equal(enriched.states[0].marketContext.topTraderPositioning.positions[0].longShortRatio, 1.1);
+  assert.equal(enriched.states[0].marketContext.topTraderPositioning.reasonCode, null);
+
+  const absent = build([spec], history);
+  assert.equal(absent.states[0].marketContext.topTraderPositioning.status, 'unavailable');
+  assert.equal(absent.states[0].marketContext.topTraderPositioning.positions[0].status, 'unavailable');
+
+  const gateSpec = { ...spec, assetOptions:{ venue:'gate', venueSymbol:'AAPL_USDT' } };
+  const noBinance = build([gateSpec], hourlyHistory([gateSpec]));
+  assert.equal(
+    noBinance.states[0].marketContext.topTraderPositioning.reasonCode,
+    'NO_BINANCE_PERP_LISTING',
+  );
+  assert.deepEqual(noBinance.states[0].marketContext.topTraderPositioning.positions, []);
 });
 
 test('Crypto identities and identity-conflicted cohorts fail closed', () => {

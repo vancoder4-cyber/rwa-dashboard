@@ -77,6 +77,9 @@ const OI_LIQUIDATION_FIELD_STATUSES = new Set(['full', 'partial', 'estimated', '
 const OI_LIQUIDATION_SOURCE_STATUSES = new Set(['full', 'partial', 'unavailable']);
 const OI_LIQUIDATION_PERSISTENCE_STATUSES = new Set(['partial', 'unavailable']);
 const OI_LIQUIDATION_EVALUATION_STATUSES = new Set(['triggered', 'clear', 'warming', 'unavailable']);
+const OI_PRICE_24H_SELECTION_METHOD = 'largest-current-oi-listing-with-available-change';
+const OI_TOP_TRADER_SCOPE = 'top-20%-by-margin-balance-position-ratio';
+const OI_MARKET_CONTEXT_VERSION = 'rwa-oi-market-context/v1';
 const OI_LIQUIDATION_WRITE_STATUSES = new Set([
   'stored',
   'read-only',
@@ -703,6 +706,139 @@ function oiTopTraderPositionValid(position, generatedAtMs) {
   return bias === expectedBias && position?.reasonCode === null;
 }
 
+function expectedOiPrice24h(listings, currentOi, generatedAtMs) {
+  const expectedListings = listings.length;
+  const observed = listings.filter(listing => Number.isFinite(listing?.change24hPct) &&
+    listing.change24hPct >= -100 && rounded(listing.change24hPct, 5) === listing.change24hPct &&
+    typeof listing?.change24hMethod === 'string' && listing.change24hMethod.length > 0 &&
+    ['full', 'estimated'].includes(String(listing?.change24hStatus || '').toLowerCase()));
+  const candidates = observed
+    .filter(listing => Number.isFinite(listing?.openInterestUsd) && listing.openInterestUsd >= 0)
+    .sort((left, right) => right.openInterestUsd - left.openInterestUsd ||
+      String(left.venue).localeCompare(String(right.venue)) ||
+      String(left.venueSymbol).localeCompare(String(right.venueSymbol)));
+  const selected = candidates[0] || null;
+  const changes = observed.map(listing => listing.change24hPct);
+  return {
+    coverageStatus:selected
+      ? observed.length === expectedListings ? 'full' : 'partial'
+      : 'unavailable',
+    selectionMethod:OI_PRICE_24H_SELECTION_METHOD,
+    observedListings:observed.length,
+    expectedListings,
+    observedAt:new Date(generatedAtMs).toISOString(),
+    representative:selected ? {
+      venue:String(selected.venue || '').toLowerCase(),
+      venueSymbol:String(selected.venueSymbol || ''),
+      change24hPct:selected.change24hPct,
+      method:selected.change24hMethod,
+      status:selected.change24hStatus,
+      currentOpenInterestSharePct:currentOi > 0
+        ? rounded((selected.openInterestUsd / currentOi) * 100, 5)
+        : null,
+    } : null,
+    rangePct:{
+      min:changes.length ? rounded(Math.min(...changes), 5) : null,
+      max:changes.length ? rounded(Math.max(...changes), 5) : null,
+    },
+    reasonCode:selected
+      ? null
+      : observed.length ? 'PRICE_24H_REPRESENTATIVE_OI_UNAVAILABLE' : 'PRICE_24H_CHANGE_UNAVAILABLE',
+  };
+}
+
+function oiPrice24hContextValid(context, generatedAtMs, support = null) {
+  const keys = [
+    'coverageStatus', 'selectionMethod', 'observedListings', 'expectedListings', 'observedAt',
+    'representative', 'rangePct', 'reasonCode',
+  ];
+  if (!context || typeof context !== 'object' || Array.isArray(context) ||
+      Object.keys(context).length !== keys.length || keys.some(key =>
+        !Object.prototype.hasOwnProperty.call(context, key)) ||
+      context.selectionMethod !== OI_PRICE_24H_SELECTION_METHOD ||
+      !['full', 'partial', 'unavailable'].includes(String(context.coverageStatus || '').toLowerCase()) ||
+      !Number.isInteger(context.observedListings) || context.observedListings < 0 ||
+      !Number.isInteger(context.expectedListings) || context.expectedListings <= 0 ||
+      context.observedListings > context.expectedListings ||
+      Date.parse(context.observedAt) !== generatedAtMs) return false;
+  const min = context?.rangePct?.min;
+  const max = context?.rangePct?.max;
+  const rangeKeysValid = context.rangePct && typeof context.rangePct === 'object' &&
+    !Array.isArray(context.rangePct) && Object.keys(context.rangePct).length === 2 &&
+    Object.prototype.hasOwnProperty.call(context.rangePct, 'min') &&
+    Object.prototype.hasOwnProperty.call(context.rangePct, 'max');
+  const emptyRange = min === null && max === null;
+  const populatedRange = Number.isFinite(min) && min >= -100 && rounded(min, 5) === min &&
+    Number.isFinite(max) && max >= min && rounded(max, 5) === max;
+  if (!rangeKeysValid || (context.observedListings === 0 ? !emptyRange : !populatedRange)) return false;
+  const representative = context.representative;
+  if (representative === null) {
+    if (context.coverageStatus !== 'unavailable' || typeof context.reasonCode !== 'string' ||
+        !context.reasonCode.length) return false;
+  } else {
+    const representativeKeys = [
+      'venue', 'venueSymbol', 'change24hPct', 'method', 'status', 'currentOpenInterestSharePct',
+    ];
+    const share = representative.currentOpenInterestSharePct;
+    const shareValid = share === null ||
+      (Number.isFinite(share) && share >= 0 && share <= 100 && rounded(share, 5) === share);
+    const expectedStatus = context.observedListings === context.expectedListings ? 'full' : 'partial';
+    if (!representative || typeof representative !== 'object' || Array.isArray(representative) ||
+        Object.keys(representative).length !== representativeKeys.length ||
+        representativeKeys.some(key => !Object.prototype.hasOwnProperty.call(representative, key)) ||
+        !SIGNAL_VENUES.has(String(representative.venue || '').toLowerCase()) ||
+        !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$/.test(String(representative.venueSymbol || '')) ||
+        !Number.isFinite(representative.change24hPct) || representative.change24hPct < -100 ||
+        rounded(representative.change24hPct, 5) !== representative.change24hPct ||
+        representative.change24hPct < min || representative.change24hPct > max ||
+        typeof representative.method !== 'string' || !representative.method.length ||
+        !['full', 'estimated'].includes(String(representative.status || '').toLowerCase()) ||
+        !shareValid || context.coverageStatus !== expectedStatus || context.reasonCode !== null) return false;
+  }
+  if (support) {
+    const expected = expectedOiPrice24h(support.listings, support.currentOi, generatedAtMs);
+    if (JSON.stringify(context) !== JSON.stringify(expected)) return false;
+  }
+  return true;
+}
+
+function oiTopTraderContextValid(context, evaluationStatus, generatedAtMs) {
+  const keys = ['status', 'provider', 'scope', 'period', 'positions', 'reasonCode'];
+  if (!context || typeof context !== 'object' || Array.isArray(context) ||
+      Object.keys(context).length !== keys.length || keys.some(key =>
+        !Object.prototype.hasOwnProperty.call(context, key)) ||
+      context.provider !== 'binance' || context.scope !== OI_TOP_TRADER_SCOPE || context.period !== '1h' ||
+      !['full', 'partial', 'unavailable'].includes(String(context.status || '').toLowerCase()) ||
+      !Array.isArray(context.positions)) return false;
+  const positions = context.positions;
+  const symbols = positions.map(position => String(position?.venueSymbol || '').toUpperCase());
+  if (new Set(symbols).size !== symbols.length ||
+      positions.some(position => !oiTopTraderPositionValid(position, generatedAtMs))) return false;
+  if (evaluationStatus !== 'triggered') {
+    return context.status === 'unavailable' && positions.length === 0 &&
+      context.reasonCode === 'OI_DRAWDOWN_NOT_TRIGGERED';
+  }
+  if (!positions.length) {
+    return context.status === 'unavailable' && context.reasonCode === 'NO_BINANCE_PERP_LISTING';
+  }
+  const available = positions.filter(position => position.status === 'full').length;
+  const expectedStatus = !available ? 'unavailable' : available === positions.length ? 'full' : 'partial';
+  return context.status === expectedStatus &&
+    (expectedStatus === 'full'
+      ? context.reasonCode === null
+      : context.reasonCode === 'TOP_TRADER_PARTIAL_OR_UNAVAILABLE');
+}
+
+function oiMarketContextValid(context, evaluationStatus, generatedAtMs, priceSupport = null) {
+  return context && typeof context === 'object' && !Array.isArray(context) &&
+    Object.keys(context).length === 3 && context.version === OI_MARKET_CONTEXT_VERSION &&
+    Object.prototype.hasOwnProperty.call(context, 'version') &&
+    Object.prototype.hasOwnProperty.call(context, 'price24h') &&
+    Object.prototype.hasOwnProperty.call(context, 'topTraderPositioning') &&
+    oiPrice24hContextValid(context.price24h, generatedAtMs, priceSupport) &&
+    oiTopTraderContextValid(context.topTraderPositioning, evaluationStatus, generatedAtMs);
+}
+
 function oiLiquidationRowValid(row, section, generatedAtMs) {
   const category = signalCategory(row?.category);
   const symbol = String(row?.symbol || '').trim().toUpperCase();
@@ -724,6 +860,14 @@ function oiLiquidationRowValid(row, section, generatedAtMs) {
     const oi = listing?.openInterestUsd;
     const volumeStatus = String(listing?.volumeStatus || '').toLowerCase();
     const oiStatus = String(listing?.openInterestStatus || '').toLowerCase();
+    const change24h = listing?.change24hPct;
+    const change24hMethod = listing?.change24hMethod;
+    const change24hStatus = String(listing?.change24hStatus || '').toLowerCase();
+    const change24hValid = change24h === null
+      ? change24hMethod === null && change24hStatus === 'unavailable'
+      : Number.isFinite(change24h) && change24h >= -100 && rounded(change24h, 5) === change24h &&
+        typeof change24hMethod === 'string' && change24hMethod.length > 0 &&
+        ['full', 'estimated'].includes(change24hStatus);
     if (!SIGNAL_VENUES.has(venue) || !/^[A-Z0-9][A-Z0-9._:/-]{0,79}$/.test(venueSymbol) ||
         !/^[A-Za-z0-9][A-Za-z0-9 ._:/-]{0,39}$/.test(instrumentType) ||
         !Number.isFinite(volume) || volume < 0 || rounded(volume, 2) !== volume ||
@@ -731,7 +875,8 @@ function oiLiquidationRowValid(row, section, generatedAtMs) {
         typeof listing?.volumeMethod !== 'string' || !listing.volumeMethod.trim() ||
         !Number.isFinite(oi) || oi < 0 || rounded(oi, 2) !== oi ||
         !['full', 'estimated'].includes(oiStatus) ||
-        typeof listing?.openInterestMethod !== 'string' || !listing.openInterestMethod.trim()) {
+        typeof listing?.openInterestMethod !== 'string' || !listing.openInterestMethod.trim() ||
+        !change24hValid) {
       listingFieldsValid = false;
       continue;
     }
@@ -869,7 +1014,8 @@ function oiLiquidationStateValid(state, generatedAtMs) {
     /^[A-Z0-9][A-Z0-9.-]{0,39}$/.test(symbol) && state?.assetKey === `${category}:${symbol}` &&
     OI_LIQUIDATION_EVALUATION_STATUSES.has(evaluationStatus) &&
     Number.isFinite(observedBucketMs) && observedBucketMs === generatedHour &&
-    currentOiValid && peakValid && drawdownValid && drawdownPctValid && reasonsValid;
+    currentOiValid && peakValid && drawdownValid && drawdownPctValid && reasonsValid &&
+    oiMarketContextValid(state?.marketContext, evaluationStatus, generatedAtMs);
   if (!commonValid) return false;
 
   if (evaluationStatus === 'triggered' || evaluationStatus === 'clear') {
@@ -917,7 +1063,7 @@ function validateOiLiquidationAnomalies(section, generatedAtMs) {
   const methodology = section?.methodology;
   const methodologyValid = methodology && typeof methodology === 'object' && !Array.isArray(methodology) &&
     ['universe', 'eligibility', 'openInterest', 'threeDayTrend', 'liquidationProxy', 'logic',
-      'topTraderPositions', 'limitations']
+      'price24h', 'topTraderPositions', 'limitations']
       .every(key => typeof methodology[key] === 'string' && methodology[key].length > 0);
   const sourcesValid = exactOiLiquidationSources(section);
   const sourceValues = sourcesValid ? SIGNAL_SOURCE_KEYS.map(key => section.sources[key]) : [];
@@ -1003,7 +1149,14 @@ function validateOiLiquidationAnomalies(section, generatedAtMs) {
   const rowStatesCoherent = rows !== null && rows.every(row => {
     const state = stateByKey.get(row.assetKey);
     if (!state || state.cohortFingerprint !== row.cohortFingerprint ||
-        state.currentOpenInterestUsd !== row.currentOpenInterestUsd) return false;
+        state.currentOpenInterestUsd !== row.currentOpenInterestUsd ||
+        !oiPrice24hContextValid(state?.marketContext?.price24h, generatedAtMs, {
+          listings:row.listings,
+          currentOi:row.currentOpenInterestUsd,
+        })) return false;
+    if (state.evaluationStatus === 'triggered' &&
+        JSON.stringify(state.marketContext.topTraderPositioning.positions) !==
+          JSON.stringify(row.topTraderPositions)) return false;
     if (row.drawdown24hUsd === null) {
       return state.evaluationStatus === 'warming' && state.peak24hOpenInterestUsd === null &&
         state.drawdown24hUsd === null && state.drawdown24hPct === null;

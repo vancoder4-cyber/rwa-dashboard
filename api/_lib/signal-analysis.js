@@ -180,6 +180,8 @@ export function aggregateSignalListings(listings, limit = SIGNAL_ASSET_LIMIT) {
         openInterestStatus: String(row.openInterestStatus || '').trim().toLowerCase() || 'unavailable',
         fundingAnnualizedPct: annualizedFundingPct(row),
         change24hPct: finiteOrNull(row.change24hPct),
+        change24hMethod: String(row.change24hMethod || '').trim().toLowerCase() || null,
+        change24hStatus: String(row.change24hStatus || '').trim().toLowerCase() || 'unavailable',
       })),
     });
   }
