@@ -412,6 +412,17 @@ Binance Top Trader Position Ratio is optional supporting evidence for every exac
 
 Namespace `rwa-signal-oi-liquidation-hourly-v1` retains 96 idempotent UTC-hour buckets and requires 24 comparable hours plus three completed days. It stores only volume-eligible, OI-complete exact cohorts. Runtime Cache only; empty later-phase skeletons are `fact.top_trader_observation_hourly`, `analytics.asset_daily_oi_close`, `analytics.asset_hourly` and versioned alerts.
 
+The public OI child has two deliberately different collections. `rows` keeps the existing ranked alert contract and remains capped at 100. `states` is an additive recovery contract and is never rank-capped: it contains exactly one compact state for every current volume-eligible asset, including assets whose current exact OI cohort is incomplete. `stateCoverage={expectedEligibleAssets,returnedStates,complete}` must reconcile exactly to `coverage.volumeEligibleAssets`; an incomplete state collection is a failing contract, not evidence that an alert recovered.
+
+Each state publishes `assetKey`, `symbol`, `category`, `cohortFingerprint`, UTC-hour `observedBucket`, `evaluationStatus`, `sameCohort`, current/peak/drawdown OI USD, `drawdown24hPct`, and explicit `reasonCodes`. The percentage is `drawdown24hUsd / peak24hOpenInterestUsd × 100`, rounded to six decimals; it is null when the comparable peak is zero. `evaluationStatus` is one of:
+
+- `triggered`: the comparable drawdown is strictly above the producer's existing `$2,000,000` liquidation-proxy boundary;
+- `clear`: a gap-free same-cohort 24-hour evaluation is available and does not cross that boundary;
+- `warming`: the current cohort is complete, but a cohort change or missing hourly observation prevents comparison;
+- `unavailable`: the current eligible cohort is incomplete, history is unavailable, or the snapshot is not comparable.
+
+Downstream delivery systems may apply stricter amount/percentage tiers to the published metrics, but may declare recovery only from an explicit comparable state that is below their thresholds. A missing state, `warming`, `unavailable`, or `sameCohort != true` must fail closed and must never generate a recovery notification.
+
 ### 6.5 Competitor New Listings
 
 Producer: `api/_lib/listing-audit.js`; public reader: `api/listing-changes.js`; formula/schema `rwa-listing-audit/v1`.

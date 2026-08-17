@@ -145,6 +145,13 @@ test('volume eligibility is strictly above $1m and uses the published listing-ce
   assert.equal(result.rows.length, 1);
   assert.equal(result.rows[0].symbol, 'AAPL');
   assert.equal(result.rows[0].currentVolume24hUsd, 1_000_000.01);
+  assert.deepEqual(result.stateCoverage, {
+    expectedEligibleAssets:1,
+    returnedStates:1,
+    complete:true,
+  });
+  assert.equal(result.states.length, 1, 'states cover eligible assets only and are not Top-100 ranked rows');
+  assert.equal(result.states[0].assetKey, 'equity:AAPL');
 });
 
 test('three sealed UTC closes and the 24h drawdown use strict OR semantics', () => {
@@ -163,6 +170,7 @@ test('three sealed UTC closes and the 24h drawdown use strict OR semantics', () 
   }];
   const result = build(specs, hourlyHistory(specs));
   const bySymbol = new Map(result.rows.map(row => [row.symbol, row]));
+  const stateBySymbol = new Map(result.states.map(state => [state.symbol, state]));
 
   assert.equal(result.counts.alerts, 3);
   assert.equal(result.counts.oiRising, 2);
@@ -180,6 +188,13 @@ test('three sealed UTC closes and the 24h drawdown use strict OR semantics', () 
   assert.equal(bySymbol.get('BOTH').completedDailyTrend, 'rising');
   assert.equal(bySymbol.get('BOTH').drawdown24hUsd, 2_100_000.01);
   assert.equal(bySymbol.get('BOTH').status, 'estimated');
+  assert.equal(stateBySymbol.get('DROP').evaluationStatus, 'triggered');
+  assert.equal(stateBySymbol.get('EDGE').evaluationStatus, 'clear');
+  assert.equal(stateBySymbol.get('EDGE').drawdown24hUsd, 2_000_000);
+  assert.equal(stateBySymbol.get('EDGE').drawdown24hPct, 28.571429);
+  assert.equal(stateBySymbol.get('EDGE').sameCohort, true);
+  assert.equal(stateBySymbol.get('EDGE').observedBucket, new Date(CURRENT_HOUR).toISOString());
+  assert.deepEqual(stateBySymbol.get('EDGE').reasonCodes, []);
   for (const field of [
     'currentVolume24hUsd', 'currentOpenInterestUsd', 'completedDailyCloses',
     'completedDailyTrend', 'peak24hOpenInterestUsd', 'drawdown24hUsd',
@@ -217,6 +232,26 @@ test('null OI is incomplete while a true zero remains a valid value', () => {
   assert.equal(missing.counts.missingEligibleAssets, 1);
   assert.equal(missing.rows.length, 0);
   assert.equal(missing.status, 'partial');
+  assert.equal(missing.states.length, 1);
+  assert.equal(missing.states[0].evaluationStatus, 'unavailable');
+  assert.equal(missing.states[0].currentOpenInterestUsd, null);
+  assert.equal(missing.states[0].sameCohort, null);
+  assert.ok(missing.states[0].reasonCodes.includes('LISTING_OPEN_INTEREST_UNAVAILABLE'));
+});
+
+test('a comparable zero peak is Clear without inventing a percentage denominator', () => {
+  const spec = {
+    symbol:'ZERO', currentOi:0,
+    oiAt:() => 0,
+  };
+  const result = build([spec], hourlyHistory([spec]));
+  assert.equal(result.rows.length, 0);
+  assert.equal(result.states[0].evaluationStatus, 'clear');
+  assert.equal(result.states[0].sameCohort, true);
+  assert.equal(result.states[0].peak24hOpenInterestUsd, 0);
+  assert.equal(result.states[0].drawdown24hUsd, 0);
+  assert.equal(result.states[0].drawdown24hPct, null);
+  assert.deepEqual(result.states[0].reasonCodes, ['OI_PEAK_ZERO_PERCENT_UNAVAILABLE']);
 });
 
 test('a changed exact-listing cohort cannot inherit old trend or peak history', () => {
@@ -233,6 +268,10 @@ test('a changed exact-listing cohort cannot inherit old trend or peak history', 
   assert.equal(changed.history.trendReadyAssets, 0);
   assert.equal(changed.history.drawdownReadyAssets, 0);
   assert.equal(changed.status, 'warming');
+  assert.equal(changed.states.length, 1);
+  assert.equal(changed.states[0].evaluationStatus, 'warming');
+  assert.equal(changed.states[0].sameCohort, false);
+  assert.deepEqual(changed.states[0].reasonCodes, ['OI_COHORT_CHANGED']);
 });
 
 test('an open-interest method change alone resets both trend and drawdown history', () => {
@@ -280,6 +319,9 @@ test('a gap in the 24h OI series suppresses only the drawdown leg of the OR sign
   assert.equal(result.history.trendReadyAssets, 1);
   assert.equal(result.history.drawdownReadyAssets, 0);
   assert.equal(result.history.readyAssets, 0);
+  assert.equal(result.states[0].evaluationStatus, 'warming');
+  assert.equal(result.states[0].sameCohort, null);
+  assert.deepEqual(result.states[0].reasonCodes, ['OI_HISTORY_HOUR_MISSING']);
 });
 
 test('a Partial venue can expose verified alerts but can never make the section Full', () => {
@@ -312,6 +354,31 @@ test('the full verified universe is evaluated before the response is capped at T
   assert.equal(result.history.trendReadyAssets, 101);
   assert.equal(result.rows.length, 100);
   assert.equal(result.rows.some(row => row.symbol === 'X100'), false);
+  assert.equal(result.states.length, 101, 'recovery states must never inherit the alert-row cap');
+  assert.deepEqual(result.stateCoverage, {
+    expectedEligibleAssets:101,
+    returnedStates:101,
+    complete:true,
+  });
+  assert.equal(result.states.some(state => state.symbol === 'X100'), true);
+});
+
+test('recovery states fail closed when history or the current snapshot is unavailable', () => {
+  const spec = {
+    symbol:'AAPL', currentOi:7_000_000,
+    oiAt:oiSchedule([5_000_000, 6_000_000, 7_000_000]),
+  };
+  const history = hourlyHistory([spec]);
+
+  const missingHistory = build([spec], history, { historyAvailable:false });
+  assert.equal(missingHistory.states[0].evaluationStatus, 'unavailable');
+  assert.equal(missingHistory.states[0].sameCohort, null);
+  assert.deepEqual(missingHistory.states[0].reasonCodes, ['OI_HISTORY_UNAVAILABLE']);
+
+  const partialSnapshot = build([spec], history, { snapshotComparable:false });
+  assert.equal(partialSnapshot.states[0].evaluationStatus, 'unavailable');
+  assert.equal(partialSnapshot.states[0].sameCohort, null);
+  assert.deepEqual(partialSnapshot.states[0].reasonCodes, ['OI_SNAPSHOT_NOT_COMPARABLE']);
 });
 
 test('hourly history is idempotent, rejects future buckets, and retains 96 UTC hours', () => {

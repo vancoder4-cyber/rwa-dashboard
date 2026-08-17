@@ -416,13 +416,33 @@ function completedDayEvaluation(hourRows, current, capturedAtMs) {
 function drawdownEvaluation(hourRows, current, capturedAtMs) {
   const currentHour = utcHour(capturedAtMs);
   const series = [];
+  let missingHour = false;
+  let changedCohort = false;
   for (let offset = OI_LIQUIDATION_THRESHOLDS.peakLookbackHours - 1; offset >= 0; offset -= 1) {
     const hour = currentHour - offset * HOUR_MS;
     const row = hourRows.get(hour)?.get(current.assetKey);
-    if (!row || row.cohortFingerprint !== current.cohortFingerprint) {
-      return { ready:false, peak:null, peakAt:null, drawdown:null };
+    if (!row) {
+      missingHour = true;
+      continue;
+    }
+    if (row.cohortFingerprint !== current.cohortFingerprint) {
+      changedCohort = true;
+      continue;
     }
     series.push({ hour, openInterestUsd:round(row.openInterestUsd, 2) });
+  }
+  if (missingHour || changedCohort) {
+    return {
+      ready:false,
+      peak:null,
+      peakAt:null,
+      drawdown:null,
+      sameCohort:changedCohort ? false : null,
+      reasonCodes:[
+        ...(changedCohort ? ['OI_COHORT_CHANGED'] : []),
+        ...(missingHour ? ['OI_HISTORY_HOUR_MISSING'] : []),
+      ],
+    };
   }
   const peak = series.reduce((selected, row) =>
     row.openInterestUsd > selected.openInterestUsd ? row : selected, series[0]);
@@ -432,6 +452,65 @@ function drawdownEvaluation(hourRows, current, capturedAtMs) {
     peak:peak.openInterestUsd,
     peakAt:new Date(peak.hour).toISOString(),
     drawdown,
+    sameCohort:true,
+    reasonCodes:[],
+  };
+}
+
+function drawdownState(current, drawdown, observedBucket, {
+  historyAvailable,
+  snapshotComparable,
+} = {}) {
+  const base = {
+    assetKey:current.assetKey,
+    symbol:current.symbol,
+    category:current.category,
+    cohortFingerprint:current.cohortFingerprint || null,
+    observedBucket,
+    evaluationStatus:'unavailable',
+    sameCohort:null,
+    currentOpenInterestUsd:Number.isFinite(current.currentOpenInterestUsd)
+      ? round(current.currentOpenInterestUsd, 2)
+      : null,
+    peak24hOpenInterestUsd:null,
+    drawdown24hUsd:null,
+    drawdown24hPct:null,
+    reasonCodes:[],
+  };
+  if (current.classification !== 'eligible-complete') {
+    const reasonCodes = Array.isArray(current.reasonCodes) && current.reasonCodes.length
+      ? current.reasonCodes
+      : ['CURRENT_OI_COHORT_INCOMPLETE'];
+    return {
+      ...base,
+      reasonCodes:[...new Set(reasonCodes)],
+    };
+  }
+  const unavailableReasons = [
+    ...(!historyAvailable ? ['OI_HISTORY_UNAVAILABLE'] : []),
+    ...(!snapshotComparable ? ['OI_SNAPSHOT_NOT_COMPARABLE'] : []),
+  ];
+  if (unavailableReasons.length) return { ...base, reasonCodes:unavailableReasons };
+  if (!drawdown?.ready) {
+    return {
+      ...base,
+      evaluationStatus:'warming',
+      sameCohort:drawdown?.sameCohort ?? null,
+      reasonCodes:[...new Set(drawdown?.reasonCodes || ['OI_HISTORY_WARMING'])],
+    };
+  }
+  const drawdownPct = drawdown.peak > 0
+    ? round((drawdown.drawdown / drawdown.peak) * 100, 6)
+    : null;
+  const triggered = drawdown.drawdown > OI_LIQUIDATION_THRESHOLDS.liquidationProxyDropUsdExclusive;
+  return {
+    ...base,
+    evaluationStatus:triggered ? 'triggered' : 'clear',
+    sameCohort:true,
+    peak24hOpenInterestUsd:drawdown.peak,
+    drawdown24hUsd:drawdown.drawdown,
+    drawdown24hPct:drawdownPct,
+    reasonCodes:drawdownPct === null ? ['OI_PEAK_ZERO_PERCENT_UNAVAILABLE'] : [],
   };
 }
 
@@ -519,6 +598,13 @@ export function buildOiLiquidationAnomalies(assets, hourlyHistory, capturedAtMs,
   let drawdownReadyAssets = 0;
   let readyAssets = 0;
   const evaluations = [];
+  const observedBucket = new Date(utcHour(captured)).toISOString();
+  const states = classified.rows
+    .filter(row => row.classification === 'eligible-incomplete')
+    .map(row => drawdownState(row, null, observedBucket, {
+      historyAvailable,
+      snapshotComparable,
+    }));
 
   for (const current of classified.rows.filter(row => row.classification === 'eligible-complete')) {
     const trend = historyAvailable && snapshotComparable
@@ -526,7 +612,11 @@ export function buildOiLiquidationAnomalies(assets, hourlyHistory, capturedAtMs,
       : { ready:false, trend:'unavailable', closes:[] };
     const drawdown = historyAvailable && snapshotComparable
       ? drawdownEvaluation(hourRows, current, captured)
-      : { ready:false, peak:null, peakAt:null, drawdown:null };
+      : { ready:false, peak:null, peakAt:null, drawdown:null, sameCohort:null, reasonCodes:[] };
+    states.push(drawdownState(current, drawdown, observedBucket, {
+      historyAvailable,
+      snapshotComparable,
+    }));
     if (trend.ready) trendReadyAssets += 1;
     if (drawdown.ready) drawdownReadyAssets += 1;
     if (trend.ready && drawdown.ready) readyAssets += 1;
@@ -603,6 +693,12 @@ export function buildOiLiquidationAnomalies(assets, hourlyHistory, capturedAtMs,
         classified.counts.missingEligibleAssets > 0
       ? 'partial'
       : allReady ? 'full' : 'warming';
+  const orderedStates = states.sort((left, right) => left.assetKey.localeCompare(right.assetKey));
+  const stateCoverage = {
+    expectedEligibleAssets:classified.counts.volumeEligibleAssets,
+    returnedStates:orderedStates.length,
+    complete:orderedStates.length === classified.counts.volumeEligibleAssets,
+  };
 
   return {
     formulaVersion:OI_LIQUIDATION_FORMULA_VERSION,
@@ -655,6 +751,8 @@ export function buildOiLiquidationAnomalies(assets, hourlyHistory, capturedAtMs,
       latestAt:decodedStored.at(-1)?.t !== undefined ? new Date(decodedStored.at(-1).t).toISOString() : null,
     },
     persistence:options.persistence || null,
+    stateCoverage,
+    states:orderedStates,
     rows:ordered.slice(0, RESPONSE_ROW_LIMIT).map((row, index) => ({ rank:index + 1, ...row })),
   };
 }
