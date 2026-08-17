@@ -78,8 +78,9 @@ const OI_LIQUIDATION_SOURCE_STATUSES = new Set(['full', 'partial', 'unavailable'
 const OI_LIQUIDATION_PERSISTENCE_STATUSES = new Set(['partial', 'unavailable']);
 const OI_LIQUIDATION_EVALUATION_STATUSES = new Set(['triggered', 'clear', 'warming', 'unavailable']);
 const OI_PRICE_24H_SELECTION_METHOD = 'largest-current-oi-listing-with-available-change';
+const OI_TOP_TRADER_METRIC = 'top-trader-position-ratio';
 const OI_TOP_TRADER_SCOPE = 'top-20%-by-margin-balance-position-ratio';
-const OI_MARKET_CONTEXT_VERSION = 'rwa-oi-market-context/v1';
+const OI_MARKET_CONTEXT_VERSION = 'rwa-oi-market-context/v2';
 const OI_LIQUIDATION_WRITE_STATUSES = new Set([
   'stored',
   'read-only',
@@ -802,41 +803,107 @@ function oiPrice24hContextValid(context, generatedAtMs, support = null) {
   return true;
 }
 
-function oiTopTraderContextValid(context, evaluationStatus, generatedAtMs) {
-  const keys = ['status', 'provider', 'scope', 'period', 'positions', 'reasonCode'];
+function expectedOiFunding(listings, price24h, generatedAtMs) {
+  const reference = price24h?.representative || null;
+  if (!reference) {
+    return {
+      status:'unavailable', venue:null, venueSymbol:null, ratePct:null, intervalHours:null,
+      observedAt:null, reasonCode:'REFERENCE_CONTRACT_UNAVAILABLE',
+    };
+  }
+  const listing = listings.find(candidate => String(candidate?.venue || '').toLowerCase() === reference.venue &&
+    String(candidate?.venueSymbol || '') === reference.venueSymbol);
+  if (!listing || !Number.isFinite(listing.fundingRate) ||
+      !Number.isFinite(listing.fundingIntervalHours) || listing.fundingIntervalHours <= 0) {
+    return {
+      status:'unavailable', venue:reference.venue, venueSymbol:reference.venueSymbol,
+      ratePct:null, intervalHours:null, observedAt:null, reasonCode:'FUNDING_UNAVAILABLE',
+    };
+  }
+  return {
+    status:'full',
+    venue:reference.venue,
+    venueSymbol:reference.venueSymbol,
+    ratePct:rounded(listing.fundingRate * 100, 8),
+    intervalHours:rounded(listing.fundingIntervalHours, 6),
+    observedAt:new Date(generatedAtMs).toISOString(),
+    reasonCode:null,
+  };
+}
+
+function oiFundingContextValid(context, generatedAtMs, price24h, support = null) {
+  const keys = [
+    'status', 'venue', 'venueSymbol', 'ratePct', 'intervalHours', 'observedAt', 'reasonCode',
+  ];
   if (!context || typeof context !== 'object' || Array.isArray(context) ||
       Object.keys(context).length !== keys.length || keys.some(key =>
         !Object.prototype.hasOwnProperty.call(context, key)) ||
-      context.provider !== 'binance' || context.scope !== OI_TOP_TRADER_SCOPE || context.period !== '1h' ||
-      !['full', 'partial', 'unavailable'].includes(String(context.status || '').toLowerCase()) ||
-      !Array.isArray(context.positions)) return false;
-  const positions = context.positions;
-  const symbols = positions.map(position => String(position?.venueSymbol || '').toUpperCase());
-  if (new Set(symbols).size !== symbols.length ||
-      positions.some(position => !oiTopTraderPositionValid(position, generatedAtMs))) return false;
+      !['full', 'unavailable'].includes(String(context.status || '').toLowerCase())) return false;
+  const reference = price24h?.representative || null;
+  if (!reference) {
+    return context.status === 'unavailable' && context.venue === null && context.venueSymbol === null &&
+      context.ratePct === null && context.intervalHours === null && context.observedAt === null &&
+      context.reasonCode === 'REFERENCE_CONTRACT_UNAVAILABLE';
+  }
+  if (context.venue !== reference.venue || context.venueSymbol !== reference.venueSymbol) return false;
+  let valid;
+  if (context.status === 'unavailable') {
+    valid = context.ratePct === null && context.intervalHours === null && context.observedAt === null &&
+      context.reasonCode === 'FUNDING_UNAVAILABLE';
+  } else {
+    valid = Number.isFinite(context.ratePct) && rounded(context.ratePct, 8) === context.ratePct &&
+      Number.isFinite(context.intervalHours) && context.intervalHours > 0 &&
+      rounded(context.intervalHours, 6) === context.intervalHours &&
+      Date.parse(context.observedAt) === generatedAtMs && context.reasonCode === null;
+  }
+  if (!valid) return false;
+  if (support) {
+    const expected = expectedOiFunding(support.listings, price24h, generatedAtMs);
+    if (JSON.stringify(context) !== JSON.stringify(expected)) return false;
+  }
+  return true;
+}
+
+function oiPositioningContextValid(context, evaluationStatus, generatedAtMs, price24h) {
+  const keys = [
+    'status', 'venue', 'venueSymbol', 'metric', 'scope', 'period', 'longShortRatio',
+    'longPositionPct', 'shortPositionPct', 'bias', 'observedAt', 'reasonCode',
+  ];
+  if (!context || typeof context !== 'object' || Array.isArray(context) ||
+      Object.keys(context).length !== keys.length || keys.some(key =>
+        !Object.prototype.hasOwnProperty.call(context, key)) ||
+      !['full', 'unavailable'].includes(String(context.status || '').toLowerCase())) return false;
+  const reference = price24h?.representative || null;
+  const unavailableValues = context.longShortRatio === null && context.longPositionPct === null &&
+    context.shortPositionPct === null && context.bias === 'unavailable' && context.observedAt === null;
+  if (!reference) {
+    return context.status === 'unavailable' && context.venue === null && context.venueSymbol === null &&
+      context.metric === null && context.scope === null && context.period === null && unavailableValues &&
+      context.reasonCode === 'REFERENCE_CONTRACT_UNAVAILABLE';
+  }
+  if (context.venue !== reference.venue || context.venueSymbol !== reference.venueSymbol) return false;
   if (evaluationStatus !== 'triggered') {
-    return context.status === 'unavailable' && positions.length === 0 &&
-      context.reasonCode === 'OI_DRAWDOWN_NOT_TRIGGERED';
+    return context.status === 'unavailable' && context.metric === null && context.scope === null &&
+      context.period === null && unavailableValues && context.reasonCode === 'OI_DRAWDOWN_NOT_TRIGGERED';
   }
-  if (!positions.length) {
-    return context.status === 'unavailable' && context.reasonCode === 'NO_BINANCE_PERP_LISTING';
+  if (reference.venue !== 'binance') {
+    return context.status === 'unavailable' && context.metric === null && context.scope === null &&
+      context.period === null && unavailableValues && context.reasonCode === 'VENUE_POSITIONING_UNSUPPORTED';
   }
-  const available = positions.filter(position => position.status === 'full').length;
-  const expectedStatus = !available ? 'unavailable' : available === positions.length ? 'full' : 'partial';
-  return context.status === expectedStatus &&
-    (expectedStatus === 'full'
-      ? context.reasonCode === null
-      : context.reasonCode === 'TOP_TRADER_PARTIAL_OR_UNAVAILABLE');
+  return context.metric === OI_TOP_TRADER_METRIC && context.scope === OI_TOP_TRADER_SCOPE &&
+    context.period === '1h' && oiTopTraderPositionValid(context, generatedAtMs);
 }
 
 function oiMarketContextValid(context, evaluationStatus, generatedAtMs, priceSupport = null) {
   return context && typeof context === 'object' && !Array.isArray(context) &&
-    Object.keys(context).length === 3 && context.version === OI_MARKET_CONTEXT_VERSION &&
+    Object.keys(context).length === 4 && context.version === OI_MARKET_CONTEXT_VERSION &&
     Object.prototype.hasOwnProperty.call(context, 'version') &&
     Object.prototype.hasOwnProperty.call(context, 'price24h') &&
-    Object.prototype.hasOwnProperty.call(context, 'topTraderPositioning') &&
+    Object.prototype.hasOwnProperty.call(context, 'funding') &&
+    Object.prototype.hasOwnProperty.call(context, 'positioning') &&
     oiPrice24hContextValid(context.price24h, generatedAtMs, priceSupport) &&
-    oiTopTraderContextValid(context.topTraderPositioning, evaluationStatus, generatedAtMs);
+    oiFundingContextValid(context.funding, generatedAtMs, context.price24h, priceSupport) &&
+    oiPositioningContextValid(context.positioning, evaluationStatus, generatedAtMs, context.price24h);
 }
 
 function oiLiquidationRowValid(row, section, generatedAtMs) {
@@ -860,6 +927,10 @@ function oiLiquidationRowValid(row, section, generatedAtMs) {
     const oi = listing?.openInterestUsd;
     const volumeStatus = String(listing?.volumeStatus || '').toLowerCase();
     const oiStatus = String(listing?.openInterestStatus || '').toLowerCase();
+    const fundingRate = listing?.fundingRate;
+    const fundingIntervalHours = listing?.fundingIntervalHours;
+    const fundingValid = (fundingRate === null && fundingIntervalHours === null) ||
+      (Number.isFinite(fundingRate) && Number.isFinite(fundingIntervalHours) && fundingIntervalHours > 0);
     const change24h = listing?.change24hPct;
     const change24hMethod = listing?.change24hMethod;
     const change24hStatus = String(listing?.change24hStatus || '').toLowerCase();
@@ -876,6 +947,7 @@ function oiLiquidationRowValid(row, section, generatedAtMs) {
         !Number.isFinite(oi) || oi < 0 || rounded(oi, 2) !== oi ||
         !['full', 'estimated'].includes(oiStatus) ||
         typeof listing?.openInterestMethod !== 'string' || !listing.openInterestMethod.trim() ||
+        !fundingValid ||
         !change24hValid) {
       listingFieldsValid = false;
       continue;
@@ -1150,13 +1222,21 @@ function validateOiLiquidationAnomalies(section, generatedAtMs) {
     const state = stateByKey.get(row.assetKey);
     if (!state || state.cohortFingerprint !== row.cohortFingerprint ||
         state.currentOpenInterestUsd !== row.currentOpenInterestUsd ||
-        !oiPrice24hContextValid(state?.marketContext?.price24h, generatedAtMs, {
+        !oiMarketContextValid(state?.marketContext, state.evaluationStatus, generatedAtMs, {
           listings:row.listings,
           currentOi:row.currentOpenInterestUsd,
         })) return false;
-    if (state.evaluationStatus === 'triggered' &&
-        JSON.stringify(state.marketContext.topTraderPositioning.positions) !==
-          JSON.stringify(row.topTraderPositions)) return false;
+    const positioning = state.marketContext.positioning;
+    if (state.evaluationStatus === 'triggered' && positioning.venue === 'binance') {
+      const legacy = row.topTraderPositions.find(position =>
+        String(position?.venueSymbol || '').toUpperCase() === positioning.venueSymbol.toUpperCase());
+      if (!legacy || legacy.status !== positioning.status ||
+          legacy.longShortRatio !== positioning.longShortRatio ||
+          legacy.longPositionPct !== positioning.longPositionPct ||
+          legacy.shortPositionPct !== positioning.shortPositionPct ||
+          legacy.bias !== positioning.bias || legacy.observedAt !== positioning.observedAt ||
+          legacy.reasonCode !== positioning.reasonCode) return false;
+    }
     if (row.drawdown24hUsd === null) {
       return state.evaluationStatus === 'warming' && state.peak24hOpenInterestUsd === null &&
         state.drawdown24hUsd === null && state.drawdown24hPct === null;

@@ -22,10 +22,11 @@ const HISTORY_VERSION = 1;
 const RESPONSE_ROW_LIMIT = 100;
 const TOP_TRADER_MAX_AGE_MS = 3 * HOUR_MS;
 const PRICE_24H_SELECTION_METHOD = 'largest-current-oi-listing-with-available-change';
-const TOP_TRADER_PROVIDER = 'binance';
+const BINANCE_VENUE = 'binance';
+const TOP_TRADER_METRIC = 'top-trader-position-ratio';
 const TOP_TRADER_SCOPE = 'top-20%-by-margin-balance-position-ratio';
 const TOP_TRADER_PERIOD = '1h';
-const MARKET_CONTEXT_VERSION = 'rwa-oi-market-context/v1';
+const MARKET_CONTEXT_VERSION = 'rwa-oi-market-context/v2';
 const CATEGORY_CODES = Object.freeze({
   equity:'e',
   etf:'t',
@@ -119,6 +120,9 @@ function publicListing(listing) {
   const openInterestStatus = String(listing?.openInterestStatus || '').trim().toLowerCase();
   const change24hMethod = String(listing?.change24hMethod || '').trim().toLowerCase();
   const change24hStatus = String(listing?.change24hStatus || '').trim().toLowerCase();
+  const fundingRate = finiteOrNull(listing?.fundingRate);
+  const fundingIntervalHours = finiteOrNull(listing?.fundingIntervalHours);
+  const fundingValid = fundingRate !== null && fundingIntervalHours !== null && fundingIntervalHours > 0;
   const volume24hUsd = round(nonNegativeOrNull(listing?.volume24hUsd), 2);
   const openInterestUsd = round(nonNegativeOrNull(listing?.openInterestUsd), 2);
   const rawChange24hPct = finiteOrNull(listing?.change24hPct);
@@ -147,6 +151,8 @@ function publicListing(listing) {
       openInterestUsd,
       openInterestMethod:openInterestMethod || null,
       openInterestStatus:acceptedFieldStatus(openInterestStatus) ? openInterestStatus : 'unavailable',
+      fundingRate:fundingValid ? fundingRate : null,
+      fundingIntervalHours:fundingValid ? fundingIntervalHours : null,
       change24hPct,
       change24hMethod:change24hValid ? change24hMethod : null,
       change24hStatus:change24hValid ? change24hStatus : 'unavailable',
@@ -594,54 +600,95 @@ function price24hContext(current, capturedAtMs) {
   };
 }
 
-function topTraderPositioningContext(current, evaluationStatus, injected, capturedAtMs) {
-  if (evaluationStatus !== 'triggered') {
-    return {
-      status:'unavailable',
-      provider:TOP_TRADER_PROVIDER,
-      scope:TOP_TRADER_SCOPE,
-      period:TOP_TRADER_PERIOD,
-      positions:[],
-      reasonCode:'OI_DRAWDOWN_NOT_TRIGGERED',
-    };
-  }
-  const binanceSymbols = (Array.isArray(current?.listings) ? current.listings : [])
-    .filter(listing => listing.venue === TOP_TRADER_PROVIDER)
-    .map(listing => listing.venueSymbol);
-  if (!binanceSymbols.length) {
-    return {
-      status:'unavailable',
-      provider:TOP_TRADER_PROVIDER,
-      scope:TOP_TRADER_SCOPE,
-      period:TOP_TRADER_PERIOD,
-      positions:[],
-      reasonCode:'NO_BINANCE_PERP_LISTING',
-    };
-  }
-  const positions = binanceSymbols.map(symbol =>
-    normalizeInjectedTraderPosition(symbol, injected, capturedAtMs));
-  const available = positions.filter(position => position.status === 'full').length;
-  const status = !available ? 'unavailable' : available === positions.length ? 'full' : 'partial';
+function unavailableFunding(reference, reasonCode) {
   return {
-    status,
-    provider:TOP_TRADER_PROVIDER,
+    status:'unavailable',
+    venue:reference?.venue || null,
+    venueSymbol:reference?.venueSymbol || null,
+    ratePct:null,
+    intervalHours:null,
+    observedAt:null,
+    reasonCode,
+  };
+}
+
+function fundingContext(current, price24h, capturedAtMs) {
+  const reference = price24h?.representative || null;
+  if (!reference) return unavailableFunding(null, 'REFERENCE_CONTRACT_UNAVAILABLE');
+  const listing = (Array.isArray(current?.listings) ? current.listings : []).find(candidate =>
+    candidate.venue === reference.venue && candidate.venueSymbol === reference.venueSymbol);
+  if (!listing || !Number.isFinite(listing.fundingRate) ||
+      !Number.isFinite(listing.fundingIntervalHours) || listing.fundingIntervalHours <= 0) {
+    return unavailableFunding(reference, 'FUNDING_UNAVAILABLE');
+  }
+  return {
+    status:'full',
+    venue:reference.venue,
+    venueSymbol:reference.venueSymbol,
+    ratePct:round(listing.fundingRate * 100, 8),
+    intervalHours:round(listing.fundingIntervalHours, 6),
+    observedAt:new Date(capturedAtMs).toISOString(),
+    reasonCode:null,
+  };
+}
+
+function unavailablePositioning(reference, reasonCode, { binanceMetric = false } = {}) {
+  return {
+    status:'unavailable',
+    venue:reference?.venue || null,
+    venueSymbol:reference?.venueSymbol || null,
+    metric:binanceMetric ? TOP_TRADER_METRIC : null,
+    scope:binanceMetric ? TOP_TRADER_SCOPE : null,
+    period:binanceMetric ? TOP_TRADER_PERIOD : null,
+    longShortRatio:null,
+    longPositionPct:null,
+    shortPositionPct:null,
+    bias:'unavailable',
+    observedAt:null,
+    reasonCode,
+  };
+}
+
+function positioningContext(price24h, evaluationStatus, injected, capturedAtMs) {
+  const reference = price24h?.representative || null;
+  if (!reference) return unavailablePositioning(null, 'REFERENCE_CONTRACT_UNAVAILABLE');
+  if (evaluationStatus !== 'triggered') {
+    return unavailablePositioning(reference, 'OI_DRAWDOWN_NOT_TRIGGERED');
+  }
+  if (reference.venue !== BINANCE_VENUE) {
+    return unavailablePositioning(reference, 'VENUE_POSITIONING_UNSUPPORTED');
+  }
+  const position = normalizeInjectedTraderPosition(reference.venueSymbol, injected, capturedAtMs);
+  if (position.status !== 'full') {
+    return unavailablePositioning(
+      reference,
+      position.reasonCode || 'TOP_TRADER_UPSTREAM_UNAVAILABLE',
+      { binanceMetric:true },
+    );
+  }
+  return {
+    status:'full',
+    venue:reference.venue,
+    venueSymbol:reference.venueSymbol,
+    metric:TOP_TRADER_METRIC,
     scope:TOP_TRADER_SCOPE,
     period:TOP_TRADER_PERIOD,
-    positions,
-    reasonCode:status === 'full' ? null : 'TOP_TRADER_PARTIAL_OR_UNAVAILABLE',
+    longShortRatio:position.longShortRatio,
+    longPositionPct:position.longPositionPct,
+    shortPositionPct:position.shortPositionPct,
+    bias:position.bias,
+    observedAt:position.observedAt,
+    reasonCode:null,
   };
 }
 
 function marketContext(current, evaluationStatus, injected, capturedAtMs) {
+  const price24h = price24hContext(current, capturedAtMs);
   return {
     version:MARKET_CONTEXT_VERSION,
-    price24h:price24hContext(current, capturedAtMs),
-    topTraderPositioning:topTraderPositioningContext(
-      current,
-      evaluationStatus,
-      injected,
-      capturedAtMs,
-    ),
+    price24h,
+    funding:fundingContext(current, price24h, capturedAtMs),
+    positioning:positioningContext(price24h, evaluationStatus, injected, capturedAtMs),
   };
 }
 
@@ -842,8 +889,8 @@ export function buildOiLiquidationAnomalies(assets, hourlyHistory, capturedAtMs,
       threeDayTrend:'oi_rising requires strictly increasing same-cohort 23:00 UTC hourly closes on each of the three most recent completed UTC days',
       liquidationProxy:'liquidation_proxy requires a same-cohort, gap-free 24-hour series and a current USD OI decline strictly greater than $2,000,000 from that window peak',
       logic:'oi_rising OR liquidation_proxy; both is reported when both conditions hold',
-      price24h:'State market context selects the exact perpetual listing with the largest current USD OI among listings with an available 24h change; the range and coverage retain cross-listing disagreement and gaps',
-      topTraderPositions:'Triggered drawdown states and alert rows can use exact Binance perpetual contracts with the latest official 1h Top Trader Long/Short Position Ratio; it describes top-20%-by-margin-balance positions, not liquidation direction',
+      price24h:'State market context selects the exact perpetual listing with the largest current USD OI among listings with an available 24h change; same-contract funding is published when available, while the range and coverage retain cross-listing disagreement and gaps',
+      topTraderPositions:'Triggered drawdown state positioning is bound to the selected price contract: exact Binance representatives can use the official 1h Top Trader Long/Short Position Ratio, while other venues remain explicitly unsupported; legacy alert-row Binance fields remain optional evidence',
       limitations:'The OI decline is a passive position-reduction/deleveraging proxy, not a trade-by-trade liquidation feed. USD OI also changes with mark price and cannot identify whether longs or shorts were liquidated.',
     },
     sources,

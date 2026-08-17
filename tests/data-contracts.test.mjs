@@ -168,6 +168,8 @@ test('signal identity gate rejects crypto types, quarantines category collisions
     categories:['equity', 'index'],
     venues:['one', 'two'],
   }]);
+  assert.equal(result.assets[0].listings[0].fundingRate, 0);
+  assert.equal(result.assets[0].listings[0].fundingIntervalHours, 8);
   assert.equal(result.assets[0].listings[0].fundingAnnualizedPct, 0);
   assert.equal(result.assets[0].fieldStatus.funding, 'full');
   assert.equal(result.assets[0].openInterestUsd, null);
@@ -509,14 +511,17 @@ test('Binance positioning enrichment targets come from uncapped triggered states
   const states = Array.from({ length:101 }, (_, index) => ({
     evaluationStatus:'triggered',
     marketContext:{
-      topTraderPositioning:{
-        positions:[{ venueSymbol:`X${String(index).padStart(3, '0')}USDT` }],
-      },
+      positioning:{ venue:'binance', venueSymbol:`X${String(index).padStart(3, '0')}USDT` },
     },
   }));
+  states.push({
+    evaluationStatus:'triggered',
+    marketContext:{ positioning:{ venue:'tradexyz', venueSymbol:'XYZ:X999' } },
+  });
   const targets = oiTriggeredBinanceSymbols({ states, rows:[] });
   assert.equal(targets.length, 101);
   assert.ok(targets.includes('X100USDT'));
+  assert.ok(!targets.includes('X999'));
 });
 
 test('Signal health allows the bounded Spot/OI cold-start budget without retrying the snapshot', async () => {
