@@ -627,6 +627,8 @@ test('Signal uses fixed same-origin Binance positioning snapshots and never call
     'Top Trader proxy work must run only after uncapped preliminary server-side states identify exact Binance contracts');
   assert.match(source, /export function oiTriggeredBinanceSymbols\(section\) \{[\s\S]*?section\?\.states[\s\S]*?evaluationStatus === 'triggered'/,
     'the enrichment target must not inherit the ranked alert-row Top-100 cap');
+  assert.match(source, /marketContext\?\.positioning[\s\S]*?venue[\s\S]*?=== 'binance'/,
+    'the enrichment target must be the exact Binance price-reference contract, never another listing');
   assert.match(source, /catch \(error\) \{[\s\S]*?Alerts remain valid without optional Binance positioning[\s\S]*?console\.error/,
     'an unavailable Top Trader proxy must preserve alerts with positioning Unavailable');
 });

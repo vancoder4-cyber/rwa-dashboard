@@ -230,6 +230,8 @@ function validOiListing(venue, venueSymbol, change24hPct) {
     openInterestUsd:1_200_000,
     openInterestMethod:'official-open-interest-usd',
     openInterestStatus:'full',
+    fundingRate:0.0001,
+    fundingIntervalHours:venue === 'tradexyz' ? 1 : 8,
     change24hPct,
     change24hMethod:estimatedChange ? 'computed-change' : 'official-change',
     change24hStatus:estimatedChange ? 'estimated' : 'full',
@@ -313,7 +315,7 @@ function validOiLiquidationSection(status, generatedAt) {
     drawdown24hPct:full ? Number(((2_000_001 / 8_000_001) * 100).toFixed(6)) : null,
     reasonCodes:full ? [] : ['OI_HISTORY_HOUR_MISSING'],
     marketContext:{
-      version:'rwa-oi-market-context/v1',
+      version:'rwa-oi-market-context/v2',
       price24h:{
         coverageStatus:'full',
         selectionMethod:'largest-current-oi-listing-with-available-change',
@@ -331,19 +333,35 @@ function validOiLiquidationSection(status, generatedAt) {
         rangePct:{ min:1, max:5 },
         reasonCode:null,
       },
-      topTraderPositioning:full ? {
+      funding:{
+        status:'full', venue:'binance', venueSymbol:'AAPLUSDT', ratePct:0.01,
+        intervalHours:8, observedAt:generatedAt, reasonCode:null,
+      },
+      positioning:full ? {
         status:'full',
-        provider:'binance',
+        venue:'binance',
+        venueSymbol:'AAPLUSDT',
+        metric:'top-trader-position-ratio',
         scope:'top-20%-by-margin-balance-position-ratio',
         period:'1h',
-        positions:row.topTraderPositions,
+        longShortRatio:1.05,
+        longPositionPct:51.22,
+        shortPositionPct:48.78,
+        bias:'neutral',
+        observedAt:'2026-08-14T11:00:00.000Z',
         reasonCode:null,
       } : {
         status:'unavailable',
-        provider:'binance',
-        scope:'top-20%-by-margin-balance-position-ratio',
-        period:'1h',
-        positions:[],
+        venue:'binance',
+        venueSymbol:'AAPLUSDT',
+        metric:null,
+        scope:null,
+        period:null,
+        longShortRatio:null,
+        longPositionPct:null,
+        shortPositionPct:null,
+        bias:'unavailable',
+        observedAt:null,
         reasonCode:'OI_DRAWDOWN_NOT_TRIGGERED',
       },
     },
@@ -714,8 +732,12 @@ test('OI health enforces strict $1m eligibility and strict $2m drawdown semantic
     drawdown24hPct:25,
   });
   Object.assign(
-    drawdownBoundary.oiLiquidationAnomalies.states[0].marketContext.topTraderPositioning,
-    { status:'unavailable', positions:[], reasonCode:'OI_DRAWDOWN_NOT_TRIGGERED' },
+    drawdownBoundary.oiLiquidationAnomalies.states[0].marketContext.positioning,
+    {
+      status:'unavailable', metric:null, scope:null, period:null, longShortRatio:null,
+      longPositionPct:null, shortPositionPct:null, bias:'unavailable', observedAt:null,
+      reasonCode:'OI_DRAWDOWN_NOT_TRIGGERED',
+    },
   );
   const strictBoundaryValid = validateSignalRadarSnapshot(drawdownBoundary, NOW);
   assert.equal(strictBoundaryValid.oiLiquidation.contractValid, true);
@@ -787,6 +809,22 @@ test('OI health recomputes state price context from exact alert listings', () =>
   const impossibleListing = basePayload('full');
   impossibleListing.oiLiquidationAnomalies.rows[0].listings[0].change24hPct = -100.00001;
   assert.equal(validateSignalRadarSnapshot(impossibleListing, NOW).oiLiquidation.invalidRows, 1);
+
+  const wrongFundingVenue = basePayload('full');
+  wrongFundingVenue.oiLiquidationAnomalies.states[0].marketContext.funding.venue = 'tradexyz';
+  assert.equal(validateSignalRadarSnapshot(wrongFundingVenue, NOW).oiLiquidation.statesValid, false);
+
+  const wrongFundingRate = basePayload('full');
+  wrongFundingRate.oiLiquidationAnomalies.states[0].marketContext.funding.ratePct = 0.02;
+  assert.equal(validateSignalRadarSnapshot(wrongFundingRate, NOW).oiLiquidation.statesValid, false);
+
+  const wrongPositioningVenue = basePayload('full');
+  wrongPositioningVenue.oiLiquidationAnomalies.states[0].marketContext.positioning.venue = 'tradexyz';
+  assert.equal(validateSignalRadarSnapshot(wrongPositioningVenue, NOW).oiLiquidation.statesValid, false);
+
+  const wrongPositioningSymbol = basePayload('full');
+  wrongPositioningSymbol.oiLiquidationAnomalies.states[0].marketContext.positioning.venueSymbol = 'MSFTUSDT';
+  assert.equal(validateSignalRadarSnapshot(wrongPositioningSymbol, NOW).oiLiquidation.statesValid, false);
 });
 
 test('OI health requires exact five-source coverage and coherent history maturity', () => {
@@ -846,10 +884,14 @@ test('OI health treats Binance Top Trader as exact optional evidence, never defa
   row.overallTraderBias = 'unavailable';
   row.fieldStatus.topTraderPositions = 'unavailable';
   unavailable.oiLiquidationAnomalies.counts.topTraderAvailable = 0;
-  Object.assign(unavailable.oiLiquidationAnomalies.states[0].marketContext.topTraderPositioning, {
+  Object.assign(unavailable.oiLiquidationAnomalies.states[0].marketContext.positioning, {
     status:'unavailable',
-    positions:row.topTraderPositions,
-    reasonCode:'TOP_TRADER_PARTIAL_OR_UNAVAILABLE',
+    longShortRatio:null,
+    longPositionPct:null,
+    shortPositionPct:null,
+    bias:'unavailable',
+    observedAt:null,
+    reasonCode:'TOP_TRADER_UPSTREAM_UNAVAILABLE',
   });
   const unavailableResult = validateSignalRadarSnapshot(unavailable, NOW);
   assert.equal(unavailableResult.oiLiquidation.contractValid, true);
@@ -869,9 +911,9 @@ test('OI health treats Binance Top Trader as exact optional evidence, never defa
   boundaryContradiction.oiLiquidationAnomalies.rows[0].topTraderPositions[0].bias = 'bullish';
   boundaryContradiction.oiLiquidationAnomalies.rows[0].overallTraderBias = 'bullish';
   boundaryContradiction.oiLiquidationAnomalies.states[0]
-    .marketContext.topTraderPositioning.positions[0].longShortRatio = 1.0501;
+    .marketContext.positioning.longShortRatio = 1.0501;
   boundaryContradiction.oiLiquidationAnomalies.states[0]
-    .marketContext.topTraderPositioning.positions[0].bias = 'bullish';
+    .marketContext.positioning.bias = 'bullish';
   assert.equal(validateSignalRadarSnapshot(boundaryContradiction, NOW).oiLiquidation.contractValid, true);
 
   const stale = basePayload('full');

@@ -29,7 +29,9 @@ function listing({
   volumeStatus = 'full',
   openInterestStatus = 'full',
   openInterestMethod = 'official-open-interest-usd',
-  change24hPct = null,
+  fundingRate = 0.0001,
+  fundingIntervalHours = 8,
+  change24hPct = 0,
   change24hMethod = change24hPct === null ? null : 'official-change-percent',
   change24hStatus = change24hPct === null ? 'unavailable' : 'full',
 } = {}) {
@@ -43,6 +45,8 @@ function listing({
     openInterestUsd,
     openInterestMethod,
     openInterestStatus,
+    fundingRate,
+    fundingIntervalHours,
     change24hPct,
     change24hMethod,
     change24hStatus,
@@ -58,7 +62,8 @@ function asset(symbol = 'AAPL', {
   openInterestMethod = 'official-open-interest-usd',
   listings = null,
 } = {}) {
-  const rows = listings || [listing({
+  const resolvedListings = typeof listings === 'function' ? listings(openInterestUsd) : listings;
+  const rows = resolvedListings || [listing({
     venue,
     venueSymbol,
     volume24hUsd,
@@ -485,7 +490,7 @@ test('state market context selects the available 24h change from the largest cur
     listing({ venue:'binance', venueSymbol:'AAPLUSDT', volume24hUsd:500_000,
       openInterestUsd:6_000_000, change24hPct:1.234567 }),
     listing({ venue:'bitget', venueSymbol:'AAPLUSDT', volume24hUsd:500_000,
-      openInterestUsd:1_000_000 }),
+      openInterestUsd:1_000_000, change24hPct:null }),
   ];
   const result = buildOiLiquidationAnomalies(
     [asset('AAPL', { listings })],
@@ -510,9 +515,19 @@ test('state market context selects the available 24h change from the largest cur
     rangePct:{ min:-2, max:1.23457 },
     reasonCode:null,
   });
-  assert.equal(result.states[0].marketContext.topTraderPositioning.status, 'unavailable');
+  assert.equal(result.states[0].marketContext.version, 'rwa-oi-market-context/v2');
+  assert.deepEqual(result.states[0].marketContext.funding, {
+    status:'full',
+    venue:'binance',
+    venueSymbol:'AAPLUSDT',
+    ratePct:0.01,
+    intervalHours:8,
+    observedAt:new Date(NOW).toISOString(),
+    reasonCode:null,
+  });
+  assert.equal(result.states[0].marketContext.positioning.status, 'unavailable');
   assert.equal(
-    result.states[0].marketContext.topTraderPositioning.reasonCode,
+    result.states[0].marketContext.positioning.reasonCode,
     'OI_DRAWDOWN_NOT_TRIGGERED',
   );
 });
@@ -529,6 +544,22 @@ test('price context rejects an impossible sub-minus-100 percent change instead o
   assert.equal(result.states[0].marketContext.price24h.coverageStatus, 'unavailable');
   assert.equal(result.states[0].marketContext.price24h.observedListings, 0);
   assert.equal(result.states[0].marketContext.price24h.reasonCode, 'PRICE_24H_CHANGE_UNAVAILABLE');
+  assert.equal(result.states[0].marketContext.funding.reasonCode, 'REFERENCE_CONTRACT_UNAVAILABLE');
+  assert.equal(result.states[0].marketContext.positioning.reasonCode, 'REFERENCE_CONTRACT_UNAVAILABLE');
+});
+
+test('same-contract funding stays unavailable when the selected listing lacks a valid native rate', () => {
+  const selected = listing({ change24hPct:1, fundingRate:null, fundingIntervalHours:null });
+  const result = buildOiLiquidationAnomalies(
+    [asset('AAPL', { listings:[selected] })],
+    null,
+    NOW,
+    { historyAvailable:false },
+  );
+  assert.deepEqual(result.states[0].marketContext.funding, {
+    status:'unavailable', venue:'binance', venueSymbol:'AAPLUSDT', ratePct:null,
+    intervalHours:null, observedAt:null, reasonCode:'FUNDING_UNAVAILABLE',
+  });
 });
 
 test('triggered state positioning is explicit for enriched, missing, and non-Binance contracts', () => {
@@ -550,21 +581,66 @@ test('triggered state positioning is explicit for enriched, missing, and non-Bin
     },
   });
   assert.equal(enriched.states[0].evaluationStatus, 'triggered');
-  assert.equal(enriched.states[0].marketContext.topTraderPositioning.status, 'full');
-  assert.equal(enriched.states[0].marketContext.topTraderPositioning.positions[0].longShortRatio, 1.1);
-  assert.equal(enriched.states[0].marketContext.topTraderPositioning.reasonCode, null);
+  assert.equal(enriched.states[0].marketContext.positioning.status, 'full');
+  assert.equal(enriched.states[0].marketContext.positioning.venue, 'binance');
+  assert.equal(enriched.states[0].marketContext.positioning.venueSymbol, 'AAPLUSDT');
+  assert.equal(enriched.states[0].marketContext.positioning.longShortRatio, 1.1);
+  assert.equal(enriched.states[0].marketContext.positioning.reasonCode, null);
 
   const absent = build([spec], history);
-  assert.equal(absent.states[0].marketContext.topTraderPositioning.status, 'unavailable');
-  assert.equal(absent.states[0].marketContext.topTraderPositioning.positions[0].status, 'unavailable');
+  assert.equal(absent.states[0].marketContext.positioning.status, 'unavailable');
+  assert.equal(absent.states[0].marketContext.positioning.venueSymbol, 'AAPLUSDT');
+  assert.equal(absent.states[0].marketContext.positioning.reasonCode, 'TOP_TRADER_NOT_FETCHED');
 
   const gateSpec = { ...spec, assetOptions:{ venue:'gate', venueSymbol:'AAPL_USDT' } };
   const noBinance = build([gateSpec], hourlyHistory([gateSpec]));
   assert.equal(
-    noBinance.states[0].marketContext.topTraderPositioning.reasonCode,
-    'NO_BINANCE_PERP_LISTING',
+    noBinance.states[0].marketContext.positioning.reasonCode,
+    'VENUE_POSITIONING_UNSUPPORTED',
   );
-  assert.deepEqual(noBinance.states[0].marketContext.topTraderPositioning.positions, []);
+  assert.equal(noBinance.states[0].marketContext.positioning.venue, 'gate');
+  assert.equal(noBinance.states[0].marketContext.positioning.venueSymbol, 'AAPL_USDT');
+});
+
+test('state context never substitutes Binance positioning for a trade.xyz reference contract', () => {
+  const dualListings = totalOi => [
+    listing({
+      venue:'tradexyz', venueSymbol:'XYZ:AAPL', volume24hUsd:750_000.01,
+      openInterestUsd:totalOi * 0.8, fundingRate:0.00025, fundingIntervalHours:1,
+      change24hPct:-3, change24hMethod:'mark-vs-prev-day-price', change24hStatus:'estimated',
+    }),
+    listing({
+      venue:'binance', venueSymbol:'AAPLUSDT', volume24hUsd:750_000,
+      openInterestUsd:totalOi * 0.2, fundingRate:0.0001, fundingIntervalHours:8,
+      change24hPct:-2,
+    }),
+  ];
+  const spec = {
+    symbol:'AAPL', currentOi:4_899_999.99,
+    oiAt:oiSchedule([5_000_000, 5_000_000, 7_000_000]),
+    assetOptions:{ listings:dualListings },
+  };
+  const short = 1 / 2.1;
+  const result = build([spec], hourlyHistory([spec]), {
+    topTraderPositions:{
+      AAPLUSDT:[{
+        symbol:'AAPLUSDT', longShortRatio:'1.1', longAccount:String(1 - short),
+        shortAccount:String(short), timestamp:NOW,
+      }],
+    },
+  });
+  const context = result.states[0].marketContext;
+  assert.equal(context.price24h.representative.venue, 'tradexyz');
+  assert.equal(context.price24h.representative.venueSymbol, 'XYZ:AAPL');
+  assert.deepEqual(context.funding, {
+    status:'full', venue:'tradexyz', venueSymbol:'XYZ:AAPL', ratePct:0.025,
+    intervalHours:1, observedAt:new Date(NOW).toISOString(), reasonCode:null,
+  });
+  assert.equal(context.positioning.status, 'unavailable');
+  assert.equal(context.positioning.venue, 'tradexyz');
+  assert.equal(context.positioning.venueSymbol, 'XYZ:AAPL');
+  assert.equal(context.positioning.reasonCode, 'VENUE_POSITIONING_UNSUPPORTED');
+  assert.equal(context.positioning.longShortRatio, null);
 });
 
 test('Crypto identities and identity-conflicted cohorts fail closed', () => {

@@ -372,8 +372,9 @@ async function fetchBinanceTopTraderPositionRows(baseUrl, venueSymbols, nowMs) {
 export function oiTriggeredBinanceSymbols(section) {
   return [...new Set((Array.isArray(section?.states) ? section.states : [])
     .filter(state => state?.evaluationStatus === 'triggered')
-    .flatMap(state => state?.marketContext?.topTraderPositioning?.positions || [])
-    .map(position => String(position?.venueSymbol || '').trim().toUpperCase())
+    .map(state => state?.marketContext?.positioning)
+    .filter(positioning => String(positioning?.venue || '').trim().toLowerCase() === 'binance')
+    .map(positioning => String(positioning?.venueSymbol || '').trim().toUpperCase())
     .filter(value => /^[A-Z0-9]{2,40}$/.test(value)))].sort();
 }
 
@@ -1079,7 +1080,9 @@ export async function serveSignalSnapshot(req, res, {
       { ...oiBaseOptions, snapshotComparable:false, historyAvailable:false },
     );
   }
-  // Positioning enrichment follows the uncapped recovery-state contract.
+  // Positioning enrichment follows the uncapped recovery-state contract and
+  // only targets a Binance contract when that exact contract is also the
+  // selected price/funding reference. Cross-venue substitution is forbidden.
   // Deriving targets from the ranked rows would silently skip a triggered
   // asset whenever more than 100 alert rows exist in the same snapshot.
   const triggeredBinanceSymbols = oiTriggeredBinanceSymbols(preliminaryOiLiquidation);

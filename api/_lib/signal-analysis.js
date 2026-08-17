@@ -178,6 +178,8 @@ export function aggregateSignalListings(listings, limit = SIGNAL_ASSET_LIMIT) {
         openInterestUsd: finiteOrNull(row.openInterestUsd),
         openInterestMethod: String(row.openInterestMethod || '').trim().toLowerCase() || null,
         openInterestStatus: String(row.openInterestStatus || '').trim().toLowerCase() || 'unavailable',
+        fundingRate: finiteOrNull(row.fundingRate),
+        fundingIntervalHours: positiveOrNull(row.fundingIntervalHours),
         fundingAnnualizedPct: annualizedFundingPct(row),
         change24hPct: finiteOrNull(row.change24hPct),
         change24hMethod: String(row.change24hMethod || '').trim().toLowerCase() || null,
