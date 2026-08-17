@@ -76,6 +76,7 @@ const OI_LIQUIDATION_SECTION_STATUSES = new Set(['full', 'partial', 'warming', '
 const OI_LIQUIDATION_FIELD_STATUSES = new Set(['full', 'partial', 'estimated', 'unavailable']);
 const OI_LIQUIDATION_SOURCE_STATUSES = new Set(['full', 'partial', 'unavailable']);
 const OI_LIQUIDATION_PERSISTENCE_STATUSES = new Set(['partial', 'unavailable']);
+const OI_LIQUIDATION_EVALUATION_STATUSES = new Set(['triggered', 'clear', 'warming', 'unavailable']);
 const OI_LIQUIDATION_WRITE_STATUSES = new Set([
   'stored',
   'read-only',
@@ -839,6 +840,69 @@ function oiLiquidationRowValid(row, section, generatedAtMs) {
     estimatedFieldsValid && reasonCodesValid;
 }
 
+function oiLiquidationStateValid(state, generatedAtMs) {
+  const category = signalCategory(state?.category);
+  const symbol = String(state?.symbol || '').trim().toUpperCase();
+  const evaluationStatus = String(state?.evaluationStatus || '').toLowerCase();
+  const cohortFingerprint = state?.cohortFingerprint;
+  const cohortValid = /^[A-Za-z0-9_-]{8,64}$/.test(String(cohortFingerprint || ''));
+  const observedBucketMs = Date.parse(state?.observedBucket);
+  const generatedHour = Number.isFinite(generatedAtMs)
+    ? Math.floor(generatedAtMs / UTC_HOUR_MS) * UTC_HOUR_MS
+    : null;
+  const currentOi = state?.currentOpenInterestUsd;
+  const peak = state?.peak24hOpenInterestUsd;
+  const drawdown = state?.drawdown24hUsd;
+  const drawdownPct = state?.drawdown24hPct;
+  const currentOiValid = currentOi === null ||
+    (Number.isFinite(currentOi) && currentOi >= 0 && rounded(currentOi, 2) === currentOi);
+  const peakValid = peak === null || (Number.isFinite(peak) && peak >= 0 && rounded(peak, 2) === peak);
+  const drawdownValid = drawdown === null ||
+    (Number.isFinite(drawdown) && drawdown >= 0 && rounded(drawdown, 2) === drawdown);
+  const drawdownPctValid = drawdownPct === null ||
+    (Number.isFinite(drawdownPct) && drawdownPct >= 0 && drawdownPct <= 100 &&
+      rounded(drawdownPct, 6) === drawdownPct);
+  const reasonCodes = Array.isArray(state?.reasonCodes) ? state.reasonCodes : null;
+  const reasonsValid = reasonCodes !== null && reasonCodes.every(reason =>
+    /^[A-Z][A-Z0-9_]{1,79}$/.test(reason)) && new Set(reasonCodes).size === reasonCodes.length;
+  const commonValid = RWA_SIGNAL_CATEGORIES.has(category) &&
+    /^[A-Z0-9][A-Z0-9.-]{0,39}$/.test(symbol) && state?.assetKey === `${category}:${symbol}` &&
+    OI_LIQUIDATION_EVALUATION_STATUSES.has(evaluationStatus) &&
+    Number.isFinite(observedBucketMs) && observedBucketMs === generatedHour &&
+    currentOiValid && peakValid && drawdownValid && drawdownPctValid && reasonsValid;
+  if (!commonValid) return false;
+
+  if (evaluationStatus === 'triggered' || evaluationStatus === 'clear') {
+    if (!cohortValid || state?.sameCohort !== true || !Number.isFinite(currentOi) ||
+        !Number.isFinite(peak) || !Number.isFinite(drawdown) || peak < currentOi ||
+        drawdown !== rounded(peak - currentOi, 2)) return false;
+    const expectedStatus = drawdown > OI_LIQUIDATION_THRESHOLDS.liquidationProxyDropUsdExclusive
+      ? 'triggered'
+      : 'clear';
+    if (evaluationStatus !== expectedStatus) return false;
+    if (peak === 0) {
+      return currentOi === 0 && drawdown === 0 && drawdownPct === null &&
+        reasonCodes.length === 1 && reasonCodes[0] === 'OI_PEAK_ZERO_PERCENT_UNAVAILABLE';
+    }
+    return drawdownPct === rounded((drawdown / peak) * 100, 6) && reasonCodes.length === 0;
+  }
+
+  if (evaluationStatus === 'warming') {
+    const explainsWarming = reasonCodes.includes('OI_COHORT_CHANGED') ||
+      reasonCodes.includes('OI_HISTORY_HOUR_MISSING') || reasonCodes.includes('OI_HISTORY_WARMING');
+    const cohortClaimValid = state?.sameCohort === false
+      ? reasonCodes.includes('OI_COHORT_CHANGED')
+      : state?.sameCohort === null;
+    return cohortValid && Number.isFinite(currentOi) && peak === null && drawdown === null &&
+      drawdownPct === null && reasonCodes.length > 0 && explainsWarming && cohortClaimValid;
+  }
+
+  const currentCohortShapeValid = (cohortFingerprint === null && currentOi === null) ||
+    (cohortValid && Number.isFinite(currentOi));
+  return evaluationStatus === 'unavailable' && currentCohortShapeValid && state?.sameCohort === null &&
+    peak === null && drawdown === null && drawdownPct === null && reasonCodes.length > 0;
+}
+
 function validateOiLiquidationAnomalies(section, generatedAtMs) {
   const status = String(section?.status || '').toLowerCase();
   const formulaValid = section?.formulaVersion === OI_LIQUIDATION_FORMULA_VERSION;
@@ -877,6 +941,16 @@ function validateOiLiquidationAnomalies(section, generatedAtMs) {
     coverage.missingEligibleAssets === coverage.volumeEligibleAssets - coverage.completeEligibleAssets &&
     coverage.filterUnknownAssets <= coverage.verifiedAssets;
   const identityConflict = Number.isInteger(coverage?.identityConflicts) && coverage.identityConflicts > 0;
+
+  const states = Array.isArray(section?.states) ? section.states : null;
+  const invalidStates = states ? states.filter(state => !oiLiquidationStateValid(state, generatedAtMs)) : [];
+  const stateKeys = states?.map(state => String(state?.assetKey || '')) || [];
+  const statesOrdered = stateKeys.every((key, index) => index === 0 || stateKeys[index - 1].localeCompare(key) < 0);
+  const stateCoverage = section?.stateCoverage;
+  const stateCoverageValid = Number.isInteger(stateCoverage?.expectedEligibleAssets) &&
+    stateCoverage.expectedEligibleAssets === coverage?.volumeEligibleAssets &&
+    Number.isInteger(stateCoverage?.returnedStates) && stateCoverage.returnedStates === states?.length &&
+    stateCoverage?.complete === true && stateCoverage.returnedStates === stateCoverage.expectedEligibleAssets;
 
   const rows = Array.isArray(section?.rows) ? section.rows : null;
   const invalidRows = rows ? rows.filter(row => !oiLiquidationRowValid(row, section, generatedAtMs)) : [];
@@ -925,6 +999,24 @@ function validateOiLiquidationAnomalies(section, generatedAtMs) {
     counts.filteredLowVolume + counts.filterUnknown + coverage.volumeEligibleAssets === coverage.verifiedAssets &&
     counts.completeEligibleAssets + counts.missingEligibleAssets === counts.volumeEligibleAssets &&
     counts.alerts <= coverage.completeEligibleAssets;
+  const stateByKey = new Map((states || []).map(state => [state.assetKey, state]));
+  const rowStatesCoherent = rows !== null && rows.every(row => {
+    const state = stateByKey.get(row.assetKey);
+    if (!state || state.cohortFingerprint !== row.cohortFingerprint ||
+        state.currentOpenInterestUsd !== row.currentOpenInterestUsd) return false;
+    if (row.drawdown24hUsd === null) {
+      return state.evaluationStatus === 'warming' && state.peak24hOpenInterestUsd === null &&
+        state.drawdown24hUsd === null && state.drawdown24hPct === null;
+    }
+    return state.peak24hOpenInterestUsd === row.peak24hOpenInterestUsd &&
+      state.drawdown24hUsd === row.drawdown24hUsd;
+  });
+  const triggeredStates = states?.filter(state => state.evaluationStatus === 'triggered').length ?? -1;
+  const completeStateCohorts = states?.filter(state => state.cohortFingerprint !== null).length ?? -1;
+  const statesValid = states !== null && invalidStates.length === 0 && statesOrdered &&
+    new Set(stateKeys).size === stateKeys.length && stateCoverageValid && rowStatesCoherent &&
+    triggeredStates === counts?.liquidationProxy &&
+    completeStateCohorts === coverage?.completeEligibleAssets;
 
   const history = section?.history;
   const historyStatus = String(history?.status || '').toLowerCase();
@@ -986,12 +1078,12 @@ function validateOiLiquidationAnomalies(section, generatedAtMs) {
       coverage.missingEligibleAssets === 0 && history?.ready === true)) &&
     (status !== 'warming' || historyStatus === 'warming') &&
     (status !== 'unavailable' || rows?.length === 0);
-  const cryptoCategoryCount = rows
-    ? rows.filter(row => !RWA_SIGNAL_CATEGORIES.has(signalCategory(row?.category))).length
-    : 0;
+  const cryptoCategoryCount = (rows || [])
+    .filter(row => !RWA_SIGNAL_CATEGORIES.has(signalCategory(row?.category))).length +
+    (states || []).filter(state => !RWA_SIGNAL_CATEGORIES.has(signalCategory(state?.category))).length;
   const metadataValid = section?.rowLimit === 100 && typeof section?.scope === 'string' && section.scope.length > 0;
   const contractValid = Boolean(section) && metadataValid && formulaValid && timestampValid && thresholdsValid &&
-    methodologyValid && sourcesValid && coverageValid && countsValid && rowsValid && historyValid &&
+    methodologyValid && sourcesValid && coverageValid && countsValid && rowsValid && statesValid && historyValid &&
     persistenceValid && statusCoherent && cryptoCategoryCount === 0;
   return {
     contractValid,
@@ -1005,6 +1097,8 @@ function validateOiLiquidationAnomalies(section, generatedAtMs) {
     coverageValid,
     countsValid,
     rowsValid,
+    statesValid,
+    stateCoverageValid,
     historyValid,
     persistenceValid,
     statusCoherent,
@@ -1012,6 +1106,8 @@ function validateOiLiquidationAnomalies(section, generatedAtMs) {
     identityConflict,
     rows:rows?.length ?? null,
     invalidRows:invalidRows.length,
+    states:states?.length ?? null,
+    invalidStates:invalidStates.length,
     cryptoCategoryCount,
   };
 }
