@@ -8,9 +8,14 @@ import {
   DATABASE_URL_ENV_KEY,
   DATABASE_URL_UNPOOLED_ENV_KEY,
   DATABASE_TRANSACTION_TIMEOUT_MS,
+  PREVIEW_DATABASE_URL_ENV_KEY,
+  PREVIEW_DATABASE_URL_UNPOOLED_ENV_KEY,
+  databaseConnectionString,
   databaseConfigured,
+  databaseEnvironmentKeys,
   getDatabaseSql,
   getMigrationDatabaseSql,
+  migrationDatabaseConnectionString,
   migrationDatabaseConfigured,
   resetDatabaseClientForTests,
 } from '../api/_lib/database.js';
@@ -34,13 +39,15 @@ test('migration files are ordered, immutable-checksummed, and parse into stateme
   assert.deepEqual(migrations.map(row => row.filename), [
     '0001_phase0_foundation.sql',
     '0002_phase1_facts_alerting.sql',
+    '0003_phase1_catalog_retry_replace.sql',
   ]);
-  assert.deepEqual(migrations.map(row => row.version), ['0001', '0002']);
+  assert.deepEqual(migrations.map(row => row.version), ['0001', '0002', '0003']);
   for (const migration of migrations) {
     assert.match(migration.filename, MIGRATION_FILE_PATTERN);
     assert.match(migration.checksum, /^[0-9a-f]{64}$/);
     assert.equal(migration.checksum, migrationChecksum(migration.sql));
-    assert.ok(migration.statements.length > 10);
+    const minimumStatements = migration.version === '0003' ? 3 : 11;
+    assert.ok(migration.statements.length >= minimumStatements);
     assert.ok(migration.statements.every(statement => statement.trim().length > 0));
   }
 });
@@ -188,6 +195,7 @@ test('Phase 1 facts, cohorts, publication, and alert outbox retain versioned for
 
 test('database roles are NOLOGIN and grants separate catalog, read, and dispatch duties', async () => {
   const phase1 = compactSql(await readFile(path.join(MIGRATION_DIRECTORY, '0002_phase1_facts_alerting.sql'), 'utf8'));
+  const catalogRetry = compactSql(await readFile(path.join(MIGRATION_DIRECTORY, '0003_phase1_catalog_retry_replace.sql'), 'utf8'));
   for (const role of ['rwa_catalog_shadow_writer', 'rwa_analytics_reader', 'rwa_alert_dispatcher']) {
     assert.match(phase1, new RegExp(`CREATE ROLE ${role} NOLOGIN`));
   }
@@ -197,15 +205,42 @@ test('database roles are NOLOGIN and grants separate catalog, read, and dispatch
   assert.match(phase1, /GRANT SELECT ON ALL TABLES[\s\S]*TO rwa_analytics_reader/);
   assert.match(phase1, /GRANT UPDATE ON alert\.delivery, alert\.outbox TO rwa_alert_dispatcher/);
   assert.match(phase1, /GRANT INSERT ON alert\.delivery_attempt TO rwa_alert_dispatcher/);
+  assert.match(catalogRetry, /GRANT DELETE ON identity\.evidence, ingest\.catalog_membership TO rwa_catalog_shadow_writer/);
+  assert.doesNotMatch(catalogRetry, /GRANT DELETE ON (?:ALL TABLES|identity\.asset|identity\.instrument|analytics\.)/);
+  assert.match(catalogRetry, /CREATE TABLE IF NOT EXISTS ingest\.catalog_publication_lease \(/);
+  assert.match(catalogRetry, /lease_key text PRIMARY KEY/);
+  assert.match(catalogRetry, /owner_token uuid NOT NULL/);
+  assert.match(catalogRetry, /payload_checksum char\(64\) NOT NULL/);
+  assert.match(catalogRetry, /lease_expires_at timestamptz NOT NULL/);
+  assert.match(catalogRetry, /last_release_status IN \('published', 'failed'\)/);
+  assert.match(catalogRetry, /CHECK \(lease_expires_at >= acquired_at\)/);
+  assert.match(catalogRetry, /GRANT SELECT, INSERT, UPDATE ON ingest\.catalog_publication_lease TO rwa_catalog_shadow_writer/);
+  assert.doesNotMatch(catalogRetry, /GRANT (?:ALL|DELETE)[^;]*catalog_publication_lease/);
+  for (const [functionName, errorCode] of [
+    ['ingest.reject_stale_catalog_retry', 'STALE_TRUSTED_LISTING_RETRY'],
+    ['ingest.reject_catalog_identity_downgrade', 'UNTRUSTED_CATALOG_IDENTITY_DOWNGRADE'],
+    ['ingest.reject_verified_catalog_identity_conflict', 'CONFLICTING_VERIFIED_CATALOG_IDENTITY'],
+  ]) {
+    const escapedFunctionName = functionName.replace('.', '\\.');
+    assert.match(catalogRetry, new RegExp(`CREATE OR REPLACE FUNCTION ${escapedFunctionName}\\(\\)`));
+    assert.match(catalogRetry, new RegExp(`MESSAGE = '${errorCode}'`));
+    assert.match(catalogRetry, new RegExp(`GRANT EXECUTE ON FUNCTION ${escapedFunctionName}\\(\\) TO rwa_catalog_shadow_writer`));
+  }
 });
 
 test('Neon clients remain lazy and migrations prefer the unpooled URL', () => {
   assert.equal(DATABASE_TRANSACTION_TIMEOUT_MS, 25_000);
   const originalPooled = process.env[DATABASE_URL_ENV_KEY];
   const originalUnpooled = process.env[DATABASE_URL_UNPOOLED_ENV_KEY];
+  const originalPreviewPooled = process.env[PREVIEW_DATABASE_URL_ENV_KEY];
+  const originalPreviewUnpooled = process.env[PREVIEW_DATABASE_URL_UNPOOLED_ENV_KEY];
+  const originalVercelEnv = process.env.VERCEL_ENV;
   try {
+    delete process.env.VERCEL_ENV;
     delete process.env[DATABASE_URL_ENV_KEY];
     delete process.env[DATABASE_URL_UNPOOLED_ENV_KEY];
+    delete process.env[PREVIEW_DATABASE_URL_ENV_KEY];
+    delete process.env[PREVIEW_DATABASE_URL_UNPOOLED_ENV_KEY];
     resetDatabaseClientForTests();
     assert.equal(databaseConfigured(), false);
     assert.equal(migrationDatabaseConfigured(), false);
@@ -218,11 +253,39 @@ test('Neon clients remain lazy and migrations prefer the unpooled URL', () => {
     assert.equal(migrationDatabaseConfigured(), true);
     assert.equal(typeof getDatabaseSql(), 'function');
     assert.equal(typeof getMigrationDatabaseSql(), 'function');
+
+    process.env.VERCEL_ENV = 'preview';
+    resetDatabaseClientForTests();
+    assert.deepEqual(databaseEnvironmentKeys(), {
+      pooled: PREVIEW_DATABASE_URL_ENV_KEY,
+      unpooled: PREVIEW_DATABASE_URL_UNPOOLED_ENV_KEY,
+    });
+    assert.equal(databaseConnectionString(), null);
+    assert.equal(migrationDatabaseConnectionString(), null);
+    assert.equal(databaseConfigured(), false);
+    assert.equal(migrationDatabaseConfigured(), false);
+    assert.throws(() => getDatabaseSql(), /PREVIEW_NEON_DATABASE_URL is required/);
+    assert.throws(() => getMigrationDatabaseSql(), /PREVIEW_NEON_DATABASE_URL_UNPOOLED or PREVIEW_NEON_DATABASE_URL is required/);
+
+    process.env[PREVIEW_DATABASE_URL_ENV_KEY] = 'postgresql://preview:password@ep-preview-pooled.example.invalid/database?sslmode=require';
+    process.env[PREVIEW_DATABASE_URL_UNPOOLED_ENV_KEY] = 'postgresql://preview:password@ep-preview-direct.example.invalid/database?sslmode=require';
+    assert.equal(databaseConfigured(), true);
+    assert.equal(migrationDatabaseConfigured(), true);
+    assert.equal(databaseConnectionString(), process.env[PREVIEW_DATABASE_URL_ENV_KEY]);
+    assert.equal(migrationDatabaseConnectionString(), process.env[PREVIEW_DATABASE_URL_UNPOOLED_ENV_KEY]);
+    assert.equal(typeof getDatabaseSql(), 'function');
+    assert.equal(typeof getMigrationDatabaseSql(), 'function');
   } finally {
     if (originalPooled === undefined) delete process.env[DATABASE_URL_ENV_KEY];
     else process.env[DATABASE_URL_ENV_KEY] = originalPooled;
     if (originalUnpooled === undefined) delete process.env[DATABASE_URL_UNPOOLED_ENV_KEY];
     else process.env[DATABASE_URL_UNPOOLED_ENV_KEY] = originalUnpooled;
+    if (originalPreviewPooled === undefined) delete process.env[PREVIEW_DATABASE_URL_ENV_KEY];
+    else process.env[PREVIEW_DATABASE_URL_ENV_KEY] = originalPreviewPooled;
+    if (originalPreviewUnpooled === undefined) delete process.env[PREVIEW_DATABASE_URL_UNPOOLED_ENV_KEY];
+    else process.env[PREVIEW_DATABASE_URL_UNPOOLED_ENV_KEY] = originalPreviewUnpooled;
+    if (originalVercelEnv === undefined) delete process.env.VERCEL_ENV;
+    else process.env.VERCEL_ENV = originalVercelEnv;
     resetDatabaseClientForTests();
   }
 });
@@ -234,6 +297,8 @@ test('package exposes only an explicit migration command and safe example modes'
   assert.match(packageJson.dependencies['@neondatabase/serverless'], /^\^1\./);
   assert.match(envExample, /^DATABASE_URL=$/m);
   assert.match(envExample, /^DATABASE_URL_UNPOOLED=$/m);
+  assert.match(envExample, /^PREVIEW_NEON_DATABASE_URL=$/m);
+  assert.match(envExample, /^PREVIEW_NEON_DATABASE_URL_UNPOOLED=$/m);
   assert.match(envExample, /^BLOB_READ_WRITE_TOKEN=$/m);
   assert.match(envExample, /^PG_WRITE_MODE=off$/m);
   assert.match(envExample, /^RAW_ARCHIVE_MODE=off$/m);

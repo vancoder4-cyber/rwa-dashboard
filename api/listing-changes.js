@@ -6,8 +6,14 @@ import {
 } from './_lib/listing-audit.js';
 import { collectListingSourceObservations } from './_lib/listing-sources.js';
 import {
+  acquireListingAuditPublicationLease,
   listingAuditPersistenceChecksum,
+  LISTING_PG_PUBLICATION_LEASE_LOST_ERROR_CODE,
+  LISTING_PG_PUBLICATION_LEASE_SECONDS,
   recordListingAuditRuntimeCacheCommit,
+  releaseListingAuditPublicationLease,
+  renewListingAuditPublicationLease,
+  resolvePgWriteMode,
   runOptionalListingAuditPgWrite,
 } from './_lib/listing-pg-shadow.js';
 import {
@@ -44,6 +50,20 @@ function cacheOptions(name) {
 
 function stateSizeBytes(state) {
   return Buffer.byteLength(JSON.stringify(state), 'utf8');
+}
+
+function isPublicationLeaseServiceFailure(error) {
+  let current = error;
+  for (let depth = 0; current && depth < 5; depth += 1) {
+    const code = String(current?.code || current?.cause?.code || '').toUpperCase();
+    const message = String(current?.message || current).toLowerCase();
+    if (/^(?:ECONN|ETIMEDOUT|EAI_AGAIN|UND_ERR)/.test(code) ||
+      /(?:connection|network|socket|fetch failed|timed? out|service unavailable|database unavailable|gateway timeout)/.test(message)) {
+      return true;
+    }
+    current = current?.cause;
+  }
+  return false;
 }
 
 const COMPACT_KNOWN_ENCODING = 'listing-row-array/v1';
@@ -193,6 +213,8 @@ export async function runListingAudit(req, res, dependencies = {}) {
   }
   listingAuditRunning = true;
   const cache = dependencies.cache || getCache({ namespace: CACHE_NAMESPACE });
+  const persistenceEnv = dependencies.env || process.env;
+  const pgWriteMode = resolvePgWriteMode(persistenceEnv);
   let previousBundle;
   try {
     previousBundle = await cache.get(BUNDLE_KEY);
@@ -206,10 +228,102 @@ export async function runListingAudit(req, res, dependencies = {}) {
     });
   }
 
+  let publicationLease = null;
+  let publicationLeaseStatus = 'failed';
+  let publishedBundleChecksum = null;
   try {
     const observations = await (dependencies.collectObservations || collectListingSourceObservations)(deploymentBaseUrl(req));
     const now = dependencies.now ? new Date(dependencies.now()) : new Date();
     const merged = mergeListingAudit(hydrateListingAuditState(previousBundle?.state), observations, now);
+    const snapshot = responseSnapshot(merged.snapshot);
+    snapshot.persistence.publicationLease = pgWriteMode === 'off'
+      ? {
+          mode:'off',
+          status:'off',
+          enforced:false,
+          ttlSeconds:LISTING_PG_PUBLICATION_LEASE_SECONDS,
+        }
+      : {
+          mode:'postgres-distributed-lease',
+          status:'enforced',
+          enforced:true,
+          ttlSeconds:LISTING_PG_PUBLICATION_LEASE_SECONDS,
+        };
+    // Events are persisted once in state and injected into the public snapshot
+    // at read time. Persisting them in both branches materially reduces the
+    // 45-day history capacity of Runtime Cache.
+    let bundle = compactListingAuditBundle(merged.state, snapshot);
+    let stateBytes = stateSizeBytes(bundle);
+    if (stateBytes > MAX_STATE_BYTES) {
+      console.error('[listing-audit] bundle exceeds Runtime Cache safety budget', { stateBytes });
+      setNoStore(res);
+      return res.status(503).json({ error: 'Listing audit state exceeds persistence budget' });
+    }
+    // The distributed lease is acquired before PostgreSQL mutation and held
+    // through Runtime Cache publication plus sink acknowledgement. This closes
+    // the cross-instance gap that an in-process flag or a transaction-only
+    // advisory lock cannot cover.
+    let bundleChecksum = listingAuditPersistenceChecksum(bundle);
+    const acquirePublicationLease = dependencies.acquirePublicationLease || acquireListingAuditPublicationLease;
+    try {
+      publicationLease = await acquirePublicationLease({
+        observedAt: merged.snapshot.generatedAt,
+        checksum: bundleChecksum,
+      }, { env:persistenceEnv });
+    } catch (leaseError) {
+      if (pgWriteMode !== 'shadow' || !isPublicationLeaseServiceFailure(leaseError)) throw leaseError;
+      // Shadow mode still advances the operational Runtime Cache when the
+      // database is unavailable, but says explicitly that cross-instance
+      // serialization was not enforced. Daily Check will fail reconciliation
+      // if the PostgreSQL shadow cannot record the same cycle.
+      publicationLease = {
+        mode:'shadow',
+        acquired:true,
+        enforced:false,
+        status:'degraded',
+        ownerToken:null,
+        observedAt:merged.snapshot.generatedAt,
+        checksum:bundleChecksum,
+        error:String(leaseError?.message || leaseError),
+      };
+      snapshot.persistence.publicationLease = {
+        mode:'postgres-distributed-lease',
+        status:'degraded',
+        enforced:false,
+        ttlSeconds:LISTING_PG_PUBLICATION_LEASE_SECONDS,
+        errorCode:'LEASE_SERVICE_UNAVAILABLE',
+      };
+      bundle = compactListingAuditBundle(merged.state, snapshot);
+      stateBytes = stateSizeBytes(bundle);
+      if (stateBytes > MAX_STATE_BYTES) {
+        console.error('[listing-audit] bundle exceeds Runtime Cache safety budget after degraded lease diagnostic', { stateBytes });
+        setNoStore(res);
+        return res.status(503).json({ error: 'Listing audit state exceeds persistence budget' });
+      }
+      bundleChecksum = listingAuditPersistenceChecksum(bundle);
+      publicationLease.checksum = bundleChecksum;
+    }
+    if (!publicationLease?.acquired) {
+      setNoStore(res);
+      const fallback = hydrateListingAuditSnapshot(previousBundle) || responseSnapshot(emptyListingAuditSnapshot());
+      return res.status(409).json({
+        error: `Listing audit publication lease ${publicationLease?.status || 'unavailable'}`,
+        ...fallback,
+      });
+    }
+    if (publicationLease.mode !== 'off' && publicationLease.status !== 'degraded') {
+      const leasedPreviousBundle = await cache.get(BUNDLE_KEY);
+      const initialPreviousChecksum = listingAuditPersistenceChecksum(previousBundle ?? null);
+      const leasedPreviousChecksum = listingAuditPersistenceChecksum(leasedPreviousBundle ?? null);
+      if (initialPreviousChecksum !== leasedPreviousChecksum) {
+        setNoStore(res);
+        const fallback = hydrateListingAuditSnapshot(leasedPreviousBundle) || responseSnapshot(emptyListingAuditSnapshot());
+        return res.status(409).json({
+          error: 'Listing audit state advanced before publication lease acquisition',
+          ...fallback,
+        });
+      }
+    }
     // Both durable sinks are server-only and default off. They run before the
     // Runtime Cache mutation so a required-mode failure cannot advance the
     // operational baseline; shadow failures remain diagnostic-only.
@@ -218,24 +332,56 @@ export async function runListingAudit(req, res, dependencies = {}) {
       merged,
       observedAt: merged.snapshot.generatedAt,
     });
-    const snapshot = responseSnapshot(merged.snapshot);
-    // Events are persisted once in state and injected into the public snapshot
-    // at read time. Persisting them in both branches materially reduces the
-    // 45-day history capacity of Runtime Cache.
-    const bundle = compactListingAuditBundle(merged.state, snapshot);
-    const stateBytes = stateSizeBytes(bundle);
-    if (stateBytes > MAX_STATE_BYTES) {
-      console.error('[listing-audit] bundle exceeds Runtime Cache safety budget', { stateBytes });
+    if (durableWrite?.publishAllowed === false || durableWrite?.staleRetry === true) {
       setNoStore(res);
-      return res.status(503).json({ error: 'Listing audit state exceeds persistence budget' });
+      const fallback = hydrateListingAuditSnapshot(previousBundle) || responseSnapshot(emptyListingAuditSnapshot());
+      return res.status(409).json({
+        error: 'Stale listing audit retry rejected',
+        ...fallback,
+      });
     }
     // State and the public snapshot are one cache value, so a partial write can
     // never expose a snapshot that disagrees with the next comparison state.
-    const bundleChecksum = listingAuditPersistenceChecksum(bundle);
     const recordRuntimeCacheCommit = dependencies.recordRuntimeCacheCommit || recordListingAuditRuntimeCacheCommit;
+    const renewPublicationLease = dependencies.renewPublicationLease || renewListingAuditPublicationLease;
+    if (publicationLease.status !== 'degraded') {
+      try {
+        publicationLease = await renewPublicationLease(publicationLease, { env:persistenceEnv });
+      } catch (leaseError) {
+        const leaseLost = String(leaseError?.message || leaseError)
+          .includes(LISTING_PG_PUBLICATION_LEASE_LOST_ERROR_CODE);
+        if (leaseLost || pgWriteMode !== 'shadow' || !isPublicationLeaseServiceFailure(leaseError)) throw leaseError;
+        publicationLease = {
+          ...publicationLease,
+          // The original 180-second lease remains longer than this function's
+          // 120-second maximum runtime. A transient renewal outage therefore
+          // degrades observability, but does not release or shorten ownership.
+          enforced:true,
+          status:'renewal-degraded',
+          error:String(leaseError?.message || leaseError),
+        };
+        snapshot.persistence.publicationLease = {
+          mode:'postgres-distributed-lease',
+          status:'degraded',
+          enforced:false,
+          ttlSeconds:LISTING_PG_PUBLICATION_LEASE_SECONDS,
+          errorCode:'LEASE_SERVICE_UNAVAILABLE',
+        };
+        bundle = compactListingAuditBundle(merged.state, snapshot);
+        stateBytes = stateSizeBytes(bundle);
+        if (stateBytes > MAX_STATE_BYTES) {
+          console.error('[listing-audit] bundle exceeds Runtime Cache safety budget after degraded lease renewal', { stateBytes });
+          setNoStore(res);
+          return res.status(503).json({ error: 'Listing audit state exceeds persistence budget' });
+        }
+        bundleChecksum = listingAuditPersistenceChecksum(bundle);
+      }
+    }
+    publishedBundleChecksum = bundleChecksum;
     let runtimeCacheCommit;
     try {
       await cache.set(BUNDLE_KEY, bundle, cacheOptions('RWA daily listing audit bundle'));
+      publicationLeaseStatus = 'published';
     } catch (cacheWriteError) {
       try {
         await recordRuntimeCacheCommit({
@@ -278,6 +424,12 @@ export async function runListingAudit(req, res, dependencies = {}) {
       })),
       durableWrite,
       runtimeCacheCommit,
+      publicationLease: {
+        mode:publicationLease?.mode || 'unknown',
+        status:publicationLease?.status || 'unknown',
+        enforced:publicationLease?.status !== 'renewal-degraded' &&
+          publicationLease?.enforced !== false && Boolean(publicationLease?.ownerToken),
+      },
     };
     if (snapshot.status === 'full' || snapshot.status === 'warming') {
       console.log('[listing-audit]', JSON.stringify(summary));
@@ -296,6 +448,21 @@ export async function runListingAudit(req, res, dependencies = {}) {
       persistence: { ...fallback.persistence, status: 'unavailable' },
     });
   } finally {
+    if (publicationLease?.acquired && publicationLease?.ownerToken) {
+      try {
+        const releasePublicationLease = dependencies.releasePublicationLease || releaseListingAuditPublicationLease;
+        await releasePublicationLease(publicationLease, {
+          status:publicationLeaseStatus,
+          checksum:publishedBundleChecksum || publicationLease.checksum,
+          env:persistenceEnv,
+        });
+      } catch (releaseError) {
+        // A lost release never permits a competing writer to enter early: the
+        // 180-second database expiry is longer than this function's 120-second
+        // maximum runtime. Surface it operationally and let the lease expire.
+        console.error('[listing-audit] publication lease release failed', releaseError);
+      }
+    }
     listingAuditRunning = false;
   }
 }

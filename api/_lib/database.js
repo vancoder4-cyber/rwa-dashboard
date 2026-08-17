@@ -2,30 +2,52 @@ import { neon } from '@neondatabase/serverless';
 
 export const DATABASE_URL_ENV_KEY = 'DATABASE_URL';
 export const DATABASE_URL_UNPOOLED_ENV_KEY = 'DATABASE_URL_UNPOOLED';
+export const PREVIEW_DATABASE_URL_ENV_KEY = 'PREVIEW_NEON_DATABASE_URL';
+export const PREVIEW_DATABASE_URL_UNPOOLED_ENV_KEY = 'PREVIEW_NEON_DATABASE_URL_UNPOOLED';
 export const DATABASE_TRANSACTION_TIMEOUT_MS = 25_000;
 
 let databaseSql = null;
 let migrationDatabaseSql = null;
 
-function databaseUrl(env = process.env) {
-  const value = String(env?.[DATABASE_URL_ENV_KEY] || '').trim();
+export function databaseEnvironmentKeys(env = process.env) {
+  if (String(env?.VERCEL_ENV || '').trim().toLowerCase() === 'preview') {
+    return {
+      pooled: PREVIEW_DATABASE_URL_ENV_KEY,
+      unpooled: PREVIEW_DATABASE_URL_UNPOOLED_ENV_KEY,
+    };
+  }
+  return {
+    pooled: DATABASE_URL_ENV_KEY,
+    unpooled: DATABASE_URL_UNPOOLED_ENV_KEY,
+  };
+}
+
+export function databaseConnectionString(env = process.env) {
+  const { pooled } = databaseEnvironmentKeys(env);
+  const value = String(env?.[pooled] || '').trim();
   return value || null;
 }
 
+export function migrationDatabaseConnectionString(env = process.env) {
+  const { unpooled } = databaseEnvironmentKeys(env);
+  return String(env?.[unpooled] || '').trim() || databaseConnectionString(env);
+}
+
 export function databaseConfigured(env = process.env) {
-  return databaseUrl(env) !== null;
+  return databaseConnectionString(env) !== null;
 }
 
 export function migrationDatabaseConfigured(env = process.env) {
-  return String(env?.[DATABASE_URL_UNPOOLED_ENV_KEY] || '').trim().length > 0 || databaseConfigured(env);
+  return migrationDatabaseConnectionString(env) !== null;
 }
 
 export function getDatabaseSql() {
   if (databaseSql) return databaseSql;
 
-  const connectionString = databaseUrl();
+  const connectionString = databaseConnectionString();
   if (!connectionString) {
-    throw new Error(`${DATABASE_URL_ENV_KEY} is required for database access`);
+    const { pooled } = databaseEnvironmentKeys();
+    throw new Error(`${pooled} is required for database access`);
   }
 
   databaseSql = neon(connectionString);
@@ -35,9 +57,10 @@ export function getDatabaseSql() {
 export function getMigrationDatabaseSql() {
   if (migrationDatabaseSql) return migrationDatabaseSql;
 
-  const connectionString = String(process.env[DATABASE_URL_UNPOOLED_ENV_KEY] || '').trim() || databaseUrl();
+  const connectionString = migrationDatabaseConnectionString();
   if (!connectionString) {
-    throw new Error(`${DATABASE_URL_UNPOOLED_ENV_KEY} or ${DATABASE_URL_ENV_KEY} is required for database migrations`);
+    const { pooled, unpooled } = databaseEnvironmentKeys();
+    throw new Error(`${unpooled} or ${pooled} is required for database migrations`);
   }
 
   migrationDatabaseSql = neon(connectionString);

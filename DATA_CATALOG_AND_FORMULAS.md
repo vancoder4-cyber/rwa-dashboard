@@ -24,6 +24,9 @@ Identity admission remains governed by [`RWA_DATA_RULES.md`](./RWA_DATA_RULES.md
 | Hour bucket | Idempotent UTC hour used by general Radar and OI proxy history |
 | Daily anchor | One idempotent UTC-date record containing a rolling-24h observation; not described as exchange UTC-day volume |
 | Completed session | Official completed Nasdaq/OCC trading session selected by the Traditional producer |
+| Event / valid time | Source market time and the interval/session to which a value applies; neither is the database write time |
+| Captured / system time | When the collector received a representation and when its immutable normalized revision was committed |
+| Revision | A changed value for the same exact source/instrument/grain/event-valid boundary and method version; it appends evidence instead of replacing the first value |
 
 Official venue product metadata is the identity authority. Names, ticker resemblance, prices, reference prices and cross-venue matches are discovery or validation signals only. The current identity implementation is concentrated in `api/_lib/security-identity.js`, `api/_lib/listing-sources.js` and the venue collectors; listing-audit normalization is at `api/_lib/listing-audit.js:30-69`.
 
@@ -341,7 +344,8 @@ History/persistence:
 - formula `rwa-radar-1.0`, payload schema `rwa-signal-snapshot/v1`;
 - namespace `rwa-signal-radar-v2`;
 - idempotent UTC-hour buckets, maximum 168 stored snapshots;
-- each historical component requires 24 total comparable samples including current; the persistence banner is Warming below 24 stored buckets, Partial at 24–167 and Full at 168;
+- Volume/OI robust-z needs **24 strictly historical comparable samples plus current**. Its first score is therefore the 25th distinct hourly point, about 24 elapsed hours after a clean start; point-in-time Funding, Price Move and Dispersion can score on the first complete snapshot. The aggregate history banner may already read Partial at 24 stored buckets, but that does not manufacture the missing 24th prior sample for Volume/OI;
+- Full/Normal history requires 168 total points (167 prior plus current), reached after about 167 elapsed hours. Before then a nominal Normal remains Warming/Partial according to the public contract;
 - response returns at most 48 points per asset;
 - Runtime Cache, regional best effort, 1.75 MB application guard.
 
@@ -431,16 +435,16 @@ Producer: `api/_lib/listing-audit.js`; public reader: `api/listing-changes.js`; 
 |---|---|
 | Sources | Exactly five Perpetual plus five Spot official catalogs |
 | Key | Exact `market:venue:venueSymbol` |
-| Initial successful run | Establish baseline; emit no New events |
-| Add/relist | Verified new exact membership becomes New or Relisted; review-required remains in a separate active queue |
-| Removal | Requires complete observations on at least two different UTC days; same-day retries do not confirm removal |
+| Initial successful run | Day 1 first Full catalog establishes baseline and emits no New events |
+| Add/relist | The second Full daily catalog can emit a verified New or Relisted event in `0–24h`; review-required remains in a separate active queue |
+| Removal | Exact lifecycle is `D0 present → D1 first complete missing → D2 complete missing confirmed`. This is three daily observations on the live path and normally `24–48h` from the first missing observation; same-day retries do not confirm removal |
 | Drift quarantine | Ratio greater than 10% and absolute change greater than 5 when removals/mixed drift are involved; extreme pure growth above 50% and 50 listings is also quarantined |
 | UI window | Rolling seven days by default, optional 30 days; pending reviews are not window-truncated |
 | Inclusion status | Only an exact current page listing with matching venue symbol and category-qualified identity is Included |
 
-Current persistence is Runtime Cache namespace `rwa-listing-audit-v2`: target 45 event days, maximum 2,000 events, inactive identity retention 180 days and 1.75 MB guard. Truncation is disclosed and cannot be Full or “no new assets.” Constants: `api/_lib/listing-audit.js:1-22`.
+Current persistence is Runtime Cache namespace `rwa-listing-audit-v2`: target 45 event days, maximum 2,000 events, inactive identity retention 180 days and 1.75 MB guard. The 7/30-day UI windows and 45-day retention are view/audit horizons, not product warm-up. Truncation is disclosed and cannot be Full or “no new assets.” Constants: `api/_lib/listing-audit.js:1-22`.
 
-This is the sole product family written to PostgreSQL in Phase 1. The shadow sink stores source runs, deterministic `normalized-catalog-v1` manifests/checksums, accepted identity/instrument versions with official-catalog evidence, exact accepted catalog memberships and `analytics.catalog_change_event` lifecycle rows. Stored normalized artifacts are linked to their evidence rows. Confirmed verified delisting closes the current instrument version and a verified relisting opens a new version; Partial/Unavailable or review-required absence never does. `identity.alias_version` is schema-only and is not populated by this writer. An unresolved `review-required` candidate is stored only in `identity.review_case`; it creates no accepted identity/instrument/membership/event. The artifact is derived from the verified/reviewed catalog observation and is not the upstream response body. Private object upload is separately controlled by `RAW_ARCHIVE_MODE`; `/api/listing-changes` continues to read Runtime Cache.
+This is the sole product family written to PostgreSQL in Phase 1. The shadow sink stores source runs, deterministic `normalized-catalog-v1` manifests/checksums, accepted identity/instrument versions with official-catalog evidence, exact accepted catalog memberships and `analytics.catalog_change_event` lifecycle rows. Stored normalized artifacts are linked to their evidence rows. Confirmed verified delisting closes the current instrument version and a verified relisting opens a new version; Partial/Unavailable or review-required absence never does. `identity.alias_version` is schema-only and is not populated by this writer. An unresolved `review-required` candidate is stored only in `identity.review_case`; it creates no accepted identity/instrument/membership/event. A trusted same-day retry atomically replaces that source's logical membership/evidence set; an untrusted retry preserves PostgreSQL last-good, and a later verification is classified as identity resolution rather than New. The artifact is derived from the verified/reviewed catalog observation and is not the upstream response body. Private object upload is separately controlled by `RAW_ARCHIVE_MODE`; `/api/listing-changes` continues to read Runtime Cache. When PostgreSQL is enabled, a fixed 180-second database lease plus a post-acquire Runtime Cache checksum re-read serializes durable write, cache publication and sink acknowledgement; busy/stale/conflicting writers return 409, and degraded/missing lease evidence cannot pass Daily Check readiness.
 
 ## 7. Asset Intelligence Drawer and browser alert panel
 
@@ -487,6 +491,36 @@ It is recomputed from fresh current Browser state, has no durable history and is
 
 The four Signal histories are separate and the authenticated writer returns HTTP 200 only when all required stores report `stored`. Existing write/503 semantics must remain unchanged through Phase 0/1. Source health and database reconciliation records may be added as shadow operational telemetry, but they cannot change page status before a separately approved read cutover.
 
+### 8.1 Product maturity and future revision collection by data family
+
+Current persistence does **not** provide a market-history revision ledger:
+
+| Current product | Retry/history behavior now | What cannot be claimed |
+|---|---|---|
+| Phase 1 Competitor Listings | One current official catalog observation per source/day, plus accepted membership and lifecycle evidence | Current catalogs have no historical market-fact overlap, and catalog success does not validate price/volume/OI/funding/reference/Traditional revisions |
+| General Radar and OI Runtime Cache | A retry in the same UTC hour replaces that cache bucket | The first value, intermediate revisions, revision count and delta are not retained |
+| Perp and Spot daily anomaly anchors | A same-UTC-day retry replaces the compact daily bucket | This is idempotent last-good history, not append-only source-restatement history |
+| Funding, Top 30, Reference and Traditional endpoints | CDN/current response behavior described above | CDN revalidation is not durable correction evidence |
+
+Phase 2 must use the bitemporal, append-only design in `DATABASE_ARCHITECTURE.md` before exact market-fact dual-write begins. For the same exact observation key and source/method/version, an identical normalized re-fetch is idempotent; a changed representation appends a revision. Read views expose typed `first_value`, `latest_value`, `revision_count` (changes after the first), latest/first delta and latest/previous delta. Event/valid time remains fixed while captured/system time identifies when each representation was seen.
+
+There is no universal overlap or elapsed-time gate. The exact current formula and future revision policy are:
+
+| Product/data family | Cadence | First usable | Formula Full / first complete conclusion | Current retention | Future revision overlap |
+|---|---|---|---|---|---|
+| Competitor Listings | Daily | Day 1 first Full baseline; no New events | Day 2 Full can emit New/Re-listed (`0–24h`). Confirmed delist is `D0 present → D1 first missing → D2 missing confirmed` (`24–48h` after first missing). | UI 7/30d; events 45d; inactive identities 180d | No historical query; append each current exact catalog/fingerprint |
+| General Radar | Hourly | Funding/Price/Dispersion on first complete snapshot; Volume/OI on the **25th point** (24 prior + current), about 24h | Full/Normal at 168 total points, about 167 elapsed hours | 168 hourly buckets; 48 points returned | No independent derived overlap; replay from versioned inputs |
+| Perp volume anomalies | Daily sealed anchors plus live current | Ratio on eighth distinct UTC date: seven prior + current, about 7d | Consecutive expansion Day 9; high-frequency first possible Day 28; complete 30-day frequency at the 38th distinct UTC-date point (`Day 0…37`), about 37d | 45d | Rolling ticker cannot backfill; append captures and version the sealing rule |
+| Spot volume/price anomalies | Daily sealed anchor plus current | Price Day 0; volume after one prior sealed day—next post-midnight hourly run in the best case, otherwise within 24h | One comparable prior anchor; Kraken price change is structurally Unavailable | 8d, retention only | Rolling ticker append-current; zero historical query overlap |
+| OI / liquidation proxy | Hourly | Current OI immediately; drawdown on bucket 24, about 23h; Top Trader immediately after an alert | Three completed 23:00 closes in about 49–72h | 96h, retention only | Historical-capable source: hot 6h, daily 48h, weekly 7d; other sources append current only |
+| Funding | Current plus requested settled history | Current immediately; history after at least two settled rows | `observed >= max(2, ceil(0.8 × expected))`. With no upstream backfill, default 24h is about 16h for 8h/4h cadence and 19h for 1h; official history can be Full on the first request. | Endpoint maximum 720h; Bitget response structure caps 100 rows | Latest two settlements or 24h; daily 7d; monthly 30d |
+| Top 30 | Completed daily/hourly candles | Old listing may be Full on first historical request; Day 0 `24h × 30` is Estimated; first daily bar <=24h or trade.xyz hourly bar <=1h is Partial | 30 daily bars Full for direct daily methods. trade.xyz 720 hourly bars is about 30d but remains Estimated; Top-80 gating can remain Estimated indefinitely. | CDN/browser only; 30d query | Daily hot 3–7d + T+2 cold + monthly 30d; hourly hot 6h + daily 48h |
+| Traditional | Completed sessions; endpoint fetches history directly | Old asset rank/rank delta on first request; new asset normally T+1 | Market relative Partial with >=1 prior, Full with 20 prior sessions (about 4 weeks). Options Partial with >=1 same-weekday report, Full with four (about 4 weeks); adjusted series can remain Partial. | CDN only | Daily 5 sessions; weekly 20 sessions + four OCC reports; monthly 60 sessions |
+| Reference | Current quote/reference | Fresh native + FX or allowed fallback immediately | No historical maturity; this is not an authoritative completed-session close | CDN/browser only | Current reference append-only with zero query overlap; future completed close uses 5 sessions + T+2 cold check |
+| Cross-venue / By Asset / Heatmap / Cash-and-Carry / browser alerts | Current loaders | Immediately after the required fresh loaders settle | Full is source/field completeness, never elapsed time | Browser only | No independent overlap; replay exact catalog/listing facts |
+
+“First usable”, “formula Full”, “retention” and “revision overlap” are separate dimensions. Retaining eight, 45, 96 or 168 buckets does not make a formula wait for the whole retention horizon; conversely a Full current formula does not prove that upstream corrections have been replayed. The initial normal/review/anomalous thresholds remain versioned operational data-quality rules in `DATABASE_ARCHITECTURE.md`; they do not alter current Radar, volume, price, OI or funding formulas. Phase 1 has no market-fact/rolling-history writer, so catalog readiness must continue to report `marketFactsChecked=false` and `rollingMarketHistoryVerified=false`.
+
 ## 9. Target layer mapping
 
 | Data layer | Current examples | Target storage | Phase 0/1 permission |
@@ -494,7 +528,7 @@ The four Signal histories are separate and the authenticated writer returns HTTP
 | External metadata/raw archive | Official catalog/market payloads and traditional source files | Object archive + `ingest.raw_artifact` manifest | Raw-body contract/schema in Phase 0; no upstream raw body in Phase 1; collector instrumentation later |
 | Normalized catalog artifact | Deterministic accepted/reviewed observation representation | `ingest.raw_artifact` manifest with kind `normalized`; optional private content-addressed object | Ten manifests/checksums per complete PostgreSQL-shadow cycle; object upload only when its independent server switch is enabled |
 | Normalized identity/catalog | Security identity, exact venue listing membership | `identity.*`, `ingest.source_run`, `ingest.catalog_membership` | Ten catalogs only in Phase 1 |
-| Normalized market facts | Listing price/volume/OI/funding/depth, traditional/reference observations | `fact.*` | Schema skeleton only |
+| Normalized market facts | Listing price/volume/OI/funding/depth, traditional/reference observations | Typed `fact.*` plus Phase 2 append-only revision relations/views | Schema skeleton only; no overlap writer in Phase 0/1 |
 | Derived analytics | Canonical hourly aggregate, daily anchors, ranks, cohorts | `analytics.*` | Schema skeleton only |
 | Signals | Radar scores, anomaly triggers, listing lifecycle events | Market signals later use `analytics.signal_result` / `alert.*`; catalog lifecycle uses `analytics.catalog_change_event` | Only verified catalog lifecycle events may shadow-write; market signals do not |
 | Publication | API snapshot payload/checksum/latest pointer | `publication.*` plus CDN | Schema skeleton only; current APIs unchanged |
@@ -509,7 +543,13 @@ Any change to a formula, threshold, grain or comparable cohort must include all 
 4. updated status, observed/expected and Warming behavior;
 5. migration/replay statement for prior history—never silently compare incompatible distributions;
 6. updates to this registry, `RWA_DATA_RULES.md` and `OPERATIONS.md` where relevant;
-7. Preview audit and explicit confirmation that no bare-ticker join or Crypto collision entered the result.
+7. a database-impact declaration naming the target fact/revision relation and observation key, or explicitly stating `no persisted representation yet`;
+8. writer/read state, formula/method/cohort version, retention/partition impact, and identical-versus-changed re-fetch behavior;
+9. any additive migration, backfill/replay and old/new compatibility plan; an existing database writer must be updated in the same release, while a not-yet-backed feature keeps its writer disabled;
+10. isolated Preview migration/audit evidence followed by Production migration checksum, database fingerprint and post-release reconciliation;
+11. explicit confirmation that no bare-ticker join or Crypto collision entered the result.
+
+An application formula and its persisted representation are one versioned contract. A release must not change the application calculation while silently continuing to write the old database meaning under the same method or formula version. Conversely, creating an empty table does not authorize a writer or imply historical coverage. Read cutover follows expand, dual-write/reconcile and explicit approval; rollback disables the new writer/reader and uses a forward migration rather than deleting accepted revisions.
 
 ## 11. Code-location index
 

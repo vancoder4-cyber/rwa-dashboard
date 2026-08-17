@@ -148,6 +148,57 @@ Migration `0002_phase1_facts_alerting.sql` creates the typed tables below as an 
 
 Do not put unrelated measurements in a generic `value` column. Units belong in typed columns and validated method metadata. Missing is `NULL`; a true observed zero is `0`.
 
+#### 4.3.1 Phase 2 bitemporal and append-only revision contract
+
+A versioned, **data-family-specific** collection policy is a Phase 2 prerequisite; there is no defensible universal elapsed-time or overlap gate. Phase 1 observes one current daily official-catalog snapshot per source and shadow-writes identity/membership/lifecycle evidence. It does not fetch overlapping price, volume, OI, funding, reference or Traditional history and must not be cited as proof that market-history restatements have already been detected. The catalog-readiness fields `marketFactsChecked` and `rollingMarketHistoryVerified` therefore remain `false` throughout Phase 1.
+
+Four times must remain distinct:
+
+| Time | Meaning | Example |
+|---|---|---|
+| Event time | When the source says the market event occurred | Candle close, funding settlement or completed exchange session |
+| Valid time | The interval for which the normalized value applies | One UTC hour, one rolling-24h anchor date or one official trading session |
+| Captured time | When the collector received the source representation | `ingest.raw_artifact.captured_at` / source-run observation time |
+| System time | When the normalized revision was committed | Append-only `recorded_at`; never substituted for event/valid time |
+
+The existing `0002` fact tables are empty skeletons and their current unique keys are not a revision ledger. Before any Phase 2 writer starts, an additive migration must introduce a typed revision relation for each enabled fact family (or an equivalently constrained shared revision header plus typed child tables) with at least:
+
+- `revision_id uuid` primary key and an `observation_key` derived from `source_id`, exact `instrument_version_id`, dataset/grain, event/valid boundary, unit/currency and immutable method version—never a bare ticker;
+- `revision_no`, `supersedes_revision_id`, `source_run_id`, optional input artifact, `captured_at`, `recorded_at`, source/method/formula version and normalized payload checksum;
+- family-specific typed measurement columns and status fields; unrelated prices, volumes, counts and rates must not be collapsed into one generic value column;
+- unique `(observation_key, revision_no)` and idempotency on `(observation_key, normalized_payload_sha256)` so an identical re-fetch records collection evidence but not a false revision;
+- no update/delete path for an accepted revision. A correction appends the next revision and preserves the first representation and every intermediate value.
+
+A read-only revision summary view must expose, for every typed measurement, `first_value`, `latest_value`, `revision_count = GREATEST(COUNT(*) - 1, 0)`, `latest_minus_first`, `latest_minus_previous`, and a percentage delta when the comparison denominator is non-zero. A method, unit, currency, identity or grain change starts a new observation series/version; it is not disguised as a restatement of the old series.
+
+Every enabled collector must register its own capture cadence, first-usable condition, formula-Full condition, hot/cold revision overlap, source finality lag and retention. The browser cannot choose any of these windows. Older repairs use an explicit authenticated backfill/replay job with a separate run reason and never expand a public request parameter.
+
+| Data family | Current/target cadence and first usable result | Formula-Full or mature result | Phase 2 revision collection policy |
+|---|---|---|---|
+| Official catalogs / competitor listings | Daily. Day 1 first Full run establishes a baseline only; Day 2 Full can emit New/Re-listed in `0–24h`. A verified delisting follows `D0 present → D1 first missing → D2 missing confirmed`, normally `24–48h` after the first complete missing observation. | The UI's 7/30-day views and 45-day event retention are presentation/audit horizons, not warm-up requirements. | Current-catalog endpoints have no historical overlap: append each exact catalog capture and compare fingerprints. |
+| General Radar | Hourly. Funding, price move and dispersion can score on the first complete snapshot. Volume/OI robust-z requires 24 strictly historical samples plus the current observation: the 25th distinct point, about 24 elapsed hours. | Full/Normal history requires 168 total points, reached after about 167 elapsed hours. | Replay derived scores from versioned inputs; do not invent a universal derived-source overlap. |
+| Perpetual volume anchors | One sealed UTC-date anchor plus live current. First ratio is seven sealed prior anchors plus current: the eighth distinct UTC date, about seven days. | Consecutive expansion first becomes possible on Day 9; high-frequency can first become true on Day 28; a complete 30-day frequency needs 38 distinct UTC-date points (`Day 0…Day 37`), about 37 days. Retention is 45 days. | Rolling ticker history is not queryable: append captures and version the fixed sealing rule; only a sealed anchor can be revised. |
+| Spot volume/price anomaly | Price-only signal is usable on Day 0. Volume comparison needs one prior sealed UTC-date anchor; crossing midnight can make it available at the next hourly run, otherwise within 24h. | One comparable prior anchor is formula-Full for volume; eight days is retention only. Kraken price change remains structurally Unavailable. | Rolling ticker is append-current only; a later capture is not a revision unless the exact source window/event key is unchanged. |
+| OI / liquidation proxy | Hourly. Current OI is immediate; the 24th comparable bucket enables drawdown after about 23h. Three completed `d-3/d-2/d-1` 23:00 UTC closes become available in the best case after about 49h and normally within 72h. Top Trader evidence is fetched immediately only after an alert. | 96h is retention only, not another formula gate. | Where official historical OI exists: hot 6h each run, cold 48h daily and 7d weekly; otherwise append point-in-time captures only. |
+| Funding history | Current funding is immediate. History needs at least two settled rows and `observed >= max(2, ceil(0.8 × expected))`; for a fresh local default 24h window this is about 16h at 8h/4h cadence and 19h at 1h cadence. Existing official history may make the first request Full. | The requested window determines completeness; Bitget's 100-row response limit remains explicit. | Re-read the latest two settlements or 24h, whichever is wider; cold-check 7d daily and 30d monthly. |
+| Top 30 completed candles | Historical endpoints can make an old listing Full on the first request. Day 0 may use `24h × 30` Estimated; one complete daily bar gives Partial within 24h, or one trade.xyz hourly bar within 1h. | Daily venues need 30 completed days for Full. trade.xyz needs 720 hourly bars (about 30d) but remains Estimated because its notional method is `base volume × close`; the Top-80 gate can keep an otherwise old listing Estimated. | Daily candles: hot 3–7 completed days, T+2 cold check, monthly 30d sweep. Hourly candles: hot 6h and daily 48h check. |
+| Traditional sessions/options | Historical endpoints can produce an old asset's rank and rank delta on the first request; a new asset normally appears T+1. One prior share session or one same-weekday option report gives a Partial relative baseline. | Market Full needs 20 prior completed sessions (about four weeks); options Full needs four same-weekday reports (about four weeks). Adjusted-root coverage can remain structurally Partial. | Daily five-session overlap; weekly 20 share sessions plus four OCC reports; monthly 60-session sweep. |
+| Reference price | A fresh native/FX-converted observation or allowed fallback is immediately usable. | Current comparison has no historical maturity and is not an authoritative completed-session close. | Current-only reference is append-current with zero query overlap. A future completed-close family uses five sessions plus a T+2 cold check. |
+| Cross-venue / By Asset / Heatmap / Cash-and-Carry / browser alerts | Usable as soon as the relevant current loaders finish fresh. | Full depends on source and field completeness, never elapsed time; there is no independent history maturity. | Zero independent query overlap; replay from exact catalog/listing facts and their versioned input set. |
+
+These elapsed times describe product formulas, not authorization to expand database writes or switch readers. A source can also remain Partial indefinitely for structural reasons such as an unsupported field, a source row cap or a ranked-universe gate.
+
+Initial Phase 2 drift policy must be versioned with the collector method and calibrated in shadow mode. Until source-specific evidence justifies tighter limits, use these conservative release gates:
+
+| Comparison within the same source/method/version | Normal restatement | Review-required | Anomalous drift / non-passing |
+|---|---|---|---|
+| Price, mark, close or reference price | Absolute relative delta `<= 0.5%` and no unit/status transition | `> 0.5%` and `<= 2%` | `> 2%` |
+| Volume, OI, notional, shares or contracts | Absolute relative delta `<= 1%` | `> 1%` and `<= 5%` | `> 5%` |
+| Funding/rate/ratio | Change no greater than declared source precision | Above source precision but `<= 1` basis point in the normalized rate | `> 1` basis point, sign contradiction or invalid ratio arithmetic |
+| Revised observation keys in one source overlap | `<= 1%` of comparable keys | `> 1%` and `<= 5%`, and no more than 50 keys | `> 5%` or more than 50 keys |
+
+For a zero first value, percentage drift is Unavailable and a versioned field-specific absolute threshold is mandatory. `NULL → value` is a normal late completion only when the first status was explicitly incomplete and the source-specific settlement SLA has not expired; otherwise it is review-required. `value → NULL`, identity/unit/method/grain changes under the same observation key, a revision older than the authorized overlap without a backfill run, or any attempt to overwrite/delete the first value is anomalous regardless of percentage. These are data-quality gates, not changes to the dashboard's signal thresholds or RWA admission rules.
+
 ### 4.4 `analytics` schema
 
 | Table | Primary key | Grain and purpose | Write phase |
@@ -288,11 +339,13 @@ Scope:
 - Persist unresolved `review-required` candidates only in `identity.review_case`; they do not create accepted identity/instrument/membership rows.
 - Close/reopen instrument SCD2 lifecycle validity only from confirmed verified delist/relist output; never infer it from an unavailable/partial catalog. A separately verified identity-fingerprint correction may also close the old version and create a new one without pretending that a delisting occurred.
 - Reuse the current server-normalized admission result. PostgreSQL is not a second identity engine and may not expand a catalog.
-- Maintain current Runtime Cache `rwa-listing-audit-v2` writes and `/api/listing-changes` reads without modification.
+- Maintain the current `rwa-listing-audit-v2` bundle/read contract and `/api/listing-changes` read path. The writer now adds a fixed publication-lease diagnostic and, whenever PostgreSQL is enabled, holds a 180-second database lease across durable mutation, a post-acquire cache checksum re-read, Runtime Cache publication and sink acknowledgement.
 - A database/archive failure is visible in shadow sink health, but during the observation window it must not turn a successful current Runtime Cache publication into a false production outage. Conversely, database success must not hide a failed current writer.
 - Do not write continuous market facts, signal histories, derived rankings or alert deliveries.
 
-Acceptance gates for at least 14 consecutive successful daily cycles:
+Phase 2 **design** has no elapsed-cycle gate: architecture, migration and replay design can proceed whenever it is reviewed. Scheduled catalog buckets are operational confidence evidence only. The recommended policy is to consider expanding shadow telemetry after three consecutive healthy scheduled buckets and to consider required-mode or read-cutover review after seven; neither threshold automatically enables a writer, changes a reader or represents product-data warm-up. A same-day retry remains the same bucket, and a missing/non-passing scheduled bucket resets consecutive confidence evidence.
+
+Every qualifying scheduled bucket must satisfy:
 
 1. all ten expected source runs exist once per UTC cycle with no duplicate active membership rows;
 2. exact source accepted/rejected counts and membership fingerprints reconcile with the Runtime Cache listing-audit inputs;
@@ -305,7 +358,7 @@ Acceptance gates for at least 14 consecutive successful daily cycles:
 
 ### Later phases — separate approvals
 
-- Phase 2: exact listing market-fact dual-write and replay comparison.
+- Phase 2: exact listing market-fact dual-write, per-data-family overlap/current-capture policies, append-only revision ledger and replay comparison. No writer starts until the bitemporal keys, typed revision tables/views, drift/finality policies and backfill isolation above are migrated and tested.
 - Phase 3: PostgreSQL-derived aggregates and signal evaluations in shadow mode.
 - Phase 4: versioned publication snapshots and read cutover behind a rollback flag.
 - Phase 5: durable alert incidents, subscriptions, outbox and delivery.
@@ -318,6 +371,9 @@ Each later phase requires its own capacity measurement, formula-by-formula conse
 - Normalized-artifact success, database success, Runtime Cache success and publication success are separate sink states. Do not compress them into one boolean. A later upstream-raw sink receives its own independent state.
 - Retry idempotency keys are deterministic from dataset family, source, UTC bucket and method version.
 - The current Phase 1 daily writer deliberately reuses `attempt_no=1` and idempotently upserts that attempt/source-run bundle for same-day retries. Preserving every physical retry as a distinct immutable attempt is a later operational enhancement and must precede any claim of full attempt history.
+- For a trusted same-UTC-day retry, the newest exact accepted membership and official-catalog evidence replace that source's prior logical set transactionally; the first confirmed lifecycle event remains append-only. Untrusted/Unavailable retries preserve PostgreSQL last-good identity and membership while the current Runtime Cache diagnostic fails reconciliation. A review-required candidate that later verifies is an identity resolution, not a synthetic listed event.
+- Runtime Cache has no compare-and-set transaction with PostgreSQL. Phase 1 therefore uses `ingest.catalog_publication_lease` as an owner/checksum fence. A writer re-reads the cache after acquiring it, rejects busy/stale/conflicting bases with HTTP 409, and holds the 180-second lease through cache and sink acknowledgement. Lease acquisition/renewal service degradation is explicit and non-passing; ownership loss blocks publication. With `PG_WRITE_MODE=off`, this cross-instance guarantee is intentionally absent.
+- Market-fact corrections in Phase 2 are append-only revisions ordered by captured/system time while preserving their original event/valid time. “Latest” is a view over immutable revisions, never an in-place replacement; first/latest values, revision count and deltas must remain reproducible from source/method/version evidence.
 - Full requires the expected source/listing denominator and all required fields. Partial allows a valid subset; Estimated describes method, not completeness; Unavailable means no defensible value. These meanings are unchanged from `RWA_DATA_RULES.md:141-169`.
 - A database outage before read cutover must degrade only the shadow pipeline. After a future read cutover, last-good publication may be served with explicit age/status only within its product-specific hard TTL.
 - The database is not allowed to turn `NULL` into zero, `Unavailable` into Neutral, Warming into no-anomaly, or a liquidation proxy into reported liquidation.
@@ -341,6 +397,26 @@ P0 risks: identity leakage, wrong units, lost audit evidence, a future partition
 - Retention changes require capacity evidence, archive restore proof and an operations update.
 - Read cutover requires a Preview comparison and an explicit production decision; it is not implied by successful shadow writing.
 - Every schema migration, feature-switch change, reconciliation override and manual identity resolution is append-only audited.
+
+### 10.1 Database-coupled change contract
+
+Every product or collector change must declare its database impact in the same pull request. This applies when the change affects an admitted identity, persisted field, unit/currency, observation grain or boundary, source/method/cohort version, formula input/output, retention, partition key, writer, reader or reconciliation rule. The declaration must identify:
+
+1. the affected source dataset and exact database relation, or explicitly state `no persisted representation yet`;
+2. whether the release needs an additive migration, writer change, replay/backfill, formula or method version bump, partition/capacity change, or read-path change;
+3. compatibility of old application/new schema and new application/old schema;
+4. the Preview migration, dual-write/reconciliation and Production verification evidence;
+5. a rollback that disables the new writer/reader or rolls back the application without editing an applied migration or deleting accepted evidence.
+
+`db/migrations/*.sql` is the only schema-change path. Applied migration files are immutable and checksum-locked; corrections use a new forward migration. Runtime startup and request handlers never apply schema changes automatically. Expand-contract changes are split across releases: add compatible schema first, migrate/replay and verify it second, switch readers only after explicit approval, and remove obsolete structures only in a later release after rollback compatibility expires.
+
+If a feature remains Runtime Cache/CDN/browser-only, its change record must say so and must not imply that an empty Phase 0/1 skeleton is receiving data. A database writer may start only after its typed relation, stable exact identity key, method/version contract, retention/partition policy, replay behavior and failure semantics have all passed the phase-specific Preview gate.
+
+### 10.2 Environment and release isolation
+
+Preview and Production use physically separate Neon resources/databases and separate migration ledgers. Preview credentials must fail closed to the Preview resource and must never fall back to Production; Production uses only Production credentials. A database fingerprint, environment label and migration checksum set are release evidence, but connection strings are never printed or copied into logs.
+
+The release unit is one reviewed source commit plus its migration set, documentation, tests and feature-switch plan. Preview applies and verifies that commit against the Preview database first. Production then rebuilds the same reviewed source with Production environment variables, applies only the already-reviewed migrations to the Production database, and repeats reconciliation. Preview catalog history is not copied into Production, and a successful Preview bucket never counts as Production readiness evidence.
 
 ## 11. Authoritative design references
 
