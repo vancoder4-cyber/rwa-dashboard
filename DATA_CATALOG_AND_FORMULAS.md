@@ -406,6 +406,8 @@ Both monetary boundaries are strict: exactly $1 million volume is ineligible and
 
 All cross-listing OI USD, completed closes, peak, drawdown and trigger fields are Estimated even when source coverage is Full. OI USD can change because mark price changes; the result is a deleveraging/large-liquidation **proxy**, not exchange-reported liquidation and not evidence of which side liquidated.
 
+Every recovery state includes additive `marketContext.version=rwa-oi-market-context/v1`. `price24h` does not publish a single cross-venue average. It selects the current exact perpetual listing with the largest USD OI among listings whose 24-hour change is available (`selectionMethod=largest-current-oi-listing-with-available-change`), and publishes that listing's venue/symbol/change/method/status plus its share of current aggregate USD OI. `rangePct`, `observedListings/expectedListings`, `coverageStatus` and snapshot `observedAt` preserve disagreement and missing coverage. Gate, Binance and Bitget use direct official 24-hour change fields as Full; trade.xyz mark-versus-previous-day and OKX last-versus-open24h are computed and therefore Estimated. Non-finite values and changes below -100% are Unavailable.
+
 Binance Top Trader Position Ratio is optional supporting evidence for every exact Binance contract on an already triggered asset. It never triggers the alert:
 
 - strict ratio `>1.05` = Bullish;
@@ -414,11 +416,13 @@ Binance Top Trader Position Ratio is optional supporting evidence for every exac
 - no exact row, failure, stale/contradictory percentages = Unavailable, never Neutral;
 - official observation may be at most three hours old.
 
+Triggered drawdown states publish this evidence under `marketContext.topTraderPositioning` with provider `binance`, scope `top-20%-by-margin-balance-position-ratio`, period `1h`, the exact contract positions and an explicit aggregate reason. A triggered asset without a Binance perpetual publishes `NO_BINANCE_PERP_LISTING`; non-triggered states remain explicitly Unavailable. Enrichment targets are derived from the uncapped triggered `states` contract, never the ranked Top-100 `rows` response.
+
 Namespace `rwa-signal-oi-liquidation-hourly-v1` retains 96 idempotent UTC-hour buckets and requires 24 comparable hours plus three completed days. It stores only volume-eligible, OI-complete exact cohorts. Runtime Cache only; empty later-phase skeletons are `fact.top_trader_observation_hourly`, `analytics.asset_daily_oi_close`, `analytics.asset_hourly` and versioned alerts.
 
 The public OI child has two deliberately different collections. `rows` keeps the existing ranked alert contract and remains capped at 100. `states` is an additive recovery contract and is never rank-capped: it contains exactly one compact state for every current volume-eligible asset, including assets whose current exact OI cohort is incomplete. `stateCoverage={expectedEligibleAssets,returnedStates,complete}` must reconcile exactly to `coverage.volumeEligibleAssets`; an incomplete state collection is a failing contract, not evidence that an alert recovered.
 
-Each state publishes `assetKey`, `symbol`, `category`, `cohortFingerprint`, UTC-hour `observedBucket`, `evaluationStatus`, `sameCohort`, current/peak/drawdown OI USD, `drawdown24hPct`, and explicit `reasonCodes`. The percentage is `drawdown24hUsd / peak24hOpenInterestUsd × 100`, rounded to six decimals; it is null when the comparable peak is zero. `evaluationStatus` is one of:
+Each state publishes `assetKey`, `symbol`, `category`, `cohortFingerprint`, UTC-hour `observedBucket`, `evaluationStatus`, `sameCohort`, current/peak/drawdown OI USD, `drawdown24hPct`, explicit `reasonCodes`, and the versioned `marketContext` above. The percentage is `drawdown24hUsd / peak24hOpenInterestUsd × 100`, rounded to six decimals; it is null when the comparable peak is zero. `evaluationStatus` is one of:
 
 - `triggered`: the comparable drawdown is strictly above the producer's existing `$2,000,000` liquidation-proxy boundary;
 - `clear`: a gap-free same-cohort 24-hour evaluation is available and does not cross that boundary;

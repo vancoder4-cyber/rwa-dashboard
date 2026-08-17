@@ -623,8 +623,10 @@ test('Signal uses fixed same-origin Binance positioning snapshots and never call
     'iad1 Signal code must not reconnect directly to Binance fapi');
   assert.doesNotMatch(source, /binance-public\?endpoint=(?:oi|top-trader)-snapshot[^'"\n]*symbols?=/,
     'the Signal caller cannot select proxy symbols through query parameters');
-  assert.match(source, /const triggeredBinanceSymbols = preliminaryOiLiquidation\.rows[\s\S]*?if \(triggeredBinanceSymbols\.length\) \{[\s\S]*?fetchBinanceTopTraderPositionRows/,
-    'Top Trader proxy work must run only after preliminary server-side alerts identify exact Binance contracts');
+  assert.match(source, /const triggeredBinanceSymbols = oiTriggeredBinanceSymbols\(preliminaryOiLiquidation\)[\s\S]*?if \(triggeredBinanceSymbols\.length\) \{[\s\S]*?fetchBinanceTopTraderPositionRows/,
+    'Top Trader proxy work must run only after uncapped preliminary server-side states identify exact Binance contracts');
+  assert.match(source, /export function oiTriggeredBinanceSymbols\(section\) \{[\s\S]*?section\?\.states[\s\S]*?evaluationStatus === 'triggered'/,
+    'the enrichment target must not inherit the ranked alert-row Top-100 cap');
   assert.match(source, /catch \(error\) \{[\s\S]*?Alerts remain valid without optional Binance positioning[\s\S]*?console\.error/,
     'an unavailable Top Trader proxy must preserve alerts with positioning Unavailable');
 });

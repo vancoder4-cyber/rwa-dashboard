@@ -28,6 +28,7 @@ import gateBulkHandler from '../api/gate-bulk.js';
 import signalSnapshotHandler, {
   isSignalSnapshotComparable,
   mergeSignalHistory,
+  oiTriggeredBinanceSymbols,
   signalHistoryWriteSucceeded,
 } from '../api/signal-snapshot.js';
 import signalSnapshotCronHandler from '../api/signal-snapshot-cron.js';
@@ -502,6 +503,20 @@ test('Gate OI uses total_size and never treats long-only position_size as total 
     assert.equal(gateRows[symbol].openInterestMethod, null);
     assert.equal(gateRows[symbol].openInterestStatus, 'unavailable');
   }
+});
+
+test('Binance positioning enrichment targets come from uncapped triggered states, not ranked rows', () => {
+  const states = Array.from({ length:101 }, (_, index) => ({
+    evaluationStatus:'triggered',
+    marketContext:{
+      topTraderPositioning:{
+        positions:[{ venueSymbol:`X${String(index).padStart(3, '0')}USDT` }],
+      },
+    },
+  }));
+  const targets = oiTriggeredBinanceSymbols({ states, rows:[] });
+  assert.equal(targets.length, 101);
+  assert.ok(targets.includes('X100USDT'));
 });
 
 test('Signal health allows the bounded Spot/OI cold-start budget without retrying the snapshot', async () => {

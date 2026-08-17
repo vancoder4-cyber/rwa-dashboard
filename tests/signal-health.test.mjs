@@ -218,7 +218,8 @@ function validHighRow() {
   };
 }
 
-function validOiListing(venue, venueSymbol) {
+function validOiListing(venue, venueSymbol, change24hPct) {
+  const estimatedChange = ['tradexyz', 'okx'].includes(venue);
   return {
     venue,
     venueSymbol,
@@ -229,6 +230,9 @@ function validOiListing(venue, venueSymbol) {
     openInterestUsd:1_200_000,
     openInterestMethod:'official-open-interest-usd',
     openInterestStatus:'full',
+    change24hPct,
+    change24hMethod:estimatedChange ? 'computed-change' : 'official-change',
+    change24hStatus:estimatedChange ? 'estimated' : 'full',
   };
 }
 
@@ -242,11 +246,11 @@ function validOiLiquidationSection(status, generatedAt) {
     warnings:[],
   }]));
   const listings = [
-    validOiListing('gate', 'AAPLX_USDT'),
-    validOiListing('binance', 'AAPLUSDT'),
-    validOiListing('bitget', 'AAPLUSDT'),
-    validOiListing('tradexyz', 'XYZ:AAPL'),
-    validOiListing('okx', 'AAPL-USDT-SWAP'),
+    validOiListing('gate', 'AAPLX_USDT', 1),
+    validOiListing('binance', 'AAPLUSDT', 2),
+    validOiListing('bitget', 'AAPLUSDT', 3),
+    validOiListing('tradexyz', 'XYZ:AAPL', 4),
+    validOiListing('okx', 'AAPL-USDT-SWAP', 5),
   ];
   const row = {
     rank:1,
@@ -308,6 +312,41 @@ function validOiLiquidationSection(status, generatedAt) {
     drawdown24hUsd:full ? 2_000_001 : null,
     drawdown24hPct:full ? Number(((2_000_001 / 8_000_001) * 100).toFixed(6)) : null,
     reasonCodes:full ? [] : ['OI_HISTORY_HOUR_MISSING'],
+    marketContext:{
+      version:'rwa-oi-market-context/v1',
+      price24h:{
+        coverageStatus:'full',
+        selectionMethod:'largest-current-oi-listing-with-available-change',
+        observedListings:5,
+        expectedListings:5,
+        observedAt:generatedAt,
+        representative:{
+          venue:'binance',
+          venueSymbol:'AAPLUSDT',
+          change24hPct:2,
+          method:'official-change',
+          status:'full',
+          currentOpenInterestSharePct:20,
+        },
+        rangePct:{ min:1, max:5 },
+        reasonCode:null,
+      },
+      topTraderPositioning:full ? {
+        status:'full',
+        provider:'binance',
+        scope:'top-20%-by-margin-balance-position-ratio',
+        period:'1h',
+        positions:row.topTraderPositions,
+        reasonCode:null,
+      } : {
+        status:'unavailable',
+        provider:'binance',
+        scope:'top-20%-by-margin-balance-position-ratio',
+        period:'1h',
+        positions:[],
+        reasonCode:'OI_DRAWDOWN_NOT_TRIGGERED',
+      },
+    },
   };
   return {
     formulaVersion:'rwa-oi-liquidation-proxy-1.0',
@@ -331,6 +370,7 @@ function validOiLiquidationSection(status, generatedAt) {
       threeDayTrend:'three sealed completed UTC-day closes',
       liquidationProxy:'24h comparable OI peak minus current OI',
       logic:'OI rising OR liquidation proxy',
+      price24h:'largest-current-OI exact listing plus cross-listing range',
       topTraderPositions:'optional exact Binance contract enrichment',
       limitations:'proxy is not trade-by-trade liquidation data',
     },
@@ -673,6 +713,10 @@ test('OI health enforces strict $1m eligibility and strict $2m drawdown semantic
     drawdown24hUsd:2_000_000,
     drawdown24hPct:25,
   });
+  Object.assign(
+    drawdownBoundary.oiLiquidationAnomalies.states[0].marketContext.topTraderPositioning,
+    { status:'unavailable', positions:[], reasonCode:'OI_DRAWDOWN_NOT_TRIGGERED' },
+  );
   const strictBoundaryValid = validateSignalRadarSnapshot(drawdownBoundary, NOW);
   assert.equal(strictBoundaryValid.oiLiquidation.contractValid, true);
   assert.equal(strictBoundaryValid.status, 'pass');
@@ -728,6 +772,21 @@ test('OI health requires complete, coherent, untruncated recovery states', () =>
   const falseRecoveryResult = validateSignalRadarSnapshot(falseRecovery, NOW);
   assert.equal(falseRecoveryResult.oiLiquidation.invalidStates, 1);
   assert.equal(falseRecoveryResult.status, 'fail');
+});
+
+test('OI health recomputes state price context from exact alert listings', () => {
+  const wrongRepresentative = basePayload('full');
+  wrongRepresentative.oiLiquidationAnomalies.states[0]
+    .marketContext.price24h.representative.venue = 'gate';
+  assert.equal(validateSignalRadarSnapshot(wrongRepresentative, NOW).oiLiquidation.statesValid, false);
+
+  const wrongRange = basePayload('full');
+  wrongRange.oiLiquidationAnomalies.states[0].marketContext.price24h.rangePct.max = 4;
+  assert.equal(validateSignalRadarSnapshot(wrongRange, NOW).oiLiquidation.statesValid, false);
+
+  const impossibleListing = basePayload('full');
+  impossibleListing.oiLiquidationAnomalies.rows[0].listings[0].change24hPct = -100.00001;
+  assert.equal(validateSignalRadarSnapshot(impossibleListing, NOW).oiLiquidation.invalidRows, 1);
 });
 
 test('OI health requires exact five-source coverage and coherent history maturity', () => {
@@ -787,6 +846,11 @@ test('OI health treats Binance Top Trader as exact optional evidence, never defa
   row.overallTraderBias = 'unavailable';
   row.fieldStatus.topTraderPositions = 'unavailable';
   unavailable.oiLiquidationAnomalies.counts.topTraderAvailable = 0;
+  Object.assign(unavailable.oiLiquidationAnomalies.states[0].marketContext.topTraderPositioning, {
+    status:'unavailable',
+    positions:row.topTraderPositions,
+    reasonCode:'TOP_TRADER_PARTIAL_OR_UNAVAILABLE',
+  });
   const unavailableResult = validateSignalRadarSnapshot(unavailable, NOW);
   assert.equal(unavailableResult.oiLiquidation.contractValid, true);
   assert.equal(unavailableResult.status, 'pass');
@@ -804,6 +868,10 @@ test('OI health treats Binance Top Trader as exact optional evidence, never defa
   assert.equal(validateSignalRadarSnapshot(boundaryContradiction, NOW).oiLiquidation.invalidRows, 1);
   boundaryContradiction.oiLiquidationAnomalies.rows[0].topTraderPositions[0].bias = 'bullish';
   boundaryContradiction.oiLiquidationAnomalies.rows[0].overallTraderBias = 'bullish';
+  boundaryContradiction.oiLiquidationAnomalies.states[0]
+    .marketContext.topTraderPositioning.positions[0].longShortRatio = 1.0501;
+  boundaryContradiction.oiLiquidationAnomalies.states[0]
+    .marketContext.topTraderPositioning.positions[0].bias = 'bullish';
   assert.equal(validateSignalRadarSnapshot(boundaryContradiction, NOW).oiLiquidation.contractValid, true);
 
   const stale = basePayload('full');
