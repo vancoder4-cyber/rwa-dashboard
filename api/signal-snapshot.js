@@ -26,6 +26,7 @@ import {
 import {
   categoryFromOfficialSignalType,
   normalizeSignalIdentity,
+  normalizedOfficialType,
 } from './_lib/security-identity.js';
 import {
   SPOT_ANOMALY_HISTORY_DAYS,
@@ -65,6 +66,7 @@ const BITGET_BASE = 'https://api.bitget.com';
 const BINANCE_CORE_TIMEOUT_MS = 12_000;
 const BINANCE_POSITIONING_TIMEOUT_MS = 20_000;
 const SIGNAL_SOURCE_NAMES = Object.freeze(['gate', 'binance', 'bitget', 'tradexyz', 'okx']);
+export const OI_CATALOG_QUARANTINE_WARNING = 'UNSUPPORTED_OFFICIAL_ROWS_QUARANTINED';
 export const TRADE_XYZ_UNTYPED_RWA_CATEGORIES = Object.freeze({
   URANIUM:'commodity',
   TTF:'commodity',
@@ -126,7 +128,39 @@ function reportedChange24hFields(value, method, { estimated = false } = {}) {
 
 function hasCatalogIdentityWarning(warnings) {
   return (Array.isArray(warnings) ? warnings : []).some(warning =>
-    /(?:IDENTITY|INSTRUMENTS_UNAVAILABLE|CATALOG|UPSTREAM_COVERAGE)/i.test(String(warning)));
+    /(?:SOURCE|IDENTITY|INSTRUMENTS_UNAVAILABLE|CATALOG|UPSTREAM_COVERAGE)/i.test(String(warning)));
+}
+
+export function oiHistorySourceComparable(source) {
+  const status = String(source?.status || '').trim().toLowerCase();
+  const listingCount = Number(source?.listingCount);
+  const catalogListingCount = Number(source?.catalogListingCount);
+  const quarantinedListings = Number(source?.quarantinedListings);
+  const volumeFieldCount = Number(source?.volumeFieldCount);
+  const openInterestFieldCount = Number(source?.openInterestFieldCount);
+  const warnings = Array.isArray(source?.warnings) &&
+    source.warnings.every(warning => typeof warning === 'string') ? source.warnings : null;
+  const quarantineWarningCount = warnings?.filter(warning =>
+    warning.toUpperCase() === OI_CATALOG_QUARANTINE_WARNING).length ?? -1;
+  const quarantineCoherent = Number.isInteger(quarantinedListings) && quarantinedListings >= 0 &&
+    ((quarantinedListings === 1 && status === 'partial' && quarantineWarningCount === 1) ||
+      (quarantinedListings === 0 && quarantineWarningCount === 0));
+  return ['full','partial'].includes(status) && warnings !== null &&
+    Number.isInteger(listingCount) && listingCount > 0 &&
+    Number.isInteger(catalogListingCount) && catalogListingCount >= listingCount &&
+    quarantineCoherent && catalogListingCount === listingCount + quarantinedListings &&
+    Number.isInteger(volumeFieldCount) && volumeFieldCount > 0 && volumeFieldCount <= listingCount &&
+    Number.isInteger(openInterestFieldCount) && openInterestFieldCount > 0 &&
+    openInterestFieldCount <= listingCount &&
+    !hasCatalogIdentityWarning(warnings);
+}
+
+export function isOiHistorySnapshotComparable(sources, conflicts = []) {
+  if (!sources || typeof sources !== 'object' || Array.isArray(sources) ||
+      !Array.isArray(conflicts) || conflicts.length > 0) return false;
+  const keys = Object.keys(sources);
+  return keys.length === SIGNAL_SOURCE_NAMES.length &&
+    SIGNAL_SOURCE_NAMES.every(name => oiHistorySourceComparable(sources[name]));
 }
 
 function positiveDeltaHours(later, earlier) {
@@ -443,6 +477,62 @@ async function collectGate(baseUrl) {
   };
 }
 
+export function classifyBinanceSignalCatalog(exchangeInfo) {
+  if (!Array.isArray(exchangeInfo?.symbols)) {
+    throw new TypeError('Invalid Binance exchangeInfo catalog');
+  }
+  const accepted = [];
+  const quarantined = [];
+  const warnings = [];
+  const seenVenueSymbols = new Set();
+  let catalogListingCount = 0;
+  for (const contract of exchangeInfo.symbols) {
+    const venueSymbol = String(contract?.symbol || '').trim().toUpperCase();
+    const venueBase = String(contract?.baseAsset || '').trim().toUpperCase();
+    const contractType = String(contract?.contractType || '').trim().toUpperCase();
+    const isMetalException = contractType === 'PERPETUAL' && ['PAXG', 'XAUT'].includes(venueBase);
+    if (String(contract?.status || '').trim().toUpperCase() !== 'TRADING' ||
+        (contractType !== 'TRADIFI_PERPETUAL' && !isMetalException)) continue;
+    catalogListingCount += 1;
+    if (!/^[A-Z0-9]{2,40}$/.test(venueSymbol) || !/^[A-Z0-9-]{1,40}$/.test(venueBase)) {
+      quarantined.push({ venueSymbol:venueSymbol || null, reasonCode:'INVALID_OFFICIAL_IDENTITY' });
+      warnings.push('INVALID_OFFICIAL_IDENTITY');
+      continue;
+    }
+    if (seenVenueSymbols.has(venueSymbol)) {
+      quarantined.push({ venueSymbol:venueSymbol || null, reasonCode:'DUPLICATE_CATALOG_IDENTITY' });
+      warnings.push('DUPLICATE_CATALOG_IDENTITY');
+      continue;
+    }
+    if (venueSymbol) seenVenueSymbols.add(venueSymbol);
+    const officialType = normalizedOfficialType(contract?.underlyingType);
+    const category = isMetalException ? 'commodity' : categoryFromOfficialSignalType(contract?.underlyingType);
+    const identity = normalizeSignalIdentity(venueBase, category, {
+      allowBinanceBstock:contractType === 'TRADIFI_PERPETUAL',
+    });
+    if (!category && officialType && !['CRYPTO','COIN','TOKEN','MEME','MEMECOIN'].includes(officialType)) {
+      quarantined.push({
+        venueSymbol:venueSymbol || null,
+        reasonCode:'UNSUPPORTED_OFFICIAL_TYPE',
+      });
+      continue;
+    }
+    if (!identity) {
+      quarantined.push({ venueSymbol:venueSymbol || null, reasonCode:'INVALID_OFFICIAL_IDENTITY' });
+      warnings.push('INVALID_OFFICIAL_IDENTITY');
+      continue;
+    }
+    accepted.push({ contract, venueSymbol, venueBase, identity });
+  }
+  if (quarantined.length) warnings.push(OI_CATALOG_QUARANTINE_WARNING);
+  return {
+    accepted,
+    catalogListingCount,
+    quarantinedListings:quarantined.length,
+    warnings:[...new Set(warnings)],
+  };
+}
+
 async function collectBinance(baseUrl) {
   const requests = await Promise.allSettled([
     fetchSameOrigin(baseUrl, '/api/binance-public?endpoint=exchangeInfo', BINANCE_CORE_TIMEOUT_MS),
@@ -465,18 +555,8 @@ async function collectBinance(baseUrl) {
   const tickerMap = new Map(tickers.map(row => [row.symbol, row]));
   const intervalMap = new Map(fundingInfo.map(row => [row.symbol, finiteOrNull(row.fundingIntervalHours)]));
   const listings = [];
-  let admittedCatalogListings = 0;
-  for (const contract of info.symbols) {
-    const venueSymbol = String(contract.symbol || '').toUpperCase();
-    const venueBase = String(contract.baseAsset || '').toUpperCase();
-    const isMetalException = contract.contractType === 'PERPETUAL' && ['PAXG', 'XAUT'].includes(venueBase);
-    if (contract.status !== 'TRADING' || (contract.contractType !== 'TRADIFI_PERPETUAL' && !isMetalException)) continue;
-    admittedCatalogListings += 1;
-    const category = isMetalException ? 'commodity' : categoryFromOfficialSignalType(contract.underlyingType);
-    const identity = normalizeSignalIdentity(venueBase, category, {
-      allowBinanceBstock: contract.contractType === 'TRADIFI_PERPETUAL',
-    });
-    if (!identity || !venueSymbol || !venueBase) continue;
+  const catalog = classifyBinanceSignalCatalog(info);
+  for (const { contract, venueSymbol, identity } of catalog.accepted) {
     const premium = premiumMap.get(venueSymbol) || {};
     const ticker = tickerMap.get(venueSymbol) || {};
     const quoteVolume = finiteOrNull(ticker.quoteVolume);
@@ -514,17 +594,20 @@ async function collectBinance(baseUrl) {
   }
   const openInterestFieldCount = listings.filter(listing => Number.isFinite(listing.openInterestUsd)).length;
   const missing = optionalAvailable.filter(available => !available).length;
-  const identityCoverageComplete = listings.length === admittedCatalogListings;
-  const warnings = [];
+  const warnings = [...catalog.warnings];
   if (missing) warnings.push('OPTIONAL_MARKET_FIELDS_UNAVAILABLE');
-  if (!identityCoverageComplete) warnings.push('IDENTITY_COVERAGE_INCOMPLETE');
+  if (listings.length + catalog.quarantinedListings !== catalog.catalogListingCount) {
+    warnings.push('IDENTITY_COVERAGE_INCOMPLETE');
+  }
   return {
     listings,
-    completeness: missing || !identityCoverageComplete ? 'partial' : 'full',
+    completeness:warnings.length ? 'partial' : 'full',
     warnings:openInterestFieldCount === listings.length
       ? warnings
       : [...warnings, 'OPEN_INTEREST_INCOMPLETE'],
     openInterestFieldCount,
+    catalogListingCount:catalog.catalogListingCount,
+    quarantinedListings:catalog.quarantinedListings,
   };
 }
 
@@ -864,7 +947,22 @@ export function isSignalSnapshotComparable(sources, expectedSourceNames = null) 
   const names = Array.isArray(expectedSourceNames) && expectedSourceNames.length
     ? expectedSourceNames
     : Object.keys(sources || {});
-  return names.length > 0 && names.every(name => sources?.[name]?.status === 'full');
+  return names.length > 0 && names.every(name => {
+    const source = sources?.[name];
+    if (source?.status === 'full') return true;
+    const warnings = Array.isArray(source?.warnings) &&
+      source.warnings.every(warning => typeof warning === 'string') ? source.warnings : null;
+    const quarantineWarnings = warnings?.filter(warning =>
+      warning.toUpperCase() === OI_CATALOG_QUARANTINE_WARNING) || [];
+    const allowedWarnings = new Set([OI_CATALOG_QUARANTINE_WARNING, 'OPEN_INTEREST_INCOMPLETE']);
+    return source?.status === 'partial' && Number.isInteger(source?.listingCount) &&
+      source.listingCount > 0 && Number.isInteger(source?.catalogListingCount) &&
+      source.quarantinedListings === 1 &&
+      source.catalogListingCount === source.listingCount + source.quarantinedListings &&
+      warnings?.length >= 1 && quarantineWarnings.length === 1 &&
+      new Set(warnings.map(warning => warning.toUpperCase())).size === warnings.length &&
+      warnings.every(warning => allowedWarnings.has(warning.toUpperCase()));
+  });
 }
 
 export function signalHistoryWriteSucceeded(runtimeHistory, dailyVolumeHistory, spotAnomalyHistory, oiLiquidationHistory) {
@@ -921,7 +1019,15 @@ export async function serveSignalSnapshot(req, res, {
       const volumeFieldCount = sourceListings.filter(row => Number.isFinite(row?.volume24hUsd)).length;
       const openInterestFieldCount = sourceListings.filter(row => Number.isFinite(row?.openInterestUsd)).length;
       const catalogIdentityComplete = !hasCatalogIdentityWarning(result.value.warnings);
-      const oiStatus = sourceListings.length && catalogIdentityComplete &&
+      const quarantinedListings = Number.isInteger(result.value.quarantinedListings)
+        ? result.value.quarantinedListings
+        : 0;
+      const catalogListingCount = Number.isInteger(result.value.catalogListingCount)
+        ? result.value.catalogListingCount
+        : sourceListings.length + quarantinedListings;
+      const catalogFullyAccepted = catalogIdentityComplete && quarantinedListings === 0 &&
+        catalogListingCount === sourceListings.length;
+      const oiStatus = sourceListings.length && catalogFullyAccepted &&
         volumeFieldCount === sourceListings.length &&
         openInterestFieldCount === sourceListings.length
         ? 'full'
@@ -929,11 +1035,15 @@ export async function serveSignalSnapshot(req, res, {
       sources[name] = {
         status: result.value.completeness,
         listingCount: result.value.listings.length,
+        catalogListingCount,
+        quarantinedListings,
         warnings: result.value.warnings,
       };
       oiSources[name] = {
         status:oiStatus,
         listingCount:sourceListings.length,
+        catalogListingCount,
+        quarantinedListings,
         volumeFieldCount,
         openInterestFieldCount,
         warnings:[...new Set([
@@ -943,9 +1053,13 @@ export async function serveSignalSnapshot(req, res, {
         ])],
       };
     } else {
-      sources[name] = { status: 'unavailable', listingCount: 0, warnings: ['SOURCE_UNAVAILABLE'] };
+      sources[name] = {
+        status:'unavailable', listingCount:0, catalogListingCount:0, quarantinedListings:0,
+        warnings:['SOURCE_UNAVAILABLE'],
+      };
       oiSources[name] = {
-        status:'unavailable', listingCount:0, volumeFieldCount:0, openInterestFieldCount:0,
+        status:'unavailable', listingCount:0, catalogListingCount:0, quarantinedListings:0,
+        volumeFieldCount:0, openInterestFieldCount:0,
         warnings:['SOURCE_UNAVAILABLE'],
       };
       console.error(`[signal-snapshot] ${name} unavailable`, result.reason);
@@ -967,15 +1081,21 @@ export async function serveSignalSnapshot(req, res, {
   const capturedAtMs = Date.now();
   const spotSnapshot = await spotSnapshotPromise;
   const compact = compactSignalSnapshot(normalized.assets, capturedAtMs, SIGNAL_ASSET_LIMIT);
-  const snapshotComparable = isSignalSnapshotComparable(sources, SIGNAL_SOURCE_NAMES);
-  const analysisComparable = snapshotComparable && normalized.conflicts.length === 0;
-  const oiCatalogComplete = result =>
-    result.status === 'fulfilled' &&
-    result.value.listings.length > 0 &&
-    !hasCatalogIdentityWarning(result.value.warnings);
-  const oiCatalogComparable = settled.every(oiCatalogComplete) && normalized.conflicts.length === 0;
-  const oiHistoryComparable = oiCatalogComparable && Object.values(oiSources).every(source =>
-    source.listingCount > 0 && source.volumeFieldCount > 0 && source.openInterestFieldCount > 0);
+  const snapshotCoverageFull = SIGNAL_SOURCE_NAMES.every(name => sources[name]?.status === 'full');
+  const analysisComparable = isSignalSnapshotComparable(sources, SIGNAL_SOURCE_NAMES) &&
+    normalized.conflicts.length === 0;
+  const oiCatalogTrusted = (result, index) => {
+    const source = oiSources[SIGNAL_SOURCE_NAMES[index]];
+    return result.status === 'fulfilled' &&
+      result.value.listings.length > 0 && source?.listingCount > 0 &&
+      source.catalogListingCount === source.listingCount + source.quarantinedListings &&
+      !hasCatalogIdentityWarning(result.value.warnings);
+  };
+  const oiCatalogComplete = (result, index) => oiCatalogTrusted(result, index) &&
+    oiSources[SIGNAL_SOURCE_NAMES[index]].quarantinedListings === 0;
+  const oiCatalogComparable = settled.every(oiCatalogTrusted) && normalized.conflicts.length === 0;
+  const oiHistoryComparable = oiCatalogComparable &&
+    isOiHistorySnapshotComparable(oiSources, normalized.conflicts);
   const spotHistoryComparable = spotSnapshot.listings.length > 0 &&
     isSpotAnomalyHistoryComparable(spotSnapshot.sources, spotSnapshot.conflicts);
   const [runtimeHistory, dailyVolumeHistory, spotAnomalyHistory, oiLiquidationHistory] = await Promise.all([
@@ -1006,10 +1126,11 @@ export async function serveSignalSnapshot(req, res, {
     capturedAtMs,
     {
       snapshotComparable:analysisComparable,
+      sourceCoverageFull:snapshotCoverageFull,
       historyAvailable:dailyVolumeHistory.status !== 'unavailable',
     },
   );
-  const perpCoverageStatus = analysisComparable
+  const perpCoverageStatus = snapshotCoverageFull && normalized.conflicts.length === 0
     ? 'full'
     : availableSources > 0 ? 'partial' : 'unavailable';
   const spotWriterSucceeded = spotAnomalyHistory.writeStatus === 'stored';
@@ -1041,6 +1162,8 @@ export async function serveSignalSnapshot(req, res, {
     expectedSources:SIGNAL_SOURCE_NAMES.length,
     availableSources:Object.values(oiSources).filter(source => source.status !== 'unavailable').length,
     fullCatalogSources:settled.filter(oiCatalogComplete).length,
+    quarantinedListings:Object.values(oiSources)
+      .reduce((sum, source) => sum + source.quarantinedListings, 0),
   };
   const oiPersistence = {
     mode:'vercel-runtime-cache',
@@ -1057,7 +1180,7 @@ export async function serveSignalSnapshot(req, res, {
     sources:oiSources,
     coverage:oiCoverage,
     conflicts:normalized.conflicts,
-    snapshotComparable:oiCatalogComparable,
+    snapshotComparable:oiHistoryComparable,
     historyAvailable:oiLiquidationHistory.status !== 'unavailable',
     persistence:oiPersistence,
   };
@@ -1108,7 +1231,7 @@ export async function serveSignalSnapshot(req, res, {
   }
   const volumeValues = normalized.assets.map(asset => asset.volume24hUsd).filter(Number.isFinite);
   const oiValues = normalized.assets.map(asset => asset.openInterestUsd).filter(Number.isFinite);
-  const responseStatus = analysisComparable
+  const responseStatus = snapshotCoverageFull && normalized.conflicts.length === 0
     ? 'full'
     : 'partial';
   const historyStatus = runtimeHistory.status === 'unavailable'

@@ -16,7 +16,7 @@ function basePayload(volumeStatus = 'warming') {
     generatedAt,
     status:'full',
     sources:Object.fromEntries(SOURCE_KEYS.map(key => [key, {
-      status:'full', listingCount:1, warnings:[],
+      status:'full', listingCount:1, catalogListingCount:1, quarantinedListings:0, warnings:[],
     }])),
     coverage:{
       expectedSources:5,
@@ -243,6 +243,8 @@ function validOiLiquidationSection(status, generatedAt) {
   const sources = Object.fromEntries(SOURCE_KEYS.map(key => [key, {
     status:'full',
     listingCount:1,
+    catalogListingCount:1,
+    quarantinedListings:0,
     volumeFieldCount:1,
     openInterestFieldCount:1,
     warnings:[],
@@ -398,6 +400,7 @@ function validOiLiquidationSection(status, generatedAt) {
       availableSources:5,
       fullCatalogSources:5,
       acceptedListings:5,
+      quarantinedListings:0,
       verifiedAssets:1,
       identityConflicts:0,
       volumeEligibleAssets:1,
@@ -871,6 +874,61 @@ test('OI health requires exact five-source coverage and coherent history maturit
   const wrongCadence = basePayload('full');
   wrongCadence.oiLiquidationAnomalies.history.cadence = 'hourly';
   assert.equal(validateSignalRadarSnapshot(wrongCadence, NOW).oiLiquidation.historyValid, false);
+});
+
+test('OI health exposes a closed unknown-type quarantine as Partial/Warn and recomputes its counts', () => {
+  const payload = basePayload('full');
+  Object.assign(payload.sources.binance, {
+    status:'partial', catalogListingCount:2, quarantinedListings:1,
+    warnings:['UNSUPPORTED_OFFICIAL_ROWS_QUARANTINED'],
+  });
+  payload.status = 'partial';
+  Object.assign(payload.oiLiquidationAnomalies.sources.binance, {
+    status:'partial', catalogListingCount:2, quarantinedListings:1,
+    warnings:['UNSUPPORTED_OFFICIAL_ROWS_QUARANTINED'],
+  });
+  Object.assign(payload.oiLiquidationAnomalies.coverage, {
+    fullCatalogSources:4,
+    quarantinedListings:1,
+  });
+  payload.oiLiquidationAnomalies.status = 'partial';
+  payload.oiLiquidationAnomalies.history.status = 'partial';
+  payload.perpVolumeAnomalies.status = 'partial';
+
+  const result = validateSignalRadarSnapshot(payload, NOW);
+  assert.equal(result.contractValid, true);
+  assert.equal(result.status, 'warn');
+  assert.equal(result.oiLiquidation.contractValid, true);
+  assert.equal(result.oiLiquidation.quarantinedListings, 1);
+  assert.equal(result.reason, '1 unsupported official OI listing row(s) quarantined');
+
+  const wrongCoverage = structuredClone(payload);
+  wrongCoverage.oiLiquidationAnomalies.coverage.quarantinedListings = 0;
+  assert.equal(validateSignalRadarSnapshot(wrongCoverage, NOW).oiLiquidation.coverageValid, false);
+
+  const missingWarning = structuredClone(payload);
+  missingWarning.oiLiquidationAnomalies.sources.binance.warnings = [];
+  assert.equal(validateSignalRadarSnapshot(missingWarning, NOW).oiLiquidation.sourcesValid, false);
+
+  const falseFull = structuredClone(payload);
+  falseFull.oiLiquidationAnomalies.sources.binance.status = 'full';
+  assert.equal(validateSignalRadarSnapshot(falseFull, NOW).oiLiquidation.sourcesValid, false);
+
+  const schemaDrift = structuredClone(payload);
+  Object.assign(schemaDrift.sources.binance, {
+    catalogListingCount:3,
+    quarantinedListings:2,
+  });
+  Object.assign(schemaDrift.oiLiquidationAnomalies.sources.binance, {
+    catalogListingCount:3,
+    quarantinedListings:2,
+  });
+  schemaDrift.oiLiquidationAnomalies.coverage.quarantinedListings = 2;
+  const schemaDriftResult = validateSignalRadarSnapshot(schemaDrift, NOW);
+  assert.equal(schemaDriftResult.sourcesValid, false,
+    'two unknown official rows exceed the narrow quarantine exception');
+  assert.equal(schemaDriftResult.oiLiquidation.sourcesValid, false);
+  assert.equal(schemaDriftResult.status, 'fail');
 });
 
 test('OI health treats Binance Top Trader as exact optional evidence, never default Neutral', () => {
