@@ -11,8 +11,12 @@ import binancePublicHandler, {
   selectBinanceKlineSymbols,
 } from '../api/binance-public.js';
 import {
+  OI_CATALOG_QUARANTINE_WARNING,
+  classifyBinanceSignalCatalog,
+  isOiHistorySnapshotComparable,
   normalizeBinanceOiProxySnapshot,
   normalizeBinanceTopTraderProxySnapshot,
+  oiHistorySourceComparable,
 } from '../api/signal-snapshot.js';
 import {
   normalizeBinanceSpotTickerCoverage,
@@ -111,6 +115,113 @@ function positioningProxyPayload(snapshotType, {
     rows:observedRows,
   };
 }
+
+function oiSource(overrides = {}) {
+  return {
+    status:'full',
+    listingCount:1,
+    catalogListingCount:1,
+    quarantinedListings:0,
+    volumeFieldCount:1,
+    openInterestFieldCount:1,
+    warnings:[],
+    ...overrides,
+  };
+}
+
+test('Binance CN_EQUITY is accepted while one valid unknown official type is quarantined', () => {
+  const catalog = classifyBinanceSignalCatalog({ symbols:[
+    binanceContract('CXMTUSDT', 'CXMT', { underlyingType:'CN_EQUITY' }),
+    binanceContract('AAPLUSDT', 'AAPL', { underlyingType:'EQUITY' }),
+    binanceContract('FUTUREUSDT', 'FUTURE', { underlyingType:'NEW_SECURITY_CLASS' }),
+  ] });
+
+  assert.equal(catalog.catalogListingCount, 3);
+  assert.equal(catalog.quarantinedListings, 1);
+  assert.deepEqual(catalog.warnings, [OI_CATALOG_QUARANTINE_WARNING]);
+  assert.deepEqual(catalog.accepted.map(row => [row.venueSymbol, row.identity]), [
+    ['CXMTUSDT', { symbol:'CXMT', category:'equity' }],
+    ['AAPLUSDT', { symbol:'AAPL', category:'equity' }],
+  ]);
+
+  const binance = oiSource({
+    status:'partial',
+    listingCount:2,
+    catalogListingCount:3,
+    quarantinedListings:1,
+    volumeFieldCount:2,
+    openInterestFieldCount:2,
+    warnings:[OI_CATALOG_QUARANTINE_WARNING],
+  });
+  const sources = Object.fromEntries(
+    ['gate','binance','bitget','tradexyz','okx'].map(name => [name, name === 'binance' ? binance : oiSource()]),
+  );
+  assert.equal(oiHistorySourceComparable(binance), true);
+  assert.equal(isOiHistorySnapshotComparable(sources), true,
+    'one fail-closed unknown type must not stop verified same-cohort OI history');
+
+  const partialOi = {
+    ...binance,
+    openInterestFieldCount:1,
+    warnings:[OI_CATALOG_QUARANTINE_WARNING, 'OPEN_INTEREST_INCOMPLETE'],
+  };
+  assert.equal(oiHistorySourceComparable(partialOi), true,
+    'missing OI on one accepted listing is isolated to that asset, not the whole source');
+
+  const productionLikeBinance = oiSource({
+    status:'partial',
+    listingCount:170,
+    catalogListingCount:170,
+    volumeFieldCount:170,
+    openInterestFieldCount:166,
+    warnings:['OPEN_INTEREST_INCOMPLETE'],
+  });
+  assert.equal(oiHistorySourceComparable(productionLikeBinance), true,
+    '166/170 accepted Binance OI rows must keep complete asset cohorts writable after CN_EQUITY is mapped');
+  assert.equal(isOiHistorySnapshotComparable({ ...sources, binance:productionLikeBinance }), true);
+});
+
+test('OI history quarantine gate rejects identity defects, duplicates, multiple unknown rows, conflicts, and source-wide data loss', () => {
+  const invalidIdentity = classifyBinanceSignalCatalog({ symbols:[
+    binanceContract('AAPLUSDT', 'AAPL', { underlyingType:'EQUITY' }),
+    binanceContract('', '', { underlyingType:'NEW_SECURITY_CLASS' }),
+  ] });
+  assert.ok(invalidIdentity.warnings.includes('INVALID_OFFICIAL_IDENTITY'));
+
+  const duplicate = classifyBinanceSignalCatalog({ symbols:[
+    binanceContract('AAPLUSDT', 'AAPL', { underlyingType:'EQUITY' }),
+    binanceContract('AAPLUSDT', 'AAPL', { underlyingType:'NEW_SECURITY_CLASS' }),
+  ] });
+  assert.ok(duplicate.warnings.includes('DUPLICATE_CATALOG_IDENTITY'));
+
+  const multipleUnknown = classifyBinanceSignalCatalog({ symbols:[
+    binanceContract('AAPLUSDT', 'AAPL', { underlyingType:'EQUITY' }),
+    binanceContract('FIRSTUSDT', 'FIRST', { underlyingType:'NEW_SECURITY_CLASS' }),
+    binanceContract('SECONDUSDT', 'SECOND', { underlyingType:'ANOTHER_SECURITY_CLASS' }),
+  ] });
+  assert.equal(multipleUnknown.quarantinedListings, 2);
+
+  const base = oiSource();
+  const identityBlocked = oiSource({
+    status:'partial', catalogListingCount:2, quarantinedListings:1,
+    warnings:[OI_CATALOG_QUARANTINE_WARNING, 'INVALID_OFFICIAL_IDENTITY'],
+  });
+  assert.equal(oiHistorySourceComparable(identityBlocked), false);
+  assert.equal(oiHistorySourceComparable(oiSource({
+    status:'partial', catalogListingCount:3, quarantinedListings:2,
+    warnings:[OI_CATALOG_QUARANTINE_WARNING],
+  })), false, 'multiple simultaneous unknown rows are treated as schema drift, not a safe exception');
+  assert.equal(oiHistorySourceComparable(oiSource({
+    status:'unavailable', volumeFieldCount:0, openInterestFieldCount:0,
+    warnings:['SOURCE_UNAVAILABLE'],
+  })), false);
+
+  const sources = Object.fromEntries(
+    ['gate','binance','bitget','tradexyz','okx'].map(name => [name, base]),
+  );
+  assert.equal(isOiHistorySnapshotComparable(sources, [{ symbol:'AAPL' }]), false,
+    'cross-category identity conflicts remain a global blocker');
+});
 
 function binanceSpotInstrument(symbol, baseAsset, quoteAsset = 'USDT', overrides = {}) {
   return {

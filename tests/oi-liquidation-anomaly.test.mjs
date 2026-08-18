@@ -335,6 +335,37 @@ test('a gap in the 24h OI series suppresses only the drawdown leg of the OR sign
   assert.deepEqual(result.states[0].reasonCodes, ['OI_HISTORY_HOUR_MISSING']);
 });
 
+test('one accepted listing with missing OI is isolated while a verified same-cohort asset keeps its hourly row', () => {
+  const healthySpec = {
+    symbol:'AAPL', currentOi:4_000_000,
+    oiAt:oiSchedule([5_000_000, 6_000_000, 7_000_000]),
+  };
+  const history = hourlyHistory([healthySpec]);
+  const currentAssets = [
+    asset('AAPL', { openInterestUsd:healthySpec.currentOi }),
+    asset('MISSING', { openInterestUsd:null }),
+  ];
+  const currentSnapshot = compactOiHourlySnapshot(currentAssets, NOW);
+
+  assert.equal(currentSnapshot.h.length, 1);
+  assert.equal(currentSnapshot.h[0].e, 2);
+  assert.equal(currentSnapshot.h[0].m, 1);
+  assert.equal(currentSnapshot.h[0].a.length, 1);
+
+  const merged = mergeOiHourlyHistory(history, currentSnapshot, NOW);
+  const result = buildOiLiquidationAnomalies(currentAssets, merged, NOW, {
+    snapshotComparable:true,
+    historyAvailable:true,
+  });
+  const stateBySymbol = new Map(result.states.map(state => [state.symbol, state]));
+  assert.equal(stateBySymbol.get('AAPL').evaluationStatus, 'triggered');
+  assert.equal(stateBySymbol.get('AAPL').sameCohort, true);
+  assert.equal(stateBySymbol.get('MISSING').evaluationStatus, 'unavailable');
+  assert.ok(stateBySymbol.get('MISSING').reasonCodes.includes('LISTING_OPEN_INTEREST_UNAVAILABLE'));
+  assert.equal(result.counts.completeEligibleAssets, 1);
+  assert.equal(result.counts.missingEligibleAssets, 1);
+});
+
 test('a Partial venue can expose verified alerts but can never make the section Full', () => {
   const spec = {
     symbol:'AAPL', currentOi:7_000_000,

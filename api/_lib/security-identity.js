@@ -28,6 +28,7 @@ const OFFICIAL_TYPE_CATEGORIES = Object.freeze({
   STOCKS: 'equity',
   EQUITY: 'equity',
   EQUITIES: 'equity',
+  CNEQUITY: 'equity',
   HKEQUITY: 'equity',
   KREQUITY: 'equity',
   SHARE: 'equity',

@@ -26,6 +26,7 @@ import {
 } from '../api/_lib/security-identity.js';
 import gateBulkHandler from '../api/gate-bulk.js';
 import signalSnapshotHandler, {
+  OI_CATALOG_QUARANTINE_WARNING,
   isSignalSnapshotComparable,
   mergeSignalHistory,
   oiTriggeredBinanceSymbols,
@@ -201,6 +202,7 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
   assert.deepEqual(BROAD_STOCK_INDEX_UNDERLYINGS, ['SP500', 'NDX100', 'KR200']);
   assert.equal(categoryFromOfficialSignalType('ETF'), 'etf');
   assert.equal(categoryFromOfficialSignalType('stock_etf'), 'etf');
+  assert.equal(categoryFromOfficialSignalType('CN_EQUITY'), 'equity');
   assert.equal(categoryFromOfficialSignalType('crypto_etf_token'), null);
   assert.equal(categoryFromOfficialSignalType('ETFCOIN'), null);
 
@@ -373,6 +375,23 @@ test('incomplete five-source coverage cannot become comparable anomaly history',
   assert.equal(isSignalSnapshotComparable(fullSources), true);
   assert.equal(isSignalSnapshotComparable({ ...fullSources, gate:{ status:'partial' } }), false);
   assert.equal(isSignalSnapshotComparable({ ...fullSources, gate:{ status:'unavailable' } }), false);
+  const quarantinedBinance = {
+    status:'partial', listingCount:169, catalogListingCount:170, quarantinedListings:1,
+    warnings:[OI_CATALOG_QUARANTINE_WARNING, 'OPEN_INTEREST_INCOMPLETE'],
+  };
+  assert.equal(isSignalSnapshotComparable({ ...fullSources, binance:quarantinedBinance }), true,
+    'one closed unknown-type quarantine plus asset-level OI gaps may keep verified histories writable');
+  assert.equal(isSignalSnapshotComparable({
+    ...fullSources,
+    binance:{ ...quarantinedBinance, warnings:[
+      OI_CATALOG_QUARANTINE_WARNING,
+      'OPTIONAL_MARKET_FIELDS_UNAVAILABLE',
+    ] },
+  }), false, 'an optional upstream failure cannot hide behind the quarantine exception');
+  assert.equal(isSignalSnapshotComparable({
+    ...fullSources,
+    binance:{ ...quarantinedBinance, catalogListingCount:171, quarantinedListings:2 },
+  }), false, 'multiple unknown rows are treated as possible schema drift');
   const asset = aggregateSignalListings([{
     symbol:'AAPL', category:'equity', venue:'gate', venueSymbol:'AAPL_USDT',
     priceUsd:100, volume24hUsd:1, openInterestUsd:1, fundingRate:0, fundingIntervalHours:8,

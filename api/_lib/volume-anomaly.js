@@ -317,6 +317,7 @@ export function buildPerpVolumeAnomalies(assets, dailyHistory, capturedAtMs, opt
   const captured = finiteOrNull(capturedAtMs);
   const currentDay = utcVolumeDay(captured);
   const snapshotComparable = options.snapshotComparable !== false;
+  const sourceCoverageFull = options.sourceCoverageFull !== false;
   let historyAvailable = options.historyAvailable !== false;
   if (captured === null || currentDay === null) throw new TypeError('Invalid volume anomaly timestamp');
 
@@ -395,7 +396,7 @@ export function buildPerpVolumeAnomalies(assets, dailyHistory, capturedAtMs, opt
   };
   const status = !historyAvailable
     ? 'unavailable'
-    : !snapshotComparable
+    : !snapshotComparable || !sourceCoverageFull
       ? 'partial'
       : priorStoredDays < PERP_VOLUME_BASELINE_DAYS
         ? 'warming'

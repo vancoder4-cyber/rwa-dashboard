@@ -87,7 +87,8 @@ const OI_LIQUIDATION_WRITE_STATUSES = new Set([
   'skipped-incomplete-sources',
   'unavailable',
 ]);
-const OI_CATALOG_BLOCKER = /(?:IDENTITY|INSTRUMENTS_UNAVAILABLE|CATALOG|UPSTREAM_COVERAGE)/;
+const OI_CATALOG_BLOCKER = /(?:SOURCE_UNAVAILABLE|IDENTITY|INSTRUMENTS_UNAVAILABLE|CATALOG|UPSTREAM_COVERAGE)/;
+const OI_CATALOG_QUARANTINE_WARNING = 'UNSUPPORTED_OFFICIAL_ROWS_QUARANTINED';
 const SIGNAL_SNAPSHOT_MAX_AGE_MS = 2 * 60 * 60 * 1_000;
 const SIGNAL_SNAPSHOT_FUTURE_TOLERANCE_MS = 5 * 60 * 1_000;
 const SIGNAL_VOLUME_DAILY_NAMESPACE = 'rwa-signal-volume-daily-v1';
@@ -302,9 +303,20 @@ function exactSignalSources(payload) {
   }
   return SIGNAL_SOURCE_KEYS.every(sourceKey => {
     const source = payload.sources[sourceKey];
+    const warnings = Array.isArray(source?.warnings) ? source.warnings : null;
+    const quarantineWarningCount = warnings?.filter(warning =>
+      String(warning).toUpperCase() === OI_CATALOG_QUARANTINE_WARNING).length ?? -1;
+    const quarantineCoherent = Number.isInteger(source?.quarantinedListings) &&
+      source.quarantinedListings >= 0 &&
+      ((source.quarantinedListings === 1 && source?.status === 'partial' && quarantineWarningCount === 1) ||
+        (source.quarantinedListings === 0 && quarantineWarningCount === 0));
     return sourceKeys.includes(sourceKey) && source && typeof source === 'object' &&
       SIGNAL_SOURCE_STATUSES.has(String(source.status || '').toLowerCase()) &&
-      Number.isInteger(source.listingCount) && source.listingCount >= 0;
+      Number.isInteger(source.listingCount) && source.listingCount >= 0 &&
+      Number.isInteger(source.catalogListingCount) && source.catalogListingCount >= source.listingCount &&
+      source.catalogListingCount === source.listingCount + source.quarantinedListings &&
+      quarantineCoherent && warnings !== null && warnings.every(warning => typeof warning === 'string') &&
+      (source.status !== 'full' || source.quarantinedListings === 0);
   });
 }
 
@@ -643,24 +655,33 @@ function exactOiLiquidationSources(section) {
     const source = sources[key];
     const status = String(source?.status || '').toLowerCase();
     const listingCount = source?.listingCount;
+    const catalogListingCount = source?.catalogListingCount;
+    const quarantinedListings = source?.quarantinedListings;
     const oiCount = source?.openInterestFieldCount;
     const volumeCount = source?.volumeFieldCount;
     const warnings = Array.isArray(source?.warnings) ? source.warnings : null;
     const hasCatalogBlocker = warnings?.some(warning =>
       OI_CATALOG_BLOCKER.test(String(warning).toUpperCase())) === true;
     const fullFields = listingCount > 0 && oiCount === listingCount && volumeCount === listingCount;
+    const quarantineWarningCount = warnings?.filter(warning =>
+      String(warning).toUpperCase() === OI_CATALOG_QUARANTINE_WARNING).length ?? -1;
+    const quarantineCoherent = Number.isInteger(quarantinedListings) && quarantinedListings >= 0 &&
+      ((quarantinedListings === 1 && quarantineWarningCount === 1) ||
+        (quarantinedListings === 0 && quarantineWarningCount === 0));
     // Complete observed fields do not make a source Full when its official
     // catalog or identity coverage is blocked. Those are separate claims.
     const partialFields = listingCount > 0 && (oiCount > 0 || volumeCount > 0) &&
-      (!fullFields || hasCatalogBlocker);
+      (!fullFields || hasCatalogBlocker || quarantinedListings > 0);
     const unavailableFields = oiCount === 0 && volumeCount === 0;
     const baseValid = source && typeof source === 'object' && !Array.isArray(source) &&
       OI_LIQUIDATION_SOURCE_STATUSES.has(status) &&
       Number.isInteger(listingCount) && listingCount >= 0 &&
+      Number.isInteger(catalogListingCount) && catalogListingCount >= listingCount &&
+      catalogListingCount === listingCount + quarantinedListings && quarantineCoherent &&
       Number.isInteger(oiCount) && oiCount >= 0 && oiCount <= listingCount &&
       Number.isInteger(volumeCount) && volumeCount >= 0 && volumeCount <= listingCount &&
       warnings !== null && warnings.every(warning => typeof warning === 'string') &&
-      ((status === 'full' && fullFields && !hasCatalogBlocker) ||
+      ((status === 'full' && fullFields && !hasCatalogBlocker && quarantinedListings === 0) ||
         (status === 'partial' && partialFields) ||
         (status === 'unavailable' && unavailableFields));
     return baseValid;
@@ -1142,11 +1163,14 @@ function validateOiLiquidationAnomalies(section, generatedAtMs) {
   const observedAvailableSources = sourceValues.filter(source => source.status !== 'unavailable').length;
   const observedFullCatalogSources = sourceValues.filter(source =>
     source.listingCount > 0 &&
+    source.quarantinedListings === 0 &&
     !source.warnings.some(warning => OI_CATALOG_BLOCKER.test(String(warning).toUpperCase()))).length;
   const observedAcceptedListings = sourceValues.reduce((sum, source) => sum + source.listingCount, 0);
+  const observedQuarantinedListings = sourceValues
+    .reduce((sum, source) => sum + source.quarantinedListings, 0);
   const coverage = section?.coverage;
   const coverageKeys = [
-    'acceptedListings', 'verifiedAssets', 'identityConflicts', 'volumeEligibleAssets',
+    'acceptedListings', 'quarantinedListings', 'verifiedAssets', 'identityConflicts', 'volumeEligibleAssets',
     'completeEligibleAssets', 'missingEligibleAssets', 'filterUnknownAssets',
   ];
   const coverageNumbersValid = coverageKeys.every(key => Number.isInteger(coverage?.[key]) && coverage[key] >= 0);
@@ -1154,6 +1178,7 @@ function validateOiLiquidationAnomalies(section, generatedAtMs) {
     coverage?.availableSources === observedAvailableSources &&
     coverage?.fullCatalogSources === observedFullCatalogSources &&
     coverage.acceptedListings === observedAcceptedListings &&
+    coverage.quarantinedListings === observedQuarantinedListings &&
     coverage.volumeEligibleAssets <= coverage.verifiedAssets &&
     coverage.completeEligibleAssets <= coverage.volumeEligibleAssets &&
     coverage.missingEligibleAssets === coverage.volumeEligibleAssets - coverage.completeEligibleAssets &&
@@ -1307,6 +1332,7 @@ function validateOiLiquidationAnomalies(section, generatedAtMs) {
   const statusCoherent = statusValid &&
     (status !== 'full' || (allSourcesFull && !identityConflict && historyStatus === 'full' &&
       coverage.fullCatalogSources === SIGNAL_SOURCE_KEYS.length &&
+      coverage.quarantinedListings === 0 &&
       counts?.filterUnknown === 0 && coverage.completeEligibleAssets === coverage.volumeEligibleAssets &&
       coverage.missingEligibleAssets === 0 && history?.ready === true)) &&
     (status !== 'warming' || historyStatus === 'warming') &&
@@ -1337,6 +1363,9 @@ function validateOiLiquidationAnomalies(section, generatedAtMs) {
     statusCoherent,
     identityConflicts:Number.isInteger(coverage?.identityConflicts) ? coverage.identityConflicts : null,
     identityConflict,
+    quarantinedListings:Number.isInteger(coverage?.quarantinedListings)
+      ? coverage.quarantinedListings
+      : null,
     rows:rows?.length ?? null,
     invalidRows:invalidRows.length,
     states:states?.length ?? null,
@@ -1545,6 +1574,9 @@ export function validateSignalRadarSnapshot(payload, now = Date.now()) {
   else if (spotVolumePrice.status === 'unavailable') reason = 'Spot volume/price anomaly coverage is unavailable';
   else if (oiLiquidation.status === 'unavailable') reason = 'OI and liquidation proxy coverage is unavailable';
   else if (!assetsValid) reason = 'Signal Radar contains a non-RWA or Crypto category';
+  else if (oiLiquidation.quarantinedListings > 0) {
+    reason = `${oiLiquidation.quarantinedListings} unsupported official OI listing row(s) quarantined`;
+  }
   else if (warmingOrDegraded) reason = 'Signal Radar or perpetual volume history is Warming, Partial, or Unavailable';
 
   return {
