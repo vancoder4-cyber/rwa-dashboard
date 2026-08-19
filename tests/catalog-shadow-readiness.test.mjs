@@ -376,6 +376,7 @@ test('v2 exposes independent 1/2/3 capability minima and 3/7/7 operational polic
   });
   assert.equal(report.schemaVersion, CATALOG_SHADOW_READINESS_SCHEMA_VERSION);
   assert.equal(report.status, 'pass');
+  assert.equal(report.remediation, null);
   assert.equal(report.readyForPhase2, true);
   assert.equal(report.readyForPhase2DesignReview, true);
   assert.equal(report.capabilities.phase2DesignReview.elapsedGate, false);
@@ -424,6 +425,39 @@ test('Day 1 healthy baseline permits design review without claiming lifecycle or
   assert.equal(report.operations.policies.readCutover.ready, false);
   assert.ok(Object.values(report.operations.policies).every(policy => policy.policyOnly === true));
   assert.match(report.decision, /design review/i);
+});
+
+test('an empty catalog shadow reports a bounded baseline repair instead of authorizing a cutover', () => {
+  const report = buildCatalogShadowReadiness({
+    now: `${LATEST_DAY}T01:45:00.000Z`,
+    laterPhaseRow: {
+      market_fact_rows_present: false,
+      derived_analytics_rows_present: false,
+      publication_rows_present: false,
+      alert_rows_present: false,
+    },
+  });
+  assert.equal(report.status, 'warming');
+  assert.equal(report.readyForPhase2, false);
+  assert.equal(report.remediation.code, 'ESTABLISH_CATALOG_BASELINE');
+  assert.ok(report.remediation.actions.some(action => /authenticated listing-audit Cron/.test(action)));
+});
+
+test('a Runtime Cache warming baseline does not require lifecycle events from older PostgreSQL membership', () => {
+  const fixture = readinessFixture(2);
+  for (const source of latestRows(fixture, 'sourceRows')) source.merged_status = 'warming';
+  for (const source of fixture.runtimeSnapshot.sources) source.status = 'warming';
+  for (const change of latestRows(fixture, 'changeRows')) {
+    change.added_count = 1;
+    change.event_eligible_added_count = 0;
+    change.identity_resolved_added_count = 0;
+  }
+
+  const report = buildCatalogShadowReadiness(fixture);
+  assert.equal(report.status, 'pass');
+  assert.equal(report.cycles[0].changes.added, LISTING_SOURCE_KEYS.length);
+  assert.equal(report.cycles[0].changes.eventEligibleAdded, 0);
+  assert.equal(report.cycles[0].lifecycle.total, 0);
 });
 
 test('new-listing and confirmed-delist capabilities require exact 2- and 3-cycle comparison windows', () => {
@@ -582,7 +616,10 @@ test('source count, exact membership, and Runtime Cache count/timestamp mismatch
 
   const cacheCountMismatch = readinessFixture();
   cacheCountMismatch.runtimeSnapshot.counts.activeListings = 11;
-  assert.equal(buildCatalogShadowReadiness(cacheCountMismatch).status, 'fail');
+  const cacheCountReport = buildCatalogShadowReadiness(cacheCountMismatch);
+  assert.equal(cacheCountReport.status, 'fail');
+  assert.equal(cacheCountReport.remediation.code, 'REBUILD_RUNTIME_CACHE_BASELINE');
+  assert.ok(cacheCountReport.remediation.actions.some(action => /Do not synthesize New\/Re-listed/.test(action)));
 
   const cacheSourceMismatch = readinessFixture();
   cacheSourceMismatch.runtimeSnapshot.sources[0].listingCount = 2;
@@ -1277,6 +1314,7 @@ test('read-only query bundle is fixed at nine bounded catalog-reconciliation que
   };
   const queries = buildCatalogShadowReadinessQueries(sql, 30);
   assert.equal(queries.length, 9);
+  assert.match(queries[5].text, /metadata->>'mergedStatus', ''\) <> 'warming'/);
   assert.equal(calls.length, 9);
   assert.ok(calls.every(call => /SELECT|WITH/.test(call.text)));
   assert.ok(calls.every(call => !/\b(?:INSERT|UPDATE|DELETE|TRUNCATE)\b/i.test(call.text)));

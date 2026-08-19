@@ -1,5 +1,6 @@
 import {
   CATALOG_SHADOW_READINESS_SCHEMA_VERSION,
+  catalogShadowRemediation,
   runCatalogShadowReadinessQueries,
 } from '../api/_lib/catalog-shadow-readiness.js';
 import { getJsonWithRetry } from './_lib/http.mjs';
@@ -36,6 +37,7 @@ function fatalReport(error) {
         detail: 'The current catalog reconciliation could not run.',
       },
     },
+    remediation: catalogShadowRemediation({ status: 'fail', hasCurrentCycle: true }),
     handoff: {
       laterPhaseTables: null,
       laterPhaseDomainsPresent: null,

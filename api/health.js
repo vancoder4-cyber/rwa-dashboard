@@ -1,4 +1,5 @@
 import { assessChecks, checkResult, PRODUCTION_BASELINES } from './_lib/health.js';
+import { validateDeploymentProvenance } from './_lib/deployment-provenance.js';
 import {
   LISTING_AUDIT_SCHEMA_VERSION,
   LISTING_EVENT_MAX,
@@ -100,6 +101,28 @@ function deploymentBaseUrl(req) {
   if (/^[a-z0-9.-]+\.vercel\.app$/.test(forwarded)) return `https://${forwarded}`;
   const deployment = process.env.VERCEL_URL || process.env.VERCEL_PROJECT_PRODUCTION_URL;
   return `https://${deployment || 'avenir-rwa-analyst.vercel.app'}`;
+}
+
+function productionAliasRequest(req, env = process.env) {
+  const host = String(req.headers?.['x-forwarded-host'] || req.headers?.host || '')
+    .toLowerCase()
+    .split(':')[0];
+  const productionHosts = new Set([
+    'avenir-rwa-analyst.vercel.app',
+    String(env.VERCEL_PROJECT_PRODUCTION_URL || '').toLowerCase(),
+  ].filter(Boolean));
+  return productionHosts.has(host);
+}
+
+export function deploymentProvenanceCheck(env = process.env, options = {}) {
+  const provenance = validateDeploymentProvenance(env, options);
+  return checkResult('deployment-provenance', provenance.valid ? 'pass' : 'fail', {
+    environment: provenance.environment,
+    ref: provenance.ref,
+    commit: provenance.commit,
+    expectedRef: provenance.expectedRef,
+    reason: provenance.reason,
+  }, { critical: true });
 }
 
 async function probePage(baseUrl) {
@@ -1864,7 +1887,10 @@ export default async function handler(req, res) {
   // never retries a full route again. Five-way bounded concurrency keeps the
   // worst-case self-probe wall time within this Function's 60-second budget;
   // the two OKX snapshots remain one sequential job.
-  const checks = [await probePage(baseUrl)];
+  const checks = [
+    deploymentProvenanceCheck(process.env, { requireProductionRef: productionAliasRequest(req) }),
+    await probePage(baseUrl),
+  ];
   const probeJobs = [
     () => probeReferences(baseUrl),
     () => probeUsMarketDirectory(baseUrl),
