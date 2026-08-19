@@ -39,6 +39,8 @@ vercel
 ```
 Follow the prompts to create a Preview. Never run `vercel --prod` from a local worktree. Production must come from the Git integration on `main`, or from a verified artifact whose deployment-provenance check reports `main` and the intended full commit SHA.
 
+The build runs unit tests through `scripts/run-tests.mjs`, which passes only a small operating-system allowlist to the test process. Vercel production credentials and persistence modes must never be visible to unit tests or used as test fixtures.
+
 ## Step 3: Custom Domain (Optional)
 In Vercel Dashboard → Project Settings → Domains → add your domain.
 
