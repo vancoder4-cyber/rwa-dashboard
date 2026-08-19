@@ -41,6 +41,8 @@ Follow the prompts to create a Preview. Never run `vercel --prod` from a local w
 
 The build runs unit tests through `scripts/run-tests.mjs`, which passes only a small operating-system allowlist to the test process. Vercel production credentials and persistence modes must never be visible to unit tests or used as test fixtures.
 
+The production runtime is pinned to Node 22 in `package.json`, matching both GitHub workflows. Upgrade CI and Vercel together only after a Preview log scan shows no runtime deprecation errors.
+
 ## Step 3: Custom Domain (Optional)
 In Vercel Dashboard → Project Settings → Domains → add your domain.
 
