@@ -95,6 +95,47 @@ function check(id, status, detail, evidence = {}) {
   return { id, status, detail, evidence };
 }
 
+export function catalogShadowRemediation({
+  status,
+  failures = [],
+  hasCurrentCycle = false,
+  runtimeMatch = null,
+} = {}) {
+  if (status === 'pass') return null;
+  if (!hasCurrentCycle) {
+    return {
+      code: 'ESTABLISH_CATALOG_BASELINE',
+      summary: 'No current PostgreSQL catalog observation is available.',
+      actions: [
+        'Run one authenticated listing-audit Cron for the current UTC bucket.',
+        'Require ten trusted source runs and all three independent sink outcomes.',
+        'Re-run the read-only catalog-shadow audit; do not advance a writer or read cutover while warming.',
+      ],
+    };
+  }
+  if (runtimeMatch === false || failures.some(reason => /Runtime Cache/i.test(reason))) {
+    return {
+      code: 'REBUILD_RUNTIME_CACHE_BASELINE',
+      summary: 'The public Runtime Cache does not reconcile with the durable catalog observation.',
+      actions: [
+        'Inspect the exact Runtime Cache reconciliation reasons and the latest trusted source/sink evidence.',
+        'Run one authenticated listing-audit retry for the current UTC bucket to establish a fresh public baseline.',
+        'Do not synthesize New/Re-listed events from older PostgreSQL membership during a cache baseline reset.',
+        'Re-run the read-only audit and require exact source counts, timestamp and sink evidence before recovery.',
+      ],
+    };
+  }
+  return {
+    code: 'REPAIR_CATALOG_SHADOW_RECONCILIATION',
+    summary: 'The current catalog shadow violates a conservation, lineage or continuity check.',
+    actions: [
+      'Stop release promotion and inspect the first failed readiness check plus its evidence.',
+      'Repair forward with an idempotent same-bucket retry or a new migration; never delete accepted evidence or rewrite migration history.',
+      'Re-run contract tests, the database audit and the read-only catalog-shadow audit before release.',
+    ],
+  };
+}
+
 function group(rows, key) {
   const output = new Map();
   for (const row of Array.isArray(rows) ? rows : []) {
@@ -867,6 +908,12 @@ export function buildCatalogShadowReadiness({
       observationStartedAt: cycles.at(-1)?.bucketAt || null,
     },
     checks,
+    remediation: catalogShadowRemediation({
+      status,
+      failures: hardFailures,
+      hasCurrentCycle: Boolean(latest),
+      runtimeMatch: runtime.match,
+    }),
     runtimeCache: runtime,
     cycles,
     failures: sortedUnique(hardFailures),
@@ -1107,6 +1154,19 @@ export function buildCatalogShadowReadinessQueries(sql, limit = CATALOG_SHADOW_Q
           FROM membership_set AS current_member
           WHERE current_member.cycle_id = current.cycle_id
             AND current_member.source_id = source.source_id
+            -- A Runtime Cache cold start intentionally establishes a fresh
+            -- baseline. Its membership must reconcile, but it cannot invent
+            -- New/Re-listed lifecycle events from older PostgreSQL history.
+            AND EXISTS (
+              SELECT 1
+              FROM ingest.collection_attempt AS current_attempt
+              JOIN ingest.source_run AS current_run
+                ON current_run.attempt_id = current_attempt.attempt_id
+              WHERE current_attempt.cycle_id = current.cycle_id
+                AND current_run.source_id = current_member.source_id
+                AND current_run.endpoint_key = '${LISTING_PG_ENDPOINT_KEY}'
+                AND COALESCE(current_run.metadata->>'mergedStatus', '') <> 'warming'
+            )
             AND current_member.valid_from >= current_member.cycle_bucket_at
             AND current_member.valid_from < current_member.cycle_bucket_at + interval '1 day'
             AND NOT EXISTS (
@@ -1130,6 +1190,18 @@ export function buildCatalogShadowReadinessQueries(sql, limit = CATALOG_SHADOW_Q
             FROM membership_set AS current_member
             WHERE current_member.cycle_id = current.cycle_id
               AND current_member.source_id = source.source_id
+              -- See identity_resolved_added_count above: a warm baseline is
+              -- an observation, not a cross-day lifecycle comparison.
+              AND EXISTS (
+                SELECT 1
+                FROM ingest.collection_attempt AS current_attempt
+                JOIN ingest.source_run AS current_run
+                  ON current_run.attempt_id = current_attempt.attempt_id
+                WHERE current_attempt.cycle_id = current.cycle_id
+                  AND current_run.source_id = current_member.source_id
+                  AND current_run.endpoint_key = '${LISTING_PG_ENDPOINT_KEY}'
+                  AND COALESCE(current_run.metadata->>'mergedStatus', '') <> 'warming'
+              )
               AND current_member.valid_from >= current_member.cycle_bucket_at
               AND current_member.valid_from < current_member.cycle_bucket_at + interval '1 day'
               AND NOT EXISTS (SELECT 1 FROM membership_set AS previous_member
@@ -1155,6 +1227,16 @@ export function buildCatalogShadowReadinessQueries(sql, limit = CATALOG_SHADOW_Q
              AND pending.normalized_venue_symbol = pending_version.normalized_venue_symbol
             WHERE pending_event.detection_cycle_id = current.cycle_id
               AND pending_event.source_id = source.source_id
+              AND EXISTS (
+                SELECT 1
+                FROM ingest.collection_attempt AS current_attempt
+                JOIN ingest.source_run AS current_run
+                  ON current_run.attempt_id = current_attempt.attempt_id
+                WHERE current_attempt.cycle_id = current.cycle_id
+                  AND current_run.source_id = pending_event.source_id
+                  AND current_run.endpoint_key = '${LISTING_PG_ENDPOINT_KEY}'
+                  AND COALESCE(current_run.metadata->>'mergedStatus', '') <> 'warming'
+              )
               AND pending_event.event_type IN ('listed', 'relisted')
               AND pending_event.status = 'confirmed'
               AND pending_version.valid_from >= current.bucket_at

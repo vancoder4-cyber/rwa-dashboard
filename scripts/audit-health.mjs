@@ -16,8 +16,10 @@ console.log(JSON.stringify({
   checks: payload.checks.map(check => ({
     name: check.name,
     status: check.status,
+    critical: Boolean(check.critical),
     latencyMs: check.latencyMs,
     reason: check.reason || null,
+    remediation: check.remediation || null,
   })),
 }, null, 2));
 

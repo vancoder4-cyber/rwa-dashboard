@@ -961,6 +961,16 @@ test('concurrent duplicate lifecycle inserts preserve the first confirmed observ
   }
 });
 
+test('a Runtime Cache baseline reset never synthesizes PostgreSQL lifecycle events', () => {
+  const calls = pgCalls(buildListingAuditPgBatch(baselineInput()));
+  assert.equal(calls.some(call => call.text.includes('durable-membership-fallback')), false);
+  assert.equal(
+    calls.filter(call => call.text.includes('INSERT INTO analytics.catalog_change_event')).length,
+    1,
+    'only producer-declared lifecycle events may enter the shadow database',
+  );
+});
+
 test('confirmed delisting closes the exact current instrument version after event capture and relisting creates a new present version', () => {
   const baselineObservations = fullObservations({
     'perp:gate': {

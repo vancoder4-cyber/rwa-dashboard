@@ -1,4 +1,5 @@
 {
+  "buildCommand": "npm run build",
   "crons": [
     { "path": "/api/listing-audit-cron", "schedule": "45 0 * * *" },
     { "path": "/api/health", "schedule": "0 1 * * *" },
