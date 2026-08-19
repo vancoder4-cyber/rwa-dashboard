@@ -7,6 +7,7 @@ import {
   validateDeploymentProvenance,
 } from '../api/_lib/deployment-provenance.js';
 import { deploymentProvenanceCheck } from '../api/health.js';
+import { buildDeploymentProvenancePayload } from '../api/deployment-provenance.js';
 
 const SHA = '30e31e60efaac238d39a0bb2880474611f200485';
 
@@ -66,6 +67,27 @@ test('the production build guard exits nonzero for an old branch', () => {
   assert.equal(result.status, 1);
   assert.match(result.stderr, /\"status\":\"rejected\"/);
   assert.doesNotMatch(result.stderr, /vancoder4@gmail\.com/);
+});
+
+test('the lightweight public provenance contract is no-store friendly and fail-closed', () => {
+  const pass = buildDeploymentProvenancePayload({
+    VERCEL_ENV:'production',
+    VERCEL_GIT_COMMIT_REF:'main',
+    VERCEL_GIT_COMMIT_SHA:SHA,
+  }, new Date('2026-08-19T04:00:00Z'));
+  assert.equal(pass.httpStatus, 200);
+  assert.equal(pass.payload.schemaVersion, 'rwa-deployment-provenance/v1');
+  assert.equal(pass.payload.commit, SHA);
+  assert.equal(pass.payload.checks[0].status, 'pass');
+
+  const fail = buildDeploymentProvenancePayload({
+    VERCEL_ENV:'production',
+    VERCEL_GIT_COMMIT_REF:'old-branch',
+    VERCEL_GIT_COMMIT_SHA:SHA,
+  }, new Date('2026-08-19T04:00:00Z'));
+  assert.equal(fail.httpStatus, 503);
+  assert.equal(fail.payload.checks[0].status, 'fail');
+  assert.match(fail.payload.checks[0].reason, /must be main/);
 });
 
 test('Vercel publishes only the generated dashboard shell after the build gate', async () => {

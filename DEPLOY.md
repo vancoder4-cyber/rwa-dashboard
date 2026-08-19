@@ -37,7 +37,7 @@ npm i -g vercel
 cd ~/path/to/RWA\ Arbitrage\ Opportunity/deploy
 vercel
 ```
-Follow the prompts to create a Preview. Never run `vercel --prod` from a local worktree. Production must come from the Git integration on `main`, or from a verified artifact whose deployment-provenance check reports `main` and the intended full commit SHA.
+Follow the prompts to create a Preview. Never run `vercel --prod` from a local worktree. Normal Production releases come only from the Git integration on reviewed `main`. Emergency restoration may point the alias only to an already verified Git-origin `main` deployment; it must never rebuild a local worktree.
 
 The build runs unit tests through `scripts/run-tests.mjs`, which passes only a small operating-system allowlist to the test process. Vercel production credentials and persistence modes must never be visible to unit tests or used as test fixtures.
 
@@ -78,6 +78,20 @@ DASHBOARD_URL=https://your-preview.vercel.app npm run audit:data
 DASHBOARD_URL=https://your-preview.vercel.app npm run audit:health
 ```
 
+Configure these GitHub Actions secrets before enabling the Production deployment guard:
+
+- `VERCEL_AUDIT_TOKEN`: a Vercel token used only for authenticated read-only deployment inspection;
+- `VERCEL_PROJECT_ID`: the exact Dashboard project ID;
+- `VERCEL_ORG_ID`: the owning Vercel team ID.
+
+After Git integration updates Production, the scheduled/external guard runs:
+
+```bash
+npm run audit:deployment
+```
+
+It fails unless the current production alias resolves to a READY Git deployment from the expected GitHub repository and current `main`, `gitDirty=0`, the lightweight runtime provenance contract agrees, and the published `index.html`/`i18n.js` SHA-256 hashes equal the files in that commit. The token is never sent to the Dashboard or written to output.
+
 For an OKX-affecting release, the Preview and final production artifact must satisfy all of these checks:
 
 - Perpetuals report 183 OKX listings: 149 SWAP + 34 X-Perp, representing 149 OKX canonical underlyings. A canonical aggregate such as AAPL retains both contract listings instead of overwriting one.
@@ -90,4 +104,4 @@ For an OKX-affecting release, the Preview and final production artifact must sat
 
 In the browser, switch `EN → 中文 → EN`, open OKX Perpetuals, Spot, Top 30, Signal Radar and one Asset Intelligence Drawer, and confirm that ticker/venue identity, selected tabs, filters and loaded data do not change with language. In both Perpetual and Spot, toggle `US-listed / 美股`; every remaining asset row must carry the same US tag, category + market filtering must use AND, and non-U.S./crypto collisions must remain excluded.
 
-Push the verified commit and promote the same Preview artifact. Repeat `audit:data`, `audit:health`, `/api/health`, the browser assertions and the production 5xx/log review against <https://avenir-rwa-analyst.vercel.app/>. Do not rebuild or deploy an unverified local revision between Preview and promotion.
+Merge the verified commit to `main` and let the Git integration build Production. Require `audit:deployment` to pass, then repeat `audit:data`, `audit:health`, `/api/health`, the browser assertions and the production 5xx/log review against <https://avenir-rwa-analyst.vercel.app/>. Do not rebuild or deploy an unverified local revision.
