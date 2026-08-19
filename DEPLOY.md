@@ -31,13 +31,13 @@ gh repo create rwa-dashboard --public --source=. --push
 4. Framework Preset: select **Other**
 5. Click **Deploy** — done!
 
-### Option B: Via Vercel CLI
+### Option B: Vercel CLI (Preview only)
 ```bash
 npm i -g vercel
 cd ~/path/to/RWA\ Arbitrage\ Opportunity/deploy
 vercel
 ```
-Follow the prompts. Vercel auto-detects the static site from `index.html`.
+Follow the prompts to create a Preview. Never run `vercel --prod` from a local worktree. Production must come from the Git integration on `main`, or from a verified artifact whose deployment-provenance check reports `main` and the intended full commit SHA.
 
 ## Step 3: Custom Domain (Optional)
 In Vercel Dashboard → Project Settings → Domains → add your domain.
@@ -64,8 +64,7 @@ and complete its pre-release audit checklist.
 Run the local contract gates before creating the deployment:
 
 ```bash
-npm test
-npm run check:inline
+npm run build
 ```
 
 Deploy a Preview, then run both audits against that exact Preview URL:

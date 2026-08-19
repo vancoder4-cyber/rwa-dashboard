@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import {
   PRODUCTION_GIT_REF,
   validateDeploymentProvenance,
@@ -65,4 +66,17 @@ test('the production build guard exits nonzero for an old branch', () => {
   assert.equal(result.status, 1);
   assert.match(result.stderr, /\"status\":\"rejected\"/);
   assert.doesNotMatch(result.stderr, /vancoder4@gmail\.com/);
+});
+
+test('Vercel publishes only the generated dashboard shell after the build gate', async () => {
+  const root = new URL('..', import.meta.url);
+  const vercel = JSON.parse(await readFile(new URL('vercel.json', root), 'utf8'));
+  const packageJson = JSON.parse(await readFile(new URL('package.json', root), 'utf8'));
+  const buildScript = await readFile(new URL('scripts/build-static.mjs', root), 'utf8');
+  assert.equal(vercel.outputDirectory, 'public');
+  assert.equal(vercel.buildCommand, 'npm run build');
+  assert.match(packageJson.scripts.build, /verify:deploy-source/);
+  assert.match(packageJson.scripts.build, /build-static\.mjs/);
+  assert.match(buildScript, /\['index\.html', 'i18n\.js'\]/);
+  assert.doesNotMatch(buildScript, /node_modules|tests|api/);
 });
