@@ -25,16 +25,15 @@ function lower(value) {
   return normalized(value).toLowerCase();
 }
 
-function cleanDeploymentMetadata(value) {
-  return value === 0 || value === false || ['0', 'false'].includes(lower(value));
-}
-
-function deploymentRepositoryMatches(gitSource, repository) {
-  const byId = normalized(gitSource?.repoId) &&
-    normalized(gitSource.repoId) === normalized(repository?.id);
-  const byName = lower(gitSource?.org) === lower(repository?.owner?.login) &&
-    lower(gitSource?.repo) === lower(repository?.name);
-  return Boolean(byId || byName);
+function normalizedUrl(value) {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' || url.username || url.password || url.port ||
+        url.pathname !== '/' || url.search || url.hash) return null;
+    return url.toString().toLowerCase();
+  } catch {
+    return null;
+  }
 }
 
 function healthProvenance(payload) {
@@ -46,17 +45,21 @@ function healthProvenance(payload) {
 export function validateProductionDeploymentEvidence({
   repository,
   mainCommit,
-  deployment,
+  productionDeployments,
+  deploymentStatuses,
   health,
   artifacts,
   expectedProjectId,
 } = {}) {
   const reasons = [];
   const expectedSha = lower(mainCommit?.sha);
-  const gitSource = deployment?.gitSource;
-  const deploymentSha = lower(gitSource?.sha);
+  const deployment = Array.isArray(productionDeployments) ? productionDeployments[0] : null;
+  const deploymentStatus = Array.isArray(deploymentStatuses) ? deploymentStatuses[0] : null;
+  const deploymentSha = lower(deployment?.sha);
   const healthCommit = lower(health?.commit);
   const provenance = healthProvenance(health);
+  const runtimeUrl = normalizedUrl(health?.deploymentUrl);
+  const registeredUrl = normalizedUrl(deploymentStatus?.environment_url || deploymentStatus?.target_url);
 
   if (lower(repository?.full_name) !== `${PRODUCTION_GITHUB_OWNER}/${PRODUCTION_GITHUB_REPOSITORY}`) {
     reasons.push('GITHUB_REPOSITORY_MISMATCH');
@@ -64,22 +67,30 @@ export function validateProductionDeploymentEvidence({
   if (repository?.default_branch !== PRODUCTION_GIT_REF) reasons.push('GITHUB_DEFAULT_BRANCH_MISMATCH');
   if (!FULL_SHA.test(expectedSha)) reasons.push('GITHUB_MAIN_SHA_INVALID');
 
-  if (deployment?.source !== 'git') reasons.push('VERCEL_SOURCE_NOT_GIT');
-  if (deployment?.target !== 'production') reasons.push('VERCEL_TARGET_NOT_PRODUCTION');
-  if (deployment?.readyState !== 'READY' && deployment?.status !== 'READY') {
-    reasons.push('VERCEL_DEPLOYMENT_NOT_READY');
+  if (!deployment) reasons.push('GITHUB_PRODUCTION_DEPLOYMENT_MISSING');
+  if (deployment?.environment !== 'Production' || deployment?.task !== 'deploy') {
+    reasons.push('GITHUB_PRODUCTION_DEPLOYMENT_INVALID');
   }
-  if (expectedProjectId && normalized(deployment?.project?.id) !== normalized(expectedProjectId)) {
+  if (deployment?.creator?.login !== 'vercel[bot]') reasons.push('GITHUB_DEPLOYMENT_CREATOR_MISMATCH');
+  if (!FULL_SHA.test(deploymentSha) || deploymentSha !== expectedSha) {
+    reasons.push('GITHUB_DEPLOYMENT_SHA_MISMATCH');
+  }
+  if (deploymentStatus?.state !== 'success') reasons.push('GITHUB_DEPLOYMENT_NOT_SUCCESSFUL');
+  if (!runtimeUrl || !registeredUrl || runtimeUrl !== registeredUrl) {
+    reasons.push('GITHUB_DEPLOYMENT_URL_MISMATCH');
+  }
+
+  if (expectedProjectId && normalized(health?.projectId) !== normalized(expectedProjectId)) {
     reasons.push('VERCEL_PROJECT_MISMATCH');
   }
-  if (gitSource?.type !== 'github') reasons.push('VERCEL_GIT_PROVIDER_MISMATCH');
-  if (!deploymentRepositoryMatches(gitSource, repository)) reasons.push('VERCEL_GIT_REPOSITORY_MISMATCH');
-  if (gitSource?.ref !== PRODUCTION_GIT_REF) reasons.push('VERCEL_GIT_REF_MISMATCH');
-  if (!FULL_SHA.test(deploymentSha) || deploymentSha !== expectedSha) reasons.push('VERCEL_GIT_SHA_MISMATCH');
-  if (!Object.prototype.hasOwnProperty.call(deployment?.meta || {}, 'gitDirty')) {
-    reasons.push('VERCEL_GIT_DIRTY_MISSING');
-  } else if (!cleanDeploymentMetadata(deployment.meta.gitDirty)) {
-    reasons.push('VERCEL_GIT_DIRTY');
+  if (!/^dpl_[A-Za-z0-9]+$/.test(normalized(health?.deploymentId))) {
+    reasons.push('VERCEL_DEPLOYMENT_ID_INVALID');
+  }
+  if (health?.gitProvider !== 'github') reasons.push('VERCEL_GIT_PROVIDER_MISMATCH');
+  if (lower(health?.repositoryOwner) !== lower(repository?.owner?.login) ||
+      lower(health?.repositorySlug) !== lower(repository?.name) ||
+      normalized(health?.repositoryId) !== normalized(repository?.id)) {
+    reasons.push('VERCEL_GIT_REPOSITORY_MISMATCH');
   }
 
   if (!provenance || provenance.status !== 'pass') reasons.push('HEALTH_PROVENANCE_NOT_PASSING');
@@ -106,9 +117,10 @@ export function validateProductionDeploymentEvidence({
     deploymentSha:FULL_SHA.test(deploymentSha) ? deploymentSha : null,
     healthCommit:FULL_SHA.test(healthCommit) ? healthCommit : null,
     deploymentId:normalized(deployment?.id || deployment?.uid) || null,
-    deploymentSource:normalized(deployment?.source) || null,
-    gitDirty:Object.prototype.hasOwnProperty.call(deployment?.meta || {}, 'gitDirty')
-      ? normalized(deployment.meta.gitDirty)
+    deploymentUrl:runtimeUrl,
+    registeredDeploymentUrl:registeredUrl,
+    deploymentSource:deployment?.creator?.login === 'vercel[bot]' && runtimeUrl === registeredUrl
+      ? 'git'
       : null,
     artifacts:Object.freeze(artifactRows.map(row => Object.freeze({
       path:row.path,
@@ -184,29 +196,30 @@ async function repositoryArtifact(fetchImpl, filename, commit, githubToken) {
 }
 
 export async function auditProductionDeployment({ env = process.env, fetchImpl = fetch } = {}) {
-  const vercelToken = normalized(env.VERCEL_TOKEN);
   const projectId = normalized(env.VERCEL_PROJECT_ID);
-  const teamId = normalized(env.VERCEL_TEAM_ID || env.VERCEL_ORG_ID);
   const githubToken = normalized(env.GITHUB_TOKEN);
   const dashboardOrigin = validatedDashboardOrigin(env.PRODUCTION_DASHBOARD_URL || PRODUCTION_DASHBOARD_ORIGIN);
-  if (!vercelToken) throw new ProductionDeploymentGuardError('VERCEL_TOKEN_MISSING', 'VERCEL_TOKEN is required');
   if (!projectId) throw new ProductionDeploymentGuardError('VERCEL_PROJECT_ID_MISSING', 'VERCEL_PROJECT_ID is required');
 
   const githubBase = `https://api.github.com/repos/${PRODUCTION_GITHUB_OWNER}/${PRODUCTION_GITHUB_REPOSITORY}`;
-  const deploymentUrl = new URL(`/v13/deployments/${new URL(dashboardOrigin).hostname}`, 'https://api.vercel.com');
-  deploymentUrl.searchParams.set('withGitRepoInfo', 'true');
-  if (teamId) deploymentUrl.searchParams.set('teamId', teamId);
+  const deploymentsUrl = new URL(`${githubBase}/deployments`);
+  deploymentsUrl.searchParams.set('environment', 'Production');
+  deploymentsUrl.searchParams.set('per_page', '10');
 
-  const [repository, mainCommit, deployment, health] = await Promise.all([
+  const [repository, mainCommit, productionDeployments, health] = await Promise.all([
     request(fetchImpl, githubBase, { token:githubToken }),
     request(fetchImpl, `${githubBase}/commits/${PRODUCTION_GIT_REF}`, { token:githubToken }),
-    request(fetchImpl, deploymentUrl, { token:vercelToken }),
+    request(fetchImpl, deploymentsUrl, { token:githubToken }),
     request(fetchImpl, `${dashboardOrigin}/api/deployment-provenance`, { allowError:true }),
   ]);
   const expectedSha = lower(mainCommit?.sha);
   if (!FULL_SHA.test(expectedSha)) {
     throw new ProductionDeploymentGuardError('GITHUB_MAIN_SHA_INVALID', 'GitHub main returned an invalid commit SHA');
   }
+  const latestDeployment = Array.isArray(productionDeployments) ? productionDeployments[0] : null;
+  const deploymentStatuses = latestDeployment?.id
+    ? await request(fetchImpl, `${githubBase}/deployments/${latestDeployment.id}/statuses`, { token:githubToken })
+    : [];
 
   const artifacts = await Promise.all(PRODUCTION_STATIC_FILES.map(async filename => {
     const [productionResponse, repositoryBytes] = await Promise.all([
@@ -224,7 +237,8 @@ export async function auditProductionDeployment({ env = process.env, fetchImpl =
   return validateProductionDeploymentEvidence({
     repository,
     mainCommit,
-    deployment,
+    productionDeployments,
+    deploymentStatuses,
     health,
     artifacts,
     expectedProjectId:projectId,

@@ -36,7 +36,5 @@ jobs:
       - name: Verify Git, Vercel, runtime and published artifacts
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          VERCEL_TOKEN: ${{ secrets.VERCEL_AUDIT_TOKEN }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
         run: npm run audit:deployment

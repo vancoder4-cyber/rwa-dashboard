@@ -10,6 +10,7 @@ import {
 
 const SHA = 'f449a7592b0b07192171eea89410c23993dda1b7';
 const HASH = 'a'.repeat(64);
+const DEPLOYMENT_URL = 'https://deploy-git-main.vercel.app/';
 
 function evidence(overrides = {}) {
   return {
@@ -21,17 +22,29 @@ function evidence(overrides = {}) {
       owner:{ login:'vancoder4-cyber' },
     },
     mainCommit:{ sha:SHA },
-    deployment: {
-      id:'dpl_verified',
-      source:'git',
-      target:'production',
-      readyState:'READY',
-      project:{ id:'prj_expected' },
-      gitSource:{ type:'github', repoId:12345, ref:'main', sha:SHA },
-      meta:{ gitDirty:'0' },
-    },
+    productionDeployments:[{
+      id:5975369386,
+      sha:SHA,
+      ref:SHA,
+      environment:'Production',
+      task:'deploy',
+      creator:{ login:'vercel[bot]' },
+    }],
+    deploymentStatuses:[{
+      state:'success',
+      environment:'Production',
+      environment_url:DEPLOYMENT_URL,
+      target_url:DEPLOYMENT_URL,
+    }],
     health: {
       commit:SHA,
+      deploymentId:'dpl_verified123',
+      deploymentUrl:DEPLOYMENT_URL,
+      projectId:'prj_expected',
+      gitProvider:'github',
+      repositoryOwner:'vancoder4-cyber',
+      repositorySlug:'rwa-dashboard',
+      repositoryId:'12345',
       checks:[{
         name:'deployment-provenance', status:'pass', critical:true,
         environment:'production', ref:'main', commit:SHA,
@@ -46,45 +59,39 @@ function evidence(overrides = {}) {
   };
 }
 
-test('production guard requires Git-origin clean main with exact repo, SHA, health and artifacts', () => {
+test('production guard binds current main to the exact Vercel-bot deployment and runtime URL', () => {
   const valid = validateProductionDeploymentEvidence(evidence());
   assert.equal(valid.valid, true);
   assert.deepEqual(valid.reasons, []);
   assert.equal(valid.expectedSha, SHA);
 
-  const dirty = validateProductionDeploymentEvidence(evidence({
-    deployment:{ ...evidence().deployment, meta:{ gitDirty:'1' } },
-  }));
-  assert.equal(dirty.valid, false);
-  assert.ok(dirty.reasons.includes('VERCEL_GIT_DIRTY'));
-
   const localCli = validateProductionDeploymentEvidence(evidence({
-    deployment:{ ...evidence().deployment, source:'cli' },
+    health:{ ...evidence().health, deploymentUrl:'https://local-cli-overwrite.vercel.app/' },
   }));
-  assert.ok(localCli.reasons.includes('VERCEL_SOURCE_NOT_GIT'));
+  assert.equal(localCli.valid, false);
+  assert.ok(localCli.reasons.includes('GITHUB_DEPLOYMENT_URL_MISMATCH'));
 
-  const missingDirtyEvidence = validateProductionDeploymentEvidence(evidence({
-    deployment:{ ...evidence().deployment, meta:{} },
+  const untrustedCreator = validateProductionDeploymentEvidence(evidence({
+    productionDeployments:[{ ...evidence().productionDeployments[0], creator:{ login:'someone' } }],
   }));
-  assert.ok(missingDirtyEvidence.reasons.includes('VERCEL_GIT_DIRTY_MISSING'));
+  assert.ok(untrustedCreator.reasons.includes('GITHUB_DEPLOYMENT_CREATOR_MISMATCH'));
+
+  const missingDeploymentIdentity = validateProductionDeploymentEvidence(evidence({
+    health:{ ...evidence().health, deploymentId:null },
+  }));
+  assert.ok(missingDeploymentIdentity.reasons.includes('VERCEL_DEPLOYMENT_ID_INVALID'));
 });
 
 test('production guard rejects wrong repository, stale SHA and changed published artifacts independently', () => {
   const wrongRepository = validateProductionDeploymentEvidence(evidence({
-    deployment:{
-      ...evidence().deployment,
-      gitSource:{ ...evidence().deployment.gitSource, repoId:99999, org:'someone', repo:'other' },
-    },
+    health:{ ...evidence().health, repositoryOwner:'someone', repositorySlug:'other', repositoryId:'99999' },
   }));
   assert.ok(wrongRepository.reasons.includes('VERCEL_GIT_REPOSITORY_MISMATCH'));
 
   const staleSha = validateProductionDeploymentEvidence(evidence({
-    deployment:{
-      ...evidence().deployment,
-      gitSource:{ ...evidence().deployment.gitSource, sha:'0'.repeat(40) },
-    },
+    productionDeployments:[{ ...evidence().productionDeployments[0], sha:'0'.repeat(40) }],
   }));
-  assert.ok(staleSha.reasons.includes('VERCEL_GIT_SHA_MISMATCH'));
+  assert.ok(staleSha.reasons.includes('GITHUB_DEPLOYMENT_SHA_MISMATCH'));
 
   const changedArtifact = validateProductionDeploymentEvidence(evidence({
     artifacts:[
@@ -95,7 +102,7 @@ test('production guard rejects wrong repository, stale SHA and changed published
   assert.ok(changedArtifact.reasons.includes('STATIC_ARTIFACT_MISMATCH:index.html'));
 });
 
-test('external audit joins GitHub, Vercel, Health and exact production bytes without exposing tokens', async () => {
+test('external audit joins GitHub deployment attestation, runtime and exact bytes without a Vercel token', async () => {
   const files = {
     'index.html':Buffer.from('<!doctype html><title>RWA</title>'),
     'i18n.js':Buffer.from('export const locale = "en";'),
@@ -110,11 +117,16 @@ test('external audit joins GitHub, Vercel, Health and exact production bytes wit
     if (url.hostname === 'api.github.com' && url.pathname.endsWith('/commits/main')) {
       return Response.json({ sha:SHA });
     }
+    if (url.hostname === 'api.github.com' && url.pathname.endsWith('/deployments')) {
+      return Response.json(evidence().productionDeployments);
+    }
+    if (url.hostname === 'api.github.com' && url.pathname.endsWith('/deployments/5975369386/statuses')) {
+      return Response.json(evidence().deploymentStatuses);
+    }
     if (url.hostname === 'api.github.com' && url.pathname.includes('/contents/')) {
       const filename = url.pathname.endsWith('/i18n.js') ? 'i18n.js' : 'index.html';
       return Response.json({ encoding:'base64', content:files[filename].toString('base64') });
     }
-    if (url.hostname === 'api.vercel.com') return Response.json(evidence().deployment);
     if (url.pathname === '/api/deployment-provenance') return Response.json(evidence().health);
     if (url.origin === PRODUCTION_DASHBOARD_ORIGIN) {
       const filename = url.pathname === '/i18n.js' ? 'i18n.js' : 'index.html';
@@ -125,9 +137,7 @@ test('external audit joins GitHub, Vercel, Health and exact production bytes wit
 
   const report = await auditProductionDeployment({
     env:{
-      VERCEL_TOKEN:'vercel-secret',
       VERCEL_PROJECT_ID:'prj_expected',
-      VERCEL_TEAM_ID:'team_expected',
       GITHUB_TOKEN:'github-secret',
     },
     fetchImpl,
@@ -136,8 +146,10 @@ test('external audit joins GitHub, Vercel, Health and exact production bytes wit
   assert.equal(report.artifacts.length, 2);
   assert.equal(report.artifacts[0].productionSha256,
     createHash('sha256').update(files['index.html']).digest('hex'));
-  assert.ok(calls.some(call => call.url.includes('withGitRepoInfo=true')));
-  assert.ok(calls.some(call => call.authorization === 'Bearer vercel-secret'));
+  assert.ok(calls.some(call => call.url.includes('environment=Production')));
+  assert.ok(calls.some(call => call.url.includes('/deployments/5975369386/statuses')));
   assert.ok(calls.some(call => call.authorization === 'Bearer github-secret'));
+  assert.ok(calls.every(call => !call.url.includes('api.vercel.com')));
+  assert.equal(calls.find(call => call.url.includes('vercel.app/api/'))?.authorization, null);
   assert.ok(calls.every(call => !call.url.includes('secret')));
 });

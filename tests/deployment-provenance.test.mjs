@@ -11,6 +11,22 @@ import { buildDeploymentProvenancePayload } from '../api/deployment-provenance.j
 
 const SHA = '30e31e60efaac238d39a0bb2880474611f200485';
 
+function productionRuntimeEnv(overrides = {}) {
+  return {
+    VERCEL_ENV:'production',
+    VERCEL_GIT_COMMIT_REF:'main',
+    VERCEL_GIT_COMMIT_SHA:SHA,
+    VERCEL_DEPLOYMENT_ID:'dpl_verified123',
+    VERCEL_URL:'deploy-git-main.vercel.app',
+    VERCEL_PROJECT_ID:'prj_expected123',
+    VERCEL_GIT_PROVIDER:'github',
+    VERCEL_GIT_REPO_OWNER:'vancoder4-cyber',
+    VERCEL_GIT_REPO_SLUG:'rwa-dashboard',
+    VERCEL_GIT_REPO_ID:'12345',
+    ...overrides,
+  };
+}
+
 test('production provenance accepts only a full commit from main', () => {
   assert.equal(PRODUCTION_GIT_REF, 'main');
   assert.equal(validateDeploymentProvenance({
@@ -70,24 +86,31 @@ test('the production build guard exits nonzero for an old branch', () => {
 });
 
 test('the lightweight public provenance contract is no-store friendly and fail-closed', () => {
-  const pass = buildDeploymentProvenancePayload({
-    VERCEL_ENV:'production',
-    VERCEL_GIT_COMMIT_REF:'main',
-    VERCEL_GIT_COMMIT_SHA:SHA,
-  }, new Date('2026-08-19T04:00:00Z'));
+  const pass = buildDeploymentProvenancePayload(
+    productionRuntimeEnv(),
+    new Date('2026-08-19T04:00:00Z'),
+  );
   assert.equal(pass.httpStatus, 200);
   assert.equal(pass.payload.schemaVersion, 'rwa-deployment-provenance/v1');
   assert.equal(pass.payload.commit, SHA);
+  assert.equal(pass.payload.deploymentId, 'dpl_verified123');
+  assert.equal(pass.payload.deploymentUrl, 'https://deploy-git-main.vercel.app');
   assert.equal(pass.payload.checks[0].status, 'pass');
 
-  const fail = buildDeploymentProvenancePayload({
-    VERCEL_ENV:'production',
-    VERCEL_GIT_COMMIT_REF:'old-branch',
-    VERCEL_GIT_COMMIT_SHA:SHA,
-  }, new Date('2026-08-19T04:00:00Z'));
+  const fail = buildDeploymentProvenancePayload(
+    productionRuntimeEnv({ VERCEL_GIT_COMMIT_REF:'old-branch' }),
+    new Date('2026-08-19T04:00:00Z'),
+  );
   assert.equal(fail.httpStatus, 503);
   assert.equal(fail.payload.checks[0].status, 'fail');
   assert.match(fail.payload.checks[0].reason, /must be main/);
+
+  const missingIdentity = buildDeploymentProvenancePayload(
+    productionRuntimeEnv({ VERCEL_DEPLOYMENT_ID:'' }),
+    new Date('2026-08-19T04:00:00Z'),
+  );
+  assert.equal(missingIdentity.httpStatus, 503);
+  assert.match(missingIdentity.payload.checks[0].reason, /identity is incomplete/);
 });
 
 test('Vercel publishes only the generated dashboard shell after the build gate', async () => {

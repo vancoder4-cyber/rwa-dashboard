@@ -10,9 +10,10 @@ try {
     expectedSha:report.expectedSha,
     deploymentSha:report.deploymentSha,
     healthCommit:report.healthCommit,
-    deploymentId:report.deploymentId,
+    githubDeploymentId:report.deploymentId,
+    deploymentUrl:report.deploymentUrl,
+    registeredDeploymentUrl:report.registeredDeploymentUrl,
     deploymentSource:report.deploymentSource,
-    gitDirty:report.gitDirty,
     artifacts:report.artifacts,
     reasons:report.reasons,
   }, null, 2));

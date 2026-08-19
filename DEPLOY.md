@@ -78,11 +78,11 @@ DASHBOARD_URL=https://your-preview.vercel.app npm run audit:data
 DASHBOARD_URL=https://your-preview.vercel.app npm run audit:health
 ```
 
-Configure these GitHub Actions secrets before enabling the Production deployment guard:
+Configure this GitHub Actions secret before enabling the Production deployment guard:
 
-- `VERCEL_AUDIT_TOKEN`: a Vercel token used only for authenticated read-only deployment inspection;
 - `VERCEL_PROJECT_ID`: the exact Dashboard project ID;
-- `VERCEL_ORG_ID`: the owning Vercel team ID.
+
+Do not copy a personal Vercel CLI token into GitHub Actions. The guard uses the repository's read-only `github.token` to verify the newest Production deployment created by the official `vercel[bot]`, then binds that deployment's unique URL to the public runtime Vercel deployment/Git identity.
 
 After Git integration updates Production, the scheduled/external guard runs:
 
@@ -90,7 +90,7 @@ After Git integration updates Production, the scheduled/external guard runs:
 npm run audit:deployment
 ```
 
-It fails unless the current production alias resolves to a READY Git deployment from the expected GitHub repository and current `main`, `gitDirty=0`, the lightweight runtime provenance contract agrees, and the published `index.html`/`i18n.js` SHA-256 hashes equal the files in that commit. The token is never sent to the Dashboard or written to output.
+It fails unless the current production alias resolves to the unique successful Production URL registered by `vercel[bot]` for current `main`, the lightweight runtime contract reports the expected Vercel project/deployment and exact GitHub repository identity, and the published `index.html`/`i18n.js` SHA-256 hashes equal the files in that commit. A local CLI deployment has no matching `vercel[bot]` Production record/URL and therefore fails closed.
 
 For an OKX-affecting release, the Preview and final production artifact must satisfy all of these checks:
 
