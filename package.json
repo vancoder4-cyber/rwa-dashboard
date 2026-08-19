@@ -8,6 +8,7 @@
     "test": "node scripts/run-tests.mjs",
     "check:inline": "node scripts/check-inline-js.mjs",
     "verify:deploy-source": "node scripts/verify-deployment-source.mjs",
+    "audit:deployment": "node scripts/audit-deployment-provenance.mjs",
     "audit:data": "node scripts/audit-data.mjs",
     "audit:health": "node scripts/audit-health.mjs",
     "audit:listings": "node scripts/audit-listings.mjs",
