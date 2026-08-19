@@ -1,7 +1,7 @@
 # RWA Asset Identity & Data Rules
 
 > 本文记录 RWA Dashboard 的资产准入、ticker 归一、类别/地区标签及上线校验规则。  
-> 最近审计：2026-08-14。生产站点：<https://avenir-rwa-analyst.vercel.app/>
+> 最近审计：2026-08-19。生产站点：<https://avenir-rwa-analyst.vercel.app/>
 
 ## 1. 核心原则
 
@@ -36,7 +36,7 @@
 | Binance | `contractType=TRADIFI_PERPETUAL`；PAXG/XAUT 可使用普通 PERPETUAL | 普通 `PERPETUAL + COIN` 合约 |
 | OKX | `state=live`，且 `instCategory` 精确属于 `3=Stocks / 4=Commodities / 5=Forex / 6=Bonds`；`SWAP` 与 `FUTURES + ruleType=xperp` 分开准入 | `instCategory=1` Crypto、空/未知类别、普通 dated `FUTURES`、`preopen`，以及只凭 `groupId` 或 ticker 猜测的产品 |
 
-trade.xyz 当前专用 `xyz` DEX universe 有 5 个 `perpCategories` 空缺：`URANIUM`、`TTF`、`H100`、`NIFTY`、`IBOV`。它们只能通过这份逐项审计的 venue-scoped fallback 映射分别进入 Commodity / Index；任意其他空类别 ticker 仍拒绝。Binance 的 `HK_EQUITY`、`KR_EQUITY` 是官方 regional equity product class，归一化后属于 Equity；不能把任意包含 `EQUITY` 的未知字符串模糊放行。
+trade.xyz 当前专用 `xyz` DEX universe 有 5 个 `perpCategories` 空缺：`URANIUM`、`TTF`、`H100`、`NIFTY`、`IBOV`。它们只能通过这份逐项审计的 venue-scoped fallback 映射分别进入 Commodity / Index；任意其他空类别 ticker 仍拒绝。Binance 的 `CN_EQUITY`、`HK_EQUITY`、`KR_EQUITY` 是官方 regional equity product class，归一化后属于 Equity；不能把任意包含 `EQUITY` 的未知字符串模糊放行。
 
 ### Spot
 
@@ -103,9 +103,8 @@ trade.xyz 当前专用 `xyz` DEX universe 有 5 个 `perpCategories` 空缺：`U
 - `SPCX/SPACEX/SPCXB/SPCXON/SPCXX`：统一为已上市的 SpaceX Equity。
 - `CBRS/CBRSB/CBRSON/CBRSX/sCBRS`：统一为已上市的 Cerebras Equity。
 - `QNT/QNTX/QNTSTOCK/QNTB`：统一为已上市的 Quantinuum Equity，但只有场所先确认 security 后才应用 alias。
-- `MINIMAX/ZHIPU/CXMT`：已上市 Equity。
+- `MINIMAX/ZHIPU/CXMT/UNITREE`：已上市 Equity。
 - `OPENAI/ANTHROPIC/ANDURIL/KALSHI/KIMI/NEURALINK/POLYMARKET`：Pre-IPO；后五项由 Gate 官方 `stocks + is_pre_market=true` catalog 交叉审计纳入。
-- `UNITREE`：已获 IPO 注册、尚未找到开始交易公告，因此仍为 Pre-IPO。
 - `EWH/DFEN`：全局 ETF 类别修正；Gate 的 `QQQX/SPYX/TQQQX/SLVON` 是仅在 Gate 官方 RWA catalog 门控后生效的 ETF wrapper，不能作为全局 ticker 类别修正。
 - `H100`：计算资源类 Commodity，不是股票指数。
 - 已公开上市的公司不能因为场所残留 `is_pre_market` 就继续显示为 Pre-IPO。
@@ -318,7 +317,7 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 - MiniMax 上市状态：[HKEX allotment results（0100，2026-01-09 开始交易）](https://www1.hkexnews.hk/listedco/listconews/sehk/2026/0108/2026010801342.pdf)。
 - Z.AI / Zhipu 上市身份：[HKEX issuer announcement（2513）](https://www.hkexnews.hk/listedco/listconews/sehk/2026/0112/2026011201131.pdf)。
 - 长鑫科技上市状态：[上交所上市交易公告（688825，2026-07-27）](https://www.sse.com.cn/disclosure/announcement/listing/ipo/c/c_20260724_10826610.shtml)。
-- Unitree 当前阶段：[证监会 IPO 注册批复（2026-07-01）](https://www.csrc.gov.cn/csrc/c105906/c7642867/content.shtml)；注册不等于已经开始交易。
+- Unitree 上市状态：[上交所上市公告书（688836，2026-08-19 开始交易）](https://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-08-18/688836_20260818_ROD1.pdf)。
 - GigaDevice 双重上市：[GigaDevice Successfully Lists in Hong Kong](https://www.gigadevice.com/about/news-and-event/news/gigadevice-listed-on-hkex)。
 
 ## 16. 健壮性与定期 Review

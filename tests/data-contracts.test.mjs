@@ -94,6 +94,8 @@ function sourceBetween(source, startMarker, endMarker) {
 test('reference map resolves non-US and commodity underlyings', () => {
   assert.equal(yahooSymbolFor('SKHYNIX'), '000660.KS');
   assert.equal(yahooSymbolFor('MINIMAX'), '0100.HK');
+  assert.equal(yahooSymbolFor('CXMT'), '688825.SS');
+  assert.equal(yahooSymbolFor('UNITREE'), '688836.SS');
   assert.equal(yahooSymbolFor('XAU'), 'GC=F');
   assert.equal(yahooSymbolFor('AAPL'), 'AAPL');
   assert.equal(FX_REFERENCE_MAP.KRW.mode, 'divide');
@@ -177,6 +179,7 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
   assert.deepEqual(normalizeSignalIdentity('SPCXB', 'pre-ipo'), { symbol:'SPCX', category:'equity' });
   assert.deepEqual(normalizeSignalIdentity('CBRSON', 'pre-ipo'), { symbol:'CBRS', category:'equity' });
   assert.deepEqual(normalizeSignalIdentity('QNTB', 'equity'), { symbol:'QNT', category:'equity' });
+  assert.deepEqual(normalizeSignalIdentity('UNITREE', 'pre-ipo'), { symbol:'UNITREE', category:'equity' });
   assert.deepEqual(normalizeSignalIdentity('OPENAI', 'equity'), { symbol:'OPENAI', category:'pre-ipo' });
   assert.deepEqual(normalizeSignalIdentity('ANTHROPIC', 'equity'), { symbol:'ANTHROPIC', category:'pre-ipo' });
   assert.deepEqual(normalizeSignalIdentity('AAPLB', 'equity', { allowBinanceBstock:true }), { symbol:'AAPL', category:'equity' });
@@ -198,6 +201,8 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
   assert.deepEqual(BROAD_STOCK_INDEX_UNDERLYINGS, ['SP500', 'NDX100', 'KR200']);
   assert.equal(categoryFromOfficialSignalType('ETF'), 'etf');
   assert.equal(categoryFromOfficialSignalType('stock_etf'), 'etf');
+  assert.equal(categoryFromOfficialSignalType('CN_EQUITY'), 'equity');
+  assert.equal(categoryFromOfficialSignalType('UNKNOWN_EQUITY'), null);
   assert.equal(categoryFromOfficialSignalType('crypto_etf_token'), null);
   assert.equal(categoryFromOfficialSignalType('ETFCOIN'), null);
 
@@ -215,6 +220,10 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
     .map(match => match[1])
     .sort();
   assert.deepEqual(clientCanonicals, Object.keys(SECURITY_LISTING_REGISTRY).sort());
+  assert.deepEqual(SECURITY_LISTING_REGISTRY.UNITREE, {
+    category:'equity', status:'public', listedOn:'2026-08-19', aliases:[],
+  });
+  assert.match(registrySource, /UNITREE: Object\.freeze\(\{[\s\S]*?category:'equity',[\s\S]*?status:'public',[\s\S]*?listedOn:'2026-08-19'/);
   for (const [canonical, record] of Object.entries(SECURITY_LISTING_REGISTRY)) {
     const entry = registrySource.match(new RegExp(
       `\\b${canonical}: Object\\.freeze\\(\\{[\\s\\S]*?category:'([^']+)'[\\s\\S]*?aliases:Object\\.freeze\\(\\[([^\\]]*)\\]\\)`,
@@ -224,6 +233,12 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
     const aliases = [...entry[2].matchAll(/'([^']+)'/g)].map(match => match[1]).sort();
     assert.deepEqual(aliases, [...record.aliases].sort(), `alias drift for ${canonical}`);
   }
+
+  const binanceLoader = sourceBetween(html, 'async function fetchBinance()', '// Fetch OI for the most liquid assets.');
+  assert.match(binanceLoader, /const officialCategory = categoryForOfficialType\(officialAssetType\);/);
+  assert.match(binanceLoader, /if \(!officialCategory \|\| officialCategory === 'other'\) continue;/);
+  assert.match(html, /CN_EQUITY: \['CXMT','UNITREE'\]/,
+    'the audited Binance fallback must retain both current CN equity contracts');
 
   const etfSource = sourceBetween(
     html,

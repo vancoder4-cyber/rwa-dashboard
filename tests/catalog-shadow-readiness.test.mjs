@@ -426,6 +426,23 @@ test('Day 1 healthy baseline permits design review without claiming lifecycle or
   assert.match(report.decision, /design review/i);
 });
 
+test('a Runtime Cache warming baseline does not require lifecycle events from older PostgreSQL membership', () => {
+  const fixture = readinessFixture(2);
+  for (const source of latestRows(fixture, 'sourceRows')) source.merged_status = 'warming';
+  for (const source of fixture.runtimeSnapshot.sources) source.status = 'warming';
+  for (const change of latestRows(fixture, 'changeRows')) {
+    change.added_count = 1;
+    change.event_eligible_added_count = 0;
+    change.identity_resolved_added_count = 0;
+  }
+
+  const report = buildCatalogShadowReadiness(fixture);
+  assert.equal(report.status, 'pass');
+  assert.equal(report.cycles[0].changes.added, LISTING_SOURCE_KEYS.length);
+  assert.equal(report.cycles[0].changes.eventEligibleAdded, 0);
+  assert.equal(report.cycles[0].lifecycle.total, 0);
+});
+
 test('new-listing and confirmed-delist capabilities require exact 2- and 3-cycle comparison windows', () => {
   let report = buildCatalogShadowReadiness(readinessFixture(2));
   assert.equal(report.status, 'pass');
@@ -1277,6 +1294,7 @@ test('read-only query bundle is fixed at nine bounded catalog-reconciliation que
   };
   const queries = buildCatalogShadowReadinessQueries(sql, 30);
   assert.equal(queries.length, 9);
+  assert.match(queries[5].text, /metadata->>'mergedStatus', ''\) <> 'warming'/);
   assert.equal(calls.length, 9);
   assert.ok(calls.every(call => /SELECT|WITH/.test(call.text)));
   assert.ok(calls.every(call => !/\b(?:INSERT|UPDATE|DELETE|TRUNCATE)\b/i.test(call.text)));

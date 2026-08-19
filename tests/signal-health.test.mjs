@@ -292,6 +292,23 @@ function validOiLiquidationSection(status, generatedAt) {
     status:'estimated',
     reasonCodes:[],
   };
+  const observedBucket = new Date(
+    Math.floor(Date.parse(generatedAt) / (60 * 60 * 1_000)) * 60 * 60 * 1_000,
+  ).toISOString();
+  const state = {
+    assetKey:'equity:AAPL',
+    symbol:'AAPL',
+    category:'equity',
+    cohortFingerprint:'abcdefgh1234',
+    observedBucket,
+    evaluationStatus:full ? 'triggered' : 'warming',
+    sameCohort:full ? true : null,
+    currentOpenInterestUsd:6_000_000,
+    peak24hOpenInterestUsd:full ? 8_000_001 : null,
+    drawdown24hUsd:full ? 2_000_001 : null,
+    drawdown24hPct:full ? Number(((2_000_001 / 8_000_001) * 100).toFixed(6)) : null,
+    reasonCodes:full ? [] : ['OI_HISTORY_HOUR_MISSING'],
+  };
   return {
     formulaVersion:'rwa-oi-liquidation-proxy-1.0',
     generatedAt,
@@ -366,6 +383,8 @@ function validOiLiquidationSection(status, generatedAt) {
       writeStatus:'read-only',
       error:null,
     },
+    stateCoverage:{ expectedEligibleAssets:1, returnedStates:1, complete:true },
+    states:[state],
     rows:full ? [row] : [],
   };
 }
@@ -648,6 +667,12 @@ test('OI health enforces strict $1m eligibility and strict $2m drawdown semantic
   Object.assign(drawdownBoundary.oiLiquidationAnomalies.counts, {
     alerts:1, oiRising:1, liquidationProxy:0, both:0,
   });
+  Object.assign(drawdownBoundary.oiLiquidationAnomalies.states[0], {
+    evaluationStatus:'clear',
+    peak24hOpenInterestUsd:8_000_000,
+    drawdown24hUsd:2_000_000,
+    drawdown24hPct:25,
+  });
   const strictBoundaryValid = validateSignalRadarSnapshot(drawdownBoundary, NOW);
   assert.equal(strictBoundaryValid.oiLiquidation.contractValid, true);
   assert.equal(strictBoundaryValid.status, 'pass');
@@ -674,6 +699,35 @@ test('OI health validates three exact completed UTC days and row aggregate arith
   falsePrecision.oiLiquidationAnomalies.rows[0].status = 'full';
   assert.equal(validateSignalRadarSnapshot(falsePrecision, NOW).oiLiquidation.invalidRows, 1,
     'complete coverage must not relabel an OI/liquidation estimate as Full');
+});
+
+test('OI health requires complete, coherent, untruncated recovery states', () => {
+  const missing = basePayload('full');
+  missing.oiLiquidationAnomalies.states = [];
+  missing.oiLiquidationAnomalies.stateCoverage.returnedStates = 0;
+  missing.oiLiquidationAnomalies.stateCoverage.complete = false;
+  const missingResult = validateSignalRadarSnapshot(missing, NOW);
+  assert.equal(missingResult.oiLiquidation.stateCoverageValid, false);
+  assert.equal(missingResult.oiLiquidation.statesValid, false);
+  assert.equal(missingResult.status, 'fail');
+
+  const wrongPercent = basePayload('full');
+  wrongPercent.oiLiquidationAnomalies.states[0].drawdown24hPct = 99;
+  const wrongPercentResult = validateSignalRadarSnapshot(wrongPercent, NOW);
+  assert.equal(wrongPercentResult.oiLiquidation.invalidStates, 1);
+  assert.equal(wrongPercentResult.status, 'fail');
+
+  const falseRecovery = basePayload('full');
+  Object.assign(falseRecovery.oiLiquidationAnomalies.states[0], {
+    evaluationStatus:'clear',
+    sameCohort:false,
+    reasonCodes:['OI_COHORT_CHANGED'],
+  });
+  falseRecovery.oiLiquidationAnomalies.counts.liquidationProxy = 0;
+  falseRecovery.oiLiquidationAnomalies.counts.both = 0;
+  const falseRecoveryResult = validateSignalRadarSnapshot(falseRecovery, NOW);
+  assert.equal(falseRecoveryResult.oiLiquidation.invalidStates, 1);
+  assert.equal(falseRecoveryResult.status, 'fail');
 });
 
 test('OI health requires exact five-source coverage and coherent history maturity', () => {

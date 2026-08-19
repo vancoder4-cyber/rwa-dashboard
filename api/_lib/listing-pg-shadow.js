@@ -4,6 +4,7 @@ import {
   LISTING_SOURCE_KEYS,
   normalizeListingObservation,
 } from './listing-audit.js';
+import { auditedLifecyclePredecessorAssetKey } from './security-identity.js';
 
 export const LISTING_PG_JOB_NAME = 'rwa-listing-audit';
 export const LISTING_PG_PIPELINE_VERSION = 'rwa-listing-catalog-pg-shadow/v1';
@@ -238,6 +239,7 @@ function buildSourceRun(sourceKey, rawObservation, summary, mergedState, observe
     }
     const reviewRequired = listing.identityStatus !== 'verified';
     const assetKey = `${category}:${listing.canonicalSymbol}`;
+    const lifecyclePredecessorAssetKey = auditedLifecyclePredecessorAssetKey(listing.canonicalSymbol, category);
     const displayName = listing.canonicalSymbol;
     const assetFingerprint = sha256(JSON.stringify([
       assetKey,
@@ -264,6 +266,7 @@ function buildSourceRun(sourceKey, rawObservation, summary, mergedState, observe
       normalizedVenueSymbol: listing.venueSymbol,
       officialCatalogPosition: String(position + 1),
       assetKey,
+      lifecyclePredecessorAssetKey,
       category,
       canonicalUnderlying: listing.canonicalSymbol,
       displayName,
@@ -627,6 +630,7 @@ function membershipRows(batch) {
     source_key: sourceRun.sourceKey,
     official_product_key: row.officialProductKey,
     asset_key: row.assetKey,
+    lifecycle_predecessor_asset_key: row.lifecyclePredecessorAssetKey,
     category: row.category,
     canonical_underlying: row.canonicalUnderlying,
     display_name: row.displayName,
@@ -801,7 +805,7 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
          SELECT 1
          FROM jsonb_to_recordset($1::jsonb) AS incoming(
            source_key text, official_product_key text, asset_key text,
-           category text, canonical_underlying text
+           lifecycle_predecessor_asset_key text, category text, canonical_underlying text
          )
          JOIN identity.source AS source ON source.source_key = incoming.source_key
          JOIN identity.instrument AS instrument
@@ -815,9 +819,16 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
            ON current_asset_version.asset_version_id = current.asset_version_id
          JOIN identity.asset AS current_asset
            ON current_asset.asset_id = current_asset_version.asset_id
-         WHERE current_asset.asset_key <> incoming.asset_key
+         WHERE (current_asset.asset_key <> incoming.asset_key
            OR current_asset_version.category <> incoming.category
-           OR current_asset_version.canonical_underlying <> incoming.canonical_underlying
+           OR current_asset_version.canonical_underlying <> incoming.canonical_underlying)
+           AND NOT (
+             incoming.lifecycle_predecessor_asset_key IS NOT NULL
+             AND current_asset.asset_key = incoming.lifecycle_predecessor_asset_key
+             AND current_asset_version.category = 'pre-ipo'
+             AND incoming.category = 'equity'
+             AND current_asset_version.canonical_underlying = incoming.canonical_underlying
+           )
        ) THEN ingest.reject_verified_catalog_identity_conflict() ELSE 1 END AS verified_identity_guard`,
       [json(memberships)],
     ),
@@ -979,6 +990,24 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
        FROM jsonb_to_recordset($1::jsonb) AS x(asset_key text)
        ON CONFLICT (asset_key) DO NOTHING`,
       [json(memberships)],
+    ),
+    sql.query(
+      `UPDATE identity.asset_version AS current
+       SET valid_to = $2::timestamptz
+       FROM identity.asset AS asset
+       JOIN (
+         SELECT DISTINCT lifecycle_predecessor_asset_key, canonical_underlying
+         FROM jsonb_to_recordset($1::jsonb) AS x(
+           lifecycle_predecessor_asset_key text, canonical_underlying text
+         )
+         WHERE lifecycle_predecessor_asset_key IS NOT NULL
+       ) AS incoming ON incoming.lifecycle_predecessor_asset_key = asset.asset_key
+       WHERE current.asset_id = asset.asset_id
+         AND current.valid_to IS NULL
+         AND current.category = 'pre-ipo'
+         AND current.canonical_underlying = incoming.canonical_underlying
+         AND current.valid_from < $2::timestamptz`,
+      [json(memberships), batch.observedAt],
     ),
     sql.query(
       `UPDATE identity.asset_version AS current
@@ -1303,6 +1332,94 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
        ON CONFLICT (source_id, instrument_version_id, event_type, effective_day)
        DO NOTHING`,
       [...common, json(events)],
+    ),
+    // Runtime Cache is a regional, best-effort publication cache. If it is
+    // evicted between healthy UTC buckets, merged.newEvents is empty because
+    // the public audit correctly restarts at a first baseline. The shadow
+    // database retains exact prior membership, so derive only missing additions
+    // from consecutive trusted source runs. This never derives a delisting.
+    sql.query(
+      `WITH current_cycle AS (${cycleLookup}),
+       current_sources AS (
+         SELECT source_run.source_run_id, source_run.source_id
+         FROM ingest.source_run AS source_run
+         WHERE source_run.attempt_id = (${attemptLookup})
+           AND source_run.endpoint_key = '${LISTING_PG_ENDPOINT_KEY}'
+           AND source_run.status = 'full'
+           AND source_run.catalog_status = 'full'
+           AND source_run.identity_status = 'full'
+       ), durable_additions AS (
+         SELECT current_source.source_id,
+           current_membership.instrument_version_id,
+           current_cycle.cycle_id,
+           prior.source_run_id AS previous_source_run_id,
+           current_source.source_run_id AS current_source_run_id,
+           CASE WHEN EXISTS (
+             SELECT 1
+             FROM analytics.catalog_change_event AS prior_event
+             JOIN identity.instrument_version AS prior_version
+               ON prior_version.instrument_version_id = prior_event.instrument_version_id
+             JOIN identity.instrument_version AS current_version
+               ON current_version.instrument_version_id = current_membership.instrument_version_id
+             WHERE prior_event.source_id = current_source.source_id
+               AND prior_event.event_type = 'delisted'
+               AND prior_version.instrument_id = current_version.instrument_id
+           ) THEN 'relisted' ELSE 'listed' END AS event_type
+         FROM current_sources AS current_source
+         JOIN ingest.catalog_membership AS current_membership
+           ON current_membership.source_run_id = current_source.source_run_id
+          AND current_membership.source_id = current_source.source_id
+          AND current_membership.presence_status = 'present'
+         JOIN LATERAL (
+           SELECT prior.source_run_id, prior.status, prior.catalog_status, prior.identity_status
+           FROM ingest.source_run AS prior
+           JOIN ingest.collection_attempt AS prior_attempt
+             ON prior_attempt.attempt_id = prior.attempt_id
+           JOIN ingest.collection_cycle AS prior_cycle
+             ON prior_cycle.cycle_id = prior_attempt.cycle_id
+           WHERE prior.source_id = current_source.source_id
+             AND prior.endpoint_key = '${LISTING_PG_ENDPOINT_KEY}'
+             AND prior_cycle.job_name = $1
+             AND prior_cycle.pipeline_version = $2
+             AND prior_cycle.bucket_at < $3::timestamptz
+           ORDER BY prior_cycle.bucket_at DESC, prior.completed_at DESC NULLS LAST
+           LIMIT 1
+         ) AS prior ON prior.status = 'full'
+           AND prior.catalog_status = 'full'
+           AND prior.identity_status = 'full'
+         JOIN current_cycle ON true
+         WHERE NOT EXISTS (
+           SELECT 1
+           FROM ingest.catalog_membership AS prior_membership
+           JOIN identity.instrument_version AS prior_version
+             ON prior_version.instrument_version_id = prior_membership.instrument_version_id
+           JOIN identity.instrument_version AS current_version
+             ON current_version.instrument_version_id = current_membership.instrument_version_id
+           WHERE prior_membership.source_run_id = prior.source_run_id
+             AND prior_membership.presence_status = 'present'
+             AND prior_version.instrument_id = current_version.instrument_id
+         )
+       )
+       INSERT INTO analytics.catalog_change_event
+         (source_id, instrument_version_id, detection_cycle_id,
+          previous_source_run_id, current_source_run_id, event_type, effective_day, baseline,
+          status, observed_at, evidence)
+       SELECT addition.source_id, addition.instrument_version_id, addition.cycle_id,
+         addition.previous_source_run_id, addition.current_source_run_id, addition.event_type,
+         $5::date, false, 'confirmed', $5::timestamptz,
+         jsonb_build_object('origin', 'durable-membership-fallback',
+           'reason', 'runtime-cache-first-baseline-after-eviction')
+       FROM durable_additions AS addition
+       WHERE NOT EXISTS (
+         SELECT 1
+         FROM analytics.catalog_change_event AS existing
+         WHERE existing.source_id = addition.source_id
+           AND existing.instrument_version_id = addition.instrument_version_id
+           AND existing.detection_cycle_id = addition.cycle_id
+       )
+       ON CONFLICT (source_id, instrument_version_id, event_type, effective_day)
+       DO NOTHING`,
+      [...common, batch.observedAt],
     ),
     sql.query(
       `UPDATE identity.instrument_version AS current

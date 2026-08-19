@@ -28,6 +28,7 @@ const OFFICIAL_TYPE_CATEGORIES = Object.freeze({
   STOCKS: 'equity',
   EQUITY: 'equity',
   EQUITIES: 'equity',
+  CNEQUITY: 'equity',
   HKEQUITY: 'equity',
   KREQUITY: 'equity',
   SHARE: 'equity',
@@ -51,7 +52,9 @@ export const SECURITY_LISTING_REGISTRY = Object.freeze({
   KIMI: Object.freeze({ category:'pre-ipo', status:'pre-ipo', aliases:Object.freeze([]) }),
   NEURALINK: Object.freeze({ category:'pre-ipo', status:'pre-ipo', aliases:Object.freeze([]) }),
   POLYMARKET: Object.freeze({ category:'pre-ipo', status:'pre-ipo', aliases:Object.freeze([]) }),
-  UNITREE: Object.freeze({ category:'pre-ipo', status:'ipo-registered', aliases:Object.freeze([]) }),
+  UNITREE: Object.freeze({
+    category:'equity', status:'public', listedOn:'2026-08-19', aliases:Object.freeze([]),
+  }),
 });
 
 const SECURITY_ALIAS_MAP = Object.freeze(Object.fromEntries(
@@ -147,6 +150,24 @@ export function categoryFromOfficialSignalType(value) {
   const normalized = normalizedOfficialType(value);
   if (!normalized || OFFICIAL_NON_RWA_TYPES.has(normalized)) return null;
   return OFFICIAL_TYPE_CATEGORIES[normalized] || null;
+}
+
+export function auditedLifecyclePredecessorAssetKey(symbol, category) {
+  const raw = String(symbol || '').trim().toUpperCase();
+  const canonical = SECURITY_ALIAS_MAP[raw];
+  const record = canonical ? SECURITY_LISTING_REGISTRY[canonical] : null;
+  if (String(category || '').trim().toLowerCase() !== 'equity' ||
+      record?.category !== 'equity' || record?.status !== 'public' || !record?.listedOn) return null;
+  return `pre-ipo:${canonical}`;
+}
+
+export function isAuditedSecurityLifecycleTransition(previous, current) {
+  const previousCanonical = String(previous?.canonicalSymbol || '').trim().toUpperCase();
+  const currentCanonical = String(current?.canonicalSymbol || '').trim().toUpperCase();
+  return previousCanonical === currentCanonical &&
+    String(previous?.category || '').trim().toLowerCase() === 'pre-ipo' &&
+    String(current?.category || '').trim().toLowerCase() === 'equity' &&
+    auditedLifecyclePredecessorAssetKey(currentCanonical, 'equity') === `pre-ipo:${previousCanonical}`;
 }
 
 function normalizedCategory(value) {

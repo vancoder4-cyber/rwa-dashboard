@@ -633,6 +633,31 @@ test('verified identity guard rejects category/canonical drift but permits non-i
   assert.equal(rejected.error, LISTING_PG_VERIFIED_IDENTITY_CONFLICT_ERROR_CODE);
 });
 
+test('PostgreSQL shadow permits and versions only the registry-audited Unitree lifecycle transition', () => {
+  const observations = fullObservations({
+    'perp:binance': targetObservation('perp:binance', [listing('perp:binance', 'UNITREE')]),
+  });
+  const batch = buildListingAuditPgBatch(baselineInput(observations));
+  const calls = pgCalls(batch);
+  const guard = calls.find(call => call.text.includes('verified_identity_guard'));
+  const unitree = JSON.parse(guard.params[0]).find(row => row.official_product_key === 'UNITREE-BINANCE-PERP');
+  assert.equal(unitree.lifecycle_predecessor_asset_key, 'pre-ipo:UNITREE');
+  assert.match(guard.text, /incoming\.lifecycle_predecessor_asset_key IS NOT NULL/);
+  assert.match(guard.text, /current_asset_version\.category = 'pre-ipo'/);
+  assert.match(guard.text, /incoming\.category = 'equity'/);
+  assert.match(guard.text, /current_asset_version\.canonical_underlying = incoming\.canonical_underlying/);
+
+  const closePreIpo = calls.find(call =>
+    call.text.includes('UPDATE identity.asset_version AS current') &&
+    call.text.includes('lifecycle_predecessor_asset_key'));
+  assert.ok(closePreIpo);
+  assert.match(closePreIpo.text, /current\.category = 'pre-ipo'/);
+  assert.match(closePreIpo.text, /SET valid_to = \$2::timestamptz/);
+
+  const ordinary = JSON.parse(guard.params[0]).find(row => row.official_product_key === 'AAPL-GATE-PERP');
+  assert.equal(ordinary.lifecycle_predecessor_asset_key, null);
+});
+
 test('trusted same-day retries replace exact evidence and membership before reinsertion', () => {
   const variants = [
     sameDayRetry({
@@ -959,6 +984,21 @@ test('concurrent duplicate lifecycle inserts preserve the first confirmed observ
     assert.match(sinkSql.text, /actual_counts\.membership_count \+ actual_counts\.lifecycle_count/);
     assert.match(sinkSql.text, /SELECT stored\.sink_name, stored\.row_count, stored\.checksum,[\s\S]*actual_counts\.membership_count, actual_counts\.lifecycle_count/);
   }
+});
+
+test('durable membership fallback restores only missing additions after a Runtime Cache baseline reset', () => {
+  const batch = buildListingAuditPgBatch(baselineInput());
+  const fallback = pgCalls(batch).find(call => call.text.includes('durable-membership-fallback'));
+
+  assert.ok(fallback, 'the shadow writer must reconcile an evicted Runtime Cache from durable membership');
+  assert.match(fallback.text, /source_run\.status = 'full'/);
+  assert.match(fallback.text, /prior\.status = 'full'/);
+  assert.match(fallback.text, /prior\.catalog_status = 'full'/);
+  assert.match(fallback.text, /prior\.identity_status = 'full'/);
+  assert.match(fallback.text, /prior_version\.instrument_id = current_version\.instrument_id/);
+  assert.match(fallback.text, /THEN 'relisted' ELSE 'listed'/);
+  assert.doesNotMatch(fallback.text, /THEN 'delisted'/);
+  assert.match(fallback.text, /existing\.detection_cycle_id = addition\.cycle_id/);
 });
 
 test('confirmed delisting closes the exact current instrument version after event capture and relisting creates a new present version', () => {

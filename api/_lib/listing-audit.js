@@ -1,3 +1,5 @@
+import { isAuditedSecurityLifecycleTransition } from './security-identity.js';
+
 export const LISTING_AUDIT_SCHEMA_VERSION = 'rwa-listing-audit/v1';
 export const LISTING_AUDIT_STATE_VERSION = 1;
 export const LISTING_EVENT_RETENTION_DAYS = 45;
@@ -258,7 +260,8 @@ export function mergeListingAudit(previousState, rawObservations, now = new Date
     const activeIdentityDrift = warming ? [] : currentRows.filter(row => {
       const previousRow = previousByKey.get(row.key);
       return previousRow && (
-        identityFingerprint(previousRow) !== identityFingerprint(row) ||
+        (identityFingerprint(previousRow) !== identityFingerprint(row) &&
+          !isAuditedSecurityLifecycleTransition(previousRow, row)) ||
         (previousRow.identityStatus === 'verified' && row.identityStatus !== 'verified')
       );
     });
@@ -267,7 +270,8 @@ export function mergeListingAudit(previousState, rawObservations, now = new Date
     const reusedIdentityDrift = warming ? [] : observedAddedRows.filter(row => {
       const known = previous.known?.[row.key];
       return known?.everSeen && known.active === false && (
-        identityFingerprint(known) !== identityFingerprint(row) ||
+        (identityFingerprint(known) !== identityFingerprint(row) &&
+          !isAuditedSecurityLifecycleTransition(known, row)) ||
         (known.identityStatus === 'verified' && row.identityStatus !== 'verified')
       );
     });

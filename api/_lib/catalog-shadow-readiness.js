@@ -1107,6 +1107,19 @@ export function buildCatalogShadowReadinessQueries(sql, limit = CATALOG_SHADOW_Q
           FROM membership_set AS current_member
           WHERE current_member.cycle_id = current.cycle_id
             AND current_member.source_id = source.source_id
+            -- A Runtime Cache cold start intentionally establishes a fresh
+            -- baseline. Its membership must reconcile, but it cannot invent
+            -- New/Re-listed lifecycle events from older PostgreSQL history.
+            AND EXISTS (
+              SELECT 1
+              FROM ingest.collection_attempt AS current_attempt
+              JOIN ingest.source_run AS current_run
+                ON current_run.attempt_id = current_attempt.attempt_id
+              WHERE current_attempt.cycle_id = current.cycle_id
+                AND current_run.source_id = current_member.source_id
+                AND current_run.endpoint_key = '${LISTING_PG_ENDPOINT_KEY}'
+                AND COALESCE(current_run.metadata->>'mergedStatus', '') <> 'warming'
+            )
             AND current_member.valid_from >= current_member.cycle_bucket_at
             AND current_member.valid_from < current_member.cycle_bucket_at + interval '1 day'
             AND NOT EXISTS (
@@ -1130,6 +1143,18 @@ export function buildCatalogShadowReadinessQueries(sql, limit = CATALOG_SHADOW_Q
             FROM membership_set AS current_member
             WHERE current_member.cycle_id = current.cycle_id
               AND current_member.source_id = source.source_id
+              -- See identity_resolved_added_count above: a warm baseline is
+              -- an observation, not a cross-day lifecycle comparison.
+              AND EXISTS (
+                SELECT 1
+                FROM ingest.collection_attempt AS current_attempt
+                JOIN ingest.source_run AS current_run
+                  ON current_run.attempt_id = current_attempt.attempt_id
+                WHERE current_attempt.cycle_id = current.cycle_id
+                  AND current_run.source_id = current_member.source_id
+                  AND current_run.endpoint_key = '${LISTING_PG_ENDPOINT_KEY}'
+                  AND COALESCE(current_run.metadata->>'mergedStatus', '') <> 'warming'
+              )
               AND current_member.valid_from >= current_member.cycle_bucket_at
               AND current_member.valid_from < current_member.cycle_bucket_at + interval '1 day'
               AND NOT EXISTS (SELECT 1 FROM membership_set AS previous_member
@@ -1155,6 +1180,16 @@ export function buildCatalogShadowReadinessQueries(sql, limit = CATALOG_SHADOW_Q
              AND pending.normalized_venue_symbol = pending_version.normalized_venue_symbol
             WHERE pending_event.detection_cycle_id = current.cycle_id
               AND pending_event.source_id = source.source_id
+              AND EXISTS (
+                SELECT 1
+                FROM ingest.collection_attempt AS current_attempt
+                JOIN ingest.source_run AS current_run
+                  ON current_run.attempt_id = current_attempt.attempt_id
+                WHERE current_attempt.cycle_id = current.cycle_id
+                  AND current_run.source_id = pending_event.source_id
+                  AND current_run.endpoint_key = '${LISTING_PG_ENDPOINT_KEY}'
+                  AND COALESCE(current_run.metadata->>'mergedStatus', '') <> 'warming'
+              )
               AND pending_event.event_type IN ('listed', 'relisted')
               AND pending_event.status = 'confirmed'
               AND pending_version.valid_from >= current.bucket_at

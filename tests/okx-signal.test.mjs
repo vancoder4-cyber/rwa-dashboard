@@ -195,8 +195,10 @@ test('OKX broad Stocks metadata is refined only after official RWA admission', (
 });
 
 test('Signal identity accepts Binance regional equity classes and only exact untyped trade.xyz fallbacks', () => {
+  assert.equal(categoryFromOfficialSignalType('CN_EQUITY'), 'equity');
   assert.equal(categoryFromOfficialSignalType('HK_EQUITY'), 'equity');
   assert.equal(categoryFromOfficialSignalType('KR_EQUITY'), 'equity');
+  assert.equal(categoryFromOfficialSignalType('UNKNOWN_EQUITY'), null);
   assert.equal(tradeXyzSignalCategory('URANIUM', ''), 'commodity');
   assert.equal(tradeXyzSignalCategory('NIFTY', ''), 'index');
   assert.equal(tradeXyzSignalCategory('CAT', ''), null);

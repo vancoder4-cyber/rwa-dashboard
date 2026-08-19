@@ -144,6 +144,40 @@ test('listing audit quarantines a delisted venue symbol reused for a different R
   assert.deepEqual(reused.state.sources['perp:gate'].listingKeys, []);
 });
 
+test('listing audit accepts only the registry-audited Unitree pre-IPO to public-equity transition', () => {
+  const unitreePreIpo = { ...row('perp:binance', 'UNITREE'), category:'pre-ipo' };
+  const initial = fullObservations({
+    'perp:binance': {
+      market:'perp', venue:'binance', status:'full', listings:[unitreePreIpo],
+    },
+  });
+  const baseline = mergeListingAudit(null, initial, new Date('2026-08-18T00:45:00Z'));
+  const migrated = mergeListingAudit(baseline.state, fullObservations({
+    'perp:binance': {
+      market:'perp', venue:'binance', status:'full',
+      listings:[{ ...unitreePreIpo, category:'equity' }],
+    },
+  }), new Date('2026-08-19T00:45:00Z'));
+  const summary = migrated.snapshot.sources.find(source => source.sourceKey === 'perp:binance');
+  assert.equal(summary.status, 'full');
+  assert.equal(migrated.newEvents.length, 0);
+  assert.equal(migrated.state.known['perp:binance:UNITREE-BINANCE-PERP'].category, 'equity');
+
+  const unknownPreIpo = { ...row('perp:binance', 'UNKNOWN'), category:'pre-ipo' };
+  const unknownBaseline = mergeListingAudit(null, fullObservations({
+    'perp:binance': {
+      market:'perp', venue:'binance', status:'full', listings:[unknownPreIpo],
+    },
+  }), new Date('2026-08-18T00:45:00Z'));
+  const unknownMigration = mergeListingAudit(unknownBaseline.state, fullObservations({
+    'perp:binance': {
+      market:'perp', venue:'binance', status:'full',
+      listings:[{ ...unknownPreIpo, category:'equity' }],
+    },
+  }), new Date('2026-08-19T00:45:00Z'));
+  assert.equal(unknownMigration.snapshot.sources.find(source => source.sourceKey === 'perp:binance').status, 'unavailable');
+});
+
 test('listing audit admits bounded official growth but quarantines destructive or extreme catalog drift', () => {
   const baselineRows = Array.from({ length:10 }, (_, index) => row('perp:gate', `BASE${index}`));
   const first = mergeListingAudit(null, fullObservations({
