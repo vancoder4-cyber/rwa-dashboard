@@ -22,6 +22,7 @@ import {
   mergeOiHourlyHistory,
   normalizeBinanceTopTraderPositions,
   normalizeOiHourlyHistory,
+  oiSurgeContextEligible,
 } from './_lib/oi-liquidation-anomaly.js';
 import {
   categoryFromOfficialSignalType,
@@ -405,7 +406,7 @@ async function fetchBinanceTopTraderPositionRows(baseUrl, venueSymbols, nowMs) {
 
 export function oiTriggeredBinanceSymbols(section) {
   return [...new Set((Array.isArray(section?.states) ? section.states : [])
-    .filter(state => state?.evaluationStatus === 'triggered')
+    .filter(state => state?.evaluationStatus === 'triggered' || oiSurgeContextEligible(state))
     .map(state => state?.marketContext?.positioning)
     .filter(positioning => String(positioning?.venue || '').trim().toLowerCase() === 'binance')
     .map(positioning => String(positioning?.venueSymbol || '').trim().toUpperCase())

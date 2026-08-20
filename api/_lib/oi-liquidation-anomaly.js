@@ -3,6 +3,12 @@ import { createHash } from 'node:crypto';
 import { normalizeSignalIdentity } from './security-identity.js';
 
 export const OI_LIQUIDATION_FORMULA_VERSION = 'rwa-oi-liquidation-proxy-1.0';
+export const OI_RANGE_FORMULA_VERSION = 'rwa-oi-24h-range-1.0';
+export const OI_SURGE_CONTEXT_THRESHOLDS = Object.freeze({
+  minimumCurrentOpenInterestUsdInclusive:10_000_000,
+  increaseUsdExclusive:5_000_000,
+  increasePctExclusive:10,
+});
 export const OI_LIQUIDATION_HISTORY_NAMESPACE = 'rwa-signal-oi-liquidation-hourly-v1';
 export const OI_LIQUIDATION_HISTORY_HOURS = 96;
 export const OI_LIQUIDATION_HISTORY_MAX_BYTES = 1_750_000;
@@ -467,6 +473,9 @@ function drawdownEvaluation(hourRows, current, capturedAtMs) {
       peak:null,
       peakAt:null,
       drawdown:null,
+      trough:null,
+      troughAt:null,
+      increase:null,
       sameCohort:changedCohort ? false : null,
       reasonCodes:[
         ...(changedCohort ? ['OI_COHORT_CHANGED'] : []),
@@ -476,12 +485,18 @@ function drawdownEvaluation(hourRows, current, capturedAtMs) {
   }
   const peak = series.reduce((selected, row) =>
     row.openInterestUsd > selected.openInterestUsd ? row : selected, series[0]);
+  const trough = series.reduce((selected, row) =>
+    row.openInterestUsd < selected.openInterestUsd ? row : selected, series[0]);
   const drawdown = round(peak.openInterestUsd - current.currentOpenInterestUsd, 2);
+  const increase = round(current.currentOpenInterestUsd - trough.openInterestUsd, 2);
   return {
     ready:true,
     peak:peak.openInterestUsd,
     peakAt:new Date(peak.hour).toISOString(),
     drawdown,
+    trough:trough.openInterestUsd,
+    troughAt:new Date(trough.hour).toISOString(),
+    increase,
     sameCohort:true,
     reasonCodes:[],
   };
@@ -505,6 +520,9 @@ function drawdownState(current, drawdown, observedBucket, {
     peak24hOpenInterestUsd:null,
     drawdown24hUsd:null,
     drawdown24hPct:null,
+    trough24hOpenInterestUsd:null,
+    increase24hUsd:null,
+    increase24hPct:null,
     reasonCodes:[],
   };
   if (current.classification !== 'eligible-complete') {
@@ -532,6 +550,9 @@ function drawdownState(current, drawdown, observedBucket, {
   const drawdownPct = drawdown.peak > 0
     ? round((drawdown.drawdown / drawdown.peak) * 100, 6)
     : null;
+  const increasePct = drawdown.trough > 0
+    ? round((drawdown.increase / drawdown.trough) * 100, 6)
+    : null;
   const triggered = drawdown.drawdown > OI_LIQUIDATION_THRESHOLDS.liquidationProxyDropUsdExclusive;
   return {
     ...base,
@@ -540,7 +561,13 @@ function drawdownState(current, drawdown, observedBucket, {
     peak24hOpenInterestUsd:drawdown.peak,
     drawdown24hUsd:drawdown.drawdown,
     drawdown24hPct:drawdownPct,
-    reasonCodes:drawdownPct === null ? ['OI_PEAK_ZERO_PERCENT_UNAVAILABLE'] : [],
+    trough24hOpenInterestUsd:drawdown.trough,
+    increase24hUsd:drawdown.increase,
+    increase24hPct:increasePct,
+    reasonCodes:[
+      ...(drawdownPct === null ? ['OI_PEAK_ZERO_PERCENT_UNAVAILABLE'] : []),
+      ...(increasePct === null ? ['OI_TROUGH_ZERO_PERCENT_UNAVAILABLE'] : []),
+    ],
   };
 }
 
@@ -649,11 +676,21 @@ function unavailablePositioning(reference, reasonCode, { binanceMetric = false }
   };
 }
 
-function positioningContext(price24h, evaluationStatus, injected, capturedAtMs) {
+export function oiSurgeContextEligible(state) {
+  const current = finiteOrNull(state?.currentOpenInterestUsd);
+  const trough = finiteOrNull(state?.trough24hOpenInterestUsd);
+  const increase = finiteOrNull(state?.increase24hUsd);
+  if (current === null || trough === null || trough <= 0 || increase === null) return false;
+  return current >= OI_SURGE_CONTEXT_THRESHOLDS.minimumCurrentOpenInterestUsdInclusive &&
+    increase > OI_SURGE_CONTEXT_THRESHOLDS.increaseUsdExclusive &&
+    (increase / trough) * 100 > OI_SURGE_CONTEXT_THRESHOLDS.increasePctExclusive;
+}
+
+function positioningContext(price24h, positioningRequested, injected, capturedAtMs) {
   const reference = price24h?.representative || null;
   if (!reference) return unavailablePositioning(null, 'REFERENCE_CONTRACT_UNAVAILABLE');
-  if (evaluationStatus !== 'triggered') {
-    return unavailablePositioning(reference, 'OI_DRAWDOWN_NOT_TRIGGERED');
+  if (!positioningRequested) {
+    return unavailablePositioning(reference, 'OI_POSITIONING_NOT_REQUESTED');
   }
   if (reference.venue !== BINANCE_VENUE) {
     return unavailablePositioning(reference, 'VENUE_POSITIONING_UNSUPPORTED');
@@ -682,13 +719,14 @@ function positioningContext(price24h, evaluationStatus, injected, capturedAtMs) 
   };
 }
 
-function marketContext(current, evaluationStatus, injected, capturedAtMs) {
+function marketContext(current, state, injected, capturedAtMs) {
   const price24h = price24hContext(current, capturedAtMs);
+  const positioningRequested = state?.evaluationStatus === 'triggered' || oiSurgeContextEligible(state);
   return {
     version:MARKET_CONTEXT_VERSION,
     price24h,
     funding:fundingContext(current, price24h, capturedAtMs),
-    positioning:positioningContext(price24h, evaluationStatus, injected, capturedAtMs),
+    positioning:positioningContext(price24h, positioningRequested, injected, capturedAtMs),
   };
 }
 
@@ -773,7 +811,7 @@ export function buildOiLiquidationAnomalies(assets, hourlyHistory, capturedAtMs,
       });
       return {
         ...state,
-        marketContext:marketContext(row, state.evaluationStatus, options.topTraderPositions, captured),
+        marketContext:marketContext(row, state, options.topTraderPositions, captured),
       };
     });
 
@@ -783,14 +821,24 @@ export function buildOiLiquidationAnomalies(assets, hourlyHistory, capturedAtMs,
       : { ready:false, trend:'unavailable', closes:[] };
     const drawdown = historyAvailable && snapshotComparable
       ? drawdownEvaluation(hourRows, current, captured)
-      : { ready:false, peak:null, peakAt:null, drawdown:null, sameCohort:null, reasonCodes:[] };
+      : {
+        ready:false,
+        peak:null,
+        peakAt:null,
+        drawdown:null,
+        trough:null,
+        troughAt:null,
+        increase:null,
+        sameCohort:null,
+        reasonCodes:[],
+      };
     const state = drawdownState(current, drawdown, observedBucket, {
       historyAvailable,
       snapshotComparable,
     });
     states.push({
       ...state,
-      marketContext:marketContext(current, state.evaluationStatus, options.topTraderPositions, captured),
+      marketContext:marketContext(current, state, options.topTraderPositions, captured),
     });
     if (trend.ready) trendReadyAssets += 1;
     if (drawdown.ready) drawdownReadyAssets += 1;
@@ -826,6 +874,12 @@ export function buildOiLiquidationAnomalies(assets, hourlyHistory, capturedAtMs,
       peak24hOpenInterestUsd:drawdown.peak,
       peak24hAt:drawdown.peakAt,
       drawdown24hUsd:drawdown.drawdown,
+      trough24hOpenInterestUsd:drawdown.trough,
+      trough24hAt:drawdown.troughAt,
+      increase24hUsd:drawdown.increase,
+      increase24hPct:drawdown.trough > 0
+        ? round((drawdown.increase / drawdown.trough) * 100, 6)
+        : null,
       trigger,
       status:'estimated',
       topTraderPositions,
@@ -837,6 +891,9 @@ export function buildOiLiquidationAnomalies(assets, hourlyHistory, capturedAtMs,
         completedDailyTrend:trend.ready ? 'estimated' : 'unavailable',
         peak24hOpenInterestUsd:drawdown.ready ? 'estimated' : 'unavailable',
         drawdown24hUsd:drawdown.ready ? 'estimated' : 'unavailable',
+        trough24hOpenInterestUsd:drawdown.ready ? 'estimated' : 'unavailable',
+        increase24hUsd:drawdown.ready ? 'estimated' : 'unavailable',
+        increase24hPct:drawdown.ready && drawdown.trough > 0 ? 'estimated' : 'unavailable',
         topTraderPositions:topTraderStatus,
       },
       reasonCodes:!binanceSymbols.length
@@ -877,6 +934,7 @@ export function buildOiLiquidationAnomalies(assets, hourlyHistory, capturedAtMs,
 
   return {
     formulaVersion:OI_LIQUIDATION_FORMULA_VERSION,
+    rangeFormulaVersion:OI_RANGE_FORMULA_VERSION,
     generatedAt:new Date(captured).toISOString(),
     status,
     rowLimit:RESPONSE_ROW_LIMIT,
@@ -888,6 +946,7 @@ export function buildOiLiquidationAnomalies(assets, hourlyHistory, capturedAtMs,
       openInterest:'Cross-venue USD open interest is an estimate derived from exact official contract observations and current mark prices where direct USD OI is unavailable',
       threeDayTrend:'oi_rising requires strictly increasing same-cohort 23:00 UTC hourly closes on each of the three most recent completed UTC days',
       liquidationProxy:'liquidation_proxy requires a same-cohort, gap-free 24-hour series and a current USD OI decline strictly greater than $2,000,000 from that window peak',
+      twentyFourHourRange:'The same gap-free 24-hour series publishes both peak-to-current decline and trough-to-current increase. Increase percentage uses the 24-hour trough as denominator.',
       logic:'oi_rising OR liquidation_proxy; both is reported when both conditions hold',
       price24h:'State market context selects the exact perpetual listing with the largest current USD OI among listings with an available 24h change; same-contract funding is published when available, while the range and coverage retain cross-listing disagreement and gaps',
       topTraderPositions:'Triggered drawdown state positioning is bound to the selected price contract: exact Binance representatives can use the official 1h Top Trader Long/Short Position Ratio, while other venues remain explicitly unsupported; legacy alert-row Binance fields remain optional evidence',
