@@ -136,7 +136,7 @@ For accepted instruments the writer records one `official-catalog` evidence row 
 
 ### 4.3 `fact` schema
 
-Migration `0002_phase1_facts_alerting.sql` creates the typed tables below as an empty schema skeleton. The Phase 0/1 application does not populate them. Continuous writes, partition conversion and any missing measurement columns require a later approval, migration and dual-write acceptance gate.
+Migration `0002_phase1_facts_alerting.sql` creates the typed tables below as an empty schema skeleton. Migration `0004_phase2_market_fact_revision_foundation.sql` adds a separate append-only, monthly partitioned listing-market revision ledger and review queue; it does not populate the `0002` skeletons or enable a writer/read path. Continuous writes and any additional fact-family columns still require a later approval and dual-write acceptance gate.
 
 | Table | Current skeleton key | Grain and fields | Partition / retention target before writes |
 |---|---|---|---|
@@ -161,7 +161,7 @@ Four times must remain distinct:
 | Captured time | When the collector received the source representation | `ingest.raw_artifact.captured_at` / source-run observation time |
 | System time | When the normalized revision was committed | Append-only `recorded_at`; never substituted for event/valid time |
 
-The existing `0002` fact tables are empty skeletons and their current unique keys are not a revision ledger. Before any Phase 2 writer starts, an additive migration must introduce a typed revision relation for each enabled fact family (or an equivalently constrained shared revision header plus typed child tables) with at least:
+The existing `0002` fact tables are empty skeletons and their current unique keys are not a revision ledger. Additive migration `0004` implements the first listing-market family foundation through `fact.market_fact_revision`, typed child `fact.listing_market_fact_revision`, `ops.market_fact_revision_review`, versioned collection/drift policies and `fact.listing_market_fact_revision_summary`. Its writer and reader remain independently disabled. Every additional fact family must add an equivalently constrained typed child/policy before its writer starts, preserving at least:
 
 - `revision_id uuid` primary key and an `observation_key` derived from `source_id`, exact `instrument_version_id`, dataset/grain, event/valid boundary, unit/currency and immutable method version—never a bare ticker;
 - `revision_no`, `supersedes_revision_id`, `source_run_id`, optional input artifact, `captured_at`, `recorded_at`, source/method/formula version and normalized payload checksum;
@@ -245,7 +245,7 @@ The `ops.*` tables after `ops.schema_migration` are documented later targets and
 
 ### 5.1 Partition keys
 
-The `0002` tables are intentionally empty, unpartitioned skeletons. Before any continuous market-fact writer is enabled, a later migration must convert or replace the time-series parents with the partition design below and prove replay/rollback. Schema existence is not permission to accumulate unbounded rows.
+The `0002` tables are intentionally empty, unpartitioned skeletons. Migration `0004` partitions only the new listing-market revision child by `valid_from`, creates previous/current/next-two monthly partitions without a default partition, and keeps partition creation migration-owner-only. Other continuous fact families must convert or replace their time-series parents with the applicable design below and prove replay/rollback before their writer is enabled. Schema existence is not permission to accumulate rows.
 
 - Monthly range partitions: hourly listing facts, funding observations, Top Trader observations, reference prices, source health and alert events.
 - Quarterly range partitions: daily catalog presence, traditional activity and daily aggregate anchors.
@@ -314,7 +314,7 @@ Scope:
 
 1. Provision Neon/PostgreSQL in the production region strategy and a separate non-production branch/database.
 2. Pin a supported PostgreSQL version and required extensions; apply versioned, transactional migrations.
-3. Create the implemented NOLOGIN group roles: `rwa_catalog_shadow_writer` for only the named Phase 1 identity/ingest/event tables, `rwa_analytics_reader` for read-only analytics/reconciliation, and `rwa_alert_dispatcher` for only delivery/outbox dispatch. The migration owner is granted `rwa_catalog_shadow_writer` so the current runtime owner can use `SET LOCAL ROLE` inside the shadow transaction; the other groups need an explicit future login grant. No Phase 0/1 group can write continuous market facts. Before any read cutover, replace the owner connection with a dedicated least-privilege application login rather than treating owner-plus-role-assumption as the final production boundary.
+3. Create the implemented NOLOGIN group roles: `rwa_catalog_shadow_writer` for only the named Phase 1 identity/ingest/event tables, `rwa_market_fact_shadow_writer` for append-only revision/review inserts, `rwa_analytics_reader` for read-only analytics/reconciliation, and `rwa_alert_dispatcher` for only delivery/outbox dispatch. The migration owner receives only the memberships needed to assume these reviewed roles; the Phase 2 market-fact mode still defaults off. Before any read cutover, replace the owner connection with a dedicated least-privilege application login rather than treating owner-plus-role-assumption as the final production boundary.
 4. Configure pooled runtime connections and a direct migration connection. Set short statement/lock/idle-in-transaction timeouts.
 5. Create the Phase 0 identity/ingest foundation plus empty typed `fact`, `analytics`, `alert` and `publication` table skeletons. `ops.schema_migration` exists now; additional ops tables remain later targets. No skeleton table is an enabled writer contract.
 6. Provision the private object-storage/archive contract and validate a synthetic content-addressed artifact's checksum, conditional-create, lifecycle and restore behavior. Do not instrument or claim capture of upstream raw bodies in this phase.
@@ -358,7 +358,7 @@ Every qualifying scheduled bucket must satisfy:
 
 ### Later phases — separate approvals
 
-- Phase 2: exact listing market-fact dual-write, per-data-family overlap/current-capture policies, append-only revision ledger and replay comparison. No writer starts until the bitemporal keys, typed revision tables/views, drift/finality policies and backfill isolation above are migrated and tested.
+- Phase 2: exact listing market-fact dual-write, per-data-family overlap/current-capture policies, append-only revision ledger and replay comparison. Migration `0004` is the default-off foundation only; writer integration, isolated Preview migration/replay evidence and explicit enablement remain separate gates.
 - Phase 3: PostgreSQL-derived aggregates and signal evaluations in shadow mode.
 - Phase 4: versioned publication snapshots and read cutover behind a rollback flag.
 - Phase 5: durable alert incidents, subscriptions, outbox and delivery.

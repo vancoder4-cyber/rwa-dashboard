@@ -55,6 +55,7 @@ annualized funding = funding rate × (24 / intervalHours) × 365
 | Runtime Cache | Regional best-effort Vercel Runtime Cache used by authenticated writers |
 | None | No server-side historical persistence for that derived result |
 | Phase 1 shadow | Accepted catalog identity/lifecycle plus a deterministic `normalized-catalog-v1` manifest/checksum written alongside unchanged production reads; private object upload is separately controlled and is not an upstream raw-body archive |
+| Phase 2 foundation | Append-only listing-market revision schema/policy exists, but its independent writer/read switches remain off and it contains no implied history |
 | Later DB | Target table exists in the architecture, but continuous writes are not authorized in Phase 0/1 |
 
 ## 2. Source catalog
@@ -510,7 +511,7 @@ Current persistence does **not** provide a market-history revision ledger:
 | Perp and Spot daily anomaly anchors | A same-UTC-day retry replaces the compact daily bucket | This is idempotent last-good history, not append-only source-restatement history |
 | Funding, Top 30, Reference and Traditional endpoints | CDN/current response behavior described above | CDN revalidation is not durable correction evidence |
 
-Phase 2 must use the bitemporal, append-only design in `DATABASE_ARCHITECTURE.md` before exact market-fact dual-write begins. For the same exact observation key and source/method/version, an identical normalized re-fetch is idempotent; a changed representation appends a revision. Read views expose typed `first_value`, `latest_value`, `revision_count` (changes after the first), latest/first delta and latest/previous delta. Event/valid time remains fixed while captured/system time identifies when each representation was seen.
+Migration `0004` supplies the default-off bitemporal, append-only listing-market foundation described in `DATABASE_ARCHITECTURE.md`; applying it alone does not begin exact market-fact dual-write. For the same exact observation key and source/method/version, an identical normalized re-fetch is idempotent; an accepted changed representation appends a revision, while review/anomalous candidates are quarantined. The read-only summary exposes typed first/latest values, revision count (changes after the first), latest/first delta and latest/previous delta. Event/valid time remains fixed while captured/system time identifies when each representation was seen.
 
 There is no universal overlap or elapsed-time gate. The exact current formula and future revision policy are:
 
@@ -536,7 +537,7 @@ There is no universal overlap or elapsed-time gate. The exact current formula an
 | External metadata/raw archive | Official catalog/market payloads and traditional source files | Object archive + `ingest.raw_artifact` manifest | Raw-body contract/schema in Phase 0; no upstream raw body in Phase 1; collector instrumentation later |
 | Normalized catalog artifact | Deterministic accepted/reviewed observation representation | `ingest.raw_artifact` manifest with kind `normalized`; optional private content-addressed object | Ten manifests/checksums per complete PostgreSQL-shadow cycle; object upload only when its independent server switch is enabled |
 | Normalized identity/catalog | Security identity, exact venue listing membership | `identity.*`, `ingest.source_run`, `ingest.catalog_membership` | Ten catalogs only in Phase 1 |
-| Normalized market facts | Listing price/volume/OI/funding/depth, traditional/reference observations | Typed `fact.*` plus Phase 2 append-only revision relations/views | Schema skeleton only; no overlap writer in Phase 0/1 |
+| Normalized market facts | Listing price/volume/OI/funding/depth, traditional/reference observations | Typed `fact.*` plus Phase 2 append-only revision relations/views | Listing revision foundation exists in `0004`; writer/read remain off, other families remain skeleton/later |
 | Derived analytics | Canonical hourly aggregate, daily anchors, ranks, cohorts | `analytics.*` | Schema skeleton only |
 | Signals | Radar scores, anomaly triggers, listing lifecycle events | Market signals later use `analytics.signal_result` / `alert.*`; catalog lifecycle uses `analytics.catalog_change_event` | Only verified catalog lifecycle events may shadow-write; market signals do not |
 | Publication | API snapshot payload/checksum/latest pointer | `publication.*` plus CDN | Schema skeleton only; current APIs unchanged |
