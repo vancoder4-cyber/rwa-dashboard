@@ -37,6 +37,8 @@ import {
   OI_LIQUIDATION_HISTORY_HOURS,
   OI_LIQUIDATION_HISTORY_NAMESPACE,
   OI_LIQUIDATION_THRESHOLDS,
+  OI_RANGE_FORMULA_VERSION,
+  oiSurgeContextEligible,
 } from './_lib/oi-liquidation-anomaly.js';
 import { fetchJsonWithPolicy, fetchWithPolicy, mapWithConcurrency } from './_lib/upstream.js';
 
@@ -908,7 +910,7 @@ function oiFundingContextValid(context, generatedAtMs, price24h, support = null)
   return true;
 }
 
-function oiPositioningContextValid(context, evaluationStatus, generatedAtMs, price24h) {
+function oiPositioningContextValid(context, positioningRequested, generatedAtMs, price24h) {
   const keys = [
     'status', 'venue', 'venueSymbol', 'metric', 'scope', 'period', 'longShortRatio',
     'longPositionPct', 'shortPositionPct', 'bias', 'observedAt', 'reasonCode',
@@ -926,9 +928,9 @@ function oiPositioningContextValid(context, evaluationStatus, generatedAtMs, pri
       context.reasonCode === 'REFERENCE_CONTRACT_UNAVAILABLE';
   }
   if (context.venue !== reference.venue || context.venueSymbol !== reference.venueSymbol) return false;
-  if (evaluationStatus !== 'triggered') {
+  if (!positioningRequested) {
     return context.status === 'unavailable' && context.metric === null && context.scope === null &&
-      context.period === null && unavailableValues && context.reasonCode === 'OI_DRAWDOWN_NOT_TRIGGERED';
+      context.period === null && unavailableValues && context.reasonCode === 'OI_POSITIONING_NOT_REQUESTED';
   }
   if (reference.venue !== 'binance') {
     return context.status === 'unavailable' && context.metric === null && context.scope === null &&
@@ -938,7 +940,13 @@ function oiPositioningContextValid(context, evaluationStatus, generatedAtMs, pri
     context.period === '1h' && oiTopTraderPositionValid(context, generatedAtMs);
 }
 
-function oiMarketContextValid(context, evaluationStatus, generatedAtMs, priceSupport = null) {
+function oiMarketContextValid(
+  context,
+  evaluationStatus,
+  generatedAtMs,
+  priceSupport = null,
+  positioningRequested = evaluationStatus === 'triggered',
+) {
   return context && typeof context === 'object' && !Array.isArray(context) &&
     Object.keys(context).length === 4 && context.version === OI_MARKET_CONTEXT_VERSION &&
     Object.prototype.hasOwnProperty.call(context, 'version') &&
@@ -947,7 +955,7 @@ function oiMarketContextValid(context, evaluationStatus, generatedAtMs, priceSup
     Object.prototype.hasOwnProperty.call(context, 'positioning') &&
     oiPrice24hContextValid(context.price24h, generatedAtMs, priceSupport) &&
     oiFundingContextValid(context.funding, generatedAtMs, context.price24h, priceSupport) &&
-    oiPositioningContextValid(context.positioning, evaluationStatus, generatedAtMs, context.price24h);
+    oiPositioningContextValid(context.positioning, positioningRequested, generatedAtMs, context.price24h);
 }
 
 function oiLiquidationRowValid(row, section, generatedAtMs) {
@@ -1038,6 +1046,22 @@ function oiLiquidationRowValid(row, section, generatedAtMs) {
   const drawdownCoherent = expectedDrawdown === null
     ? drawdown === null
     : Number.isFinite(drawdown) && drawdown === expectedDrawdown;
+  const trough = row?.trough24hOpenInterestUsd;
+  const troughAtMs = row?.trough24hAt === null ? null : Date.parse(row?.trough24hAt);
+  const troughValid = Number.isFinite(trough) && trough >= 0 && Number.isFinite(troughAtMs) &&
+    Number.isFinite(generatedAtMs) && troughAtMs <= generatedAtMs &&
+    troughAtMs >= generatedAtMs - OI_LIQUIDATION_THRESHOLDS.peakLookbackHours * UTC_HOUR_MS;
+  const expectedIncrease = troughValid && Number.isFinite(currentOi)
+    ? rounded(Math.max(0, currentOi - trough), 2)
+    : null;
+  const increase = row?.increase24hUsd;
+  const increasePct = row?.increase24hPct;
+  const increaseCoherent = expectedIncrease === null
+    ? increase === null && increasePct === null
+    : Number.isFinite(increase) && increase === expectedIncrease &&
+      (trough === 0
+        ? increasePct === null
+        : Number.isFinite(increasePct) && increasePct === rounded((increase / trough) * 100, 6));
   const oiTriggered = row?.completedDailyTrend === 'rising' && expectedTrend === 'rising';
   const liquidationTriggered = Number.isFinite(drawdown) &&
     drawdown > OI_LIQUIDATION_THRESHOLDS.liquidationProxyDropUsdExclusive;
@@ -1068,7 +1092,8 @@ function oiLiquidationRowValid(row, section, generatedAtMs) {
   const expectedClosesStatus = completeCloses ? 'estimated' : closeRows.length ? 'partial' : 'unavailable';
   const fieldStatusKeys = [
     'currentVolume24hUsd', 'currentOpenInterestUsd', 'completedDailyCloses', 'completedDailyTrend',
-    'peak24hOpenInterestUsd', 'drawdown24hUsd', 'topTraderPositions',
+    'peak24hOpenInterestUsd', 'drawdown24hUsd', 'trough24hOpenInterestUsd',
+    'increase24hUsd', 'increase24hPct', 'topTraderPositions',
   ];
   const estimatedFieldsValid = fieldStatus && typeof fieldStatus === 'object' && !Array.isArray(fieldStatus) &&
     Object.keys(fieldStatus).length === fieldStatusKeys.length &&
@@ -1079,6 +1104,10 @@ function oiLiquidationRowValid(row, section, generatedAtMs) {
     String(fieldStatus.completedDailyTrend || '').toLowerCase() === expectedClosesStatus &&
     String(fieldStatus.peak24hOpenInterestUsd || '').toLowerCase() === (peakValid ? 'estimated' : 'unavailable') &&
     String(fieldStatus.drawdown24hUsd || '').toLowerCase() === (expectedDrawdown === null ? 'unavailable' : 'estimated') &&
+    String(fieldStatus.trough24hOpenInterestUsd || '').toLowerCase() === (troughValid ? 'estimated' : 'unavailable') &&
+    String(fieldStatus.increase24hUsd || '').toLowerCase() === (expectedIncrease === null ? 'unavailable' : 'estimated') &&
+    String(fieldStatus.increase24hPct || '').toLowerCase() ===
+      (expectedIncrease === null || trough === 0 ? 'unavailable' : 'estimated') &&
     String(fieldStatus.topTraderPositions || '').toLowerCase() === topTraderFieldStatus &&
     Object.values(fieldStatus).every(value => OI_LIQUIDATION_FIELD_STATUSES.has(String(value || '').toLowerCase()));
   const reasonCodesValid = Array.isArray(row?.reasonCodes) &&
@@ -1094,8 +1123,9 @@ function oiLiquidationRowValid(row, section, generatedAtMs) {
     Number.isFinite(currentVolume) && currentVolume > OI_LIQUIDATION_THRESHOLDS.minVolume24hUsdExclusive &&
     rounded(currentVolume, 2) === currentVolume && Number.isFinite(currentOi) && currentOi >= 0 &&
     rounded(currentOi, 2) === currentOi && closes !== null && closeDaysValid &&
-    trendValid && drawdownCoherent &&
+    trendValid && drawdownCoherent && increaseCoherent &&
     (peakValid || (peak === null && row?.peak24hAt === null)) &&
+    (troughValid || (trough === null && row?.trough24hAt === null)) &&
     row?.trigger === expectedTrigger && expectedTrigger !== null && positionsValid &&
     row?.overallTraderBias === expectedOverallBias && row?.status === 'estimated' &&
     estimatedFieldsValid && reasonCodesValid;
@@ -1115,6 +1145,9 @@ function oiLiquidationStateValid(state, generatedAtMs) {
   const peak = state?.peak24hOpenInterestUsd;
   const drawdown = state?.drawdown24hUsd;
   const drawdownPct = state?.drawdown24hPct;
+  const trough = state?.trough24hOpenInterestUsd;
+  const increase = state?.increase24hUsd;
+  const increasePct = state?.increase24hPct;
   const currentOiValid = currentOi === null ||
     (Number.isFinite(currentOi) && currentOi >= 0 && rounded(currentOi, 2) === currentOi);
   const peakValid = peak === null || (Number.isFinite(peak) && peak >= 0 && rounded(peak, 2) === peak);
@@ -1123,6 +1156,12 @@ function oiLiquidationStateValid(state, generatedAtMs) {
   const drawdownPctValid = drawdownPct === null ||
     (Number.isFinite(drawdownPct) && drawdownPct >= 0 && drawdownPct <= 100 &&
       rounded(drawdownPct, 6) === drawdownPct);
+  const troughValid = trough === null ||
+    (Number.isFinite(trough) && trough >= 0 && rounded(trough, 2) === trough);
+  const increaseValid = increase === null ||
+    (Number.isFinite(increase) && increase >= 0 && rounded(increase, 2) === increase);
+  const increasePctValid = increasePct === null ||
+    (Number.isFinite(increasePct) && increasePct >= 0 && rounded(increasePct, 6) === increasePct);
   const reasonCodes = Array.isArray(state?.reasonCodes) ? state.reasonCodes : null;
   const reasonsValid = reasonCodes !== null && reasonCodes.every(reason =>
     /^[A-Z][A-Z0-9_]{1,79}$/.test(reason)) && new Set(reasonCodes).size === reasonCodes.length;
@@ -1130,23 +1169,38 @@ function oiLiquidationStateValid(state, generatedAtMs) {
     /^[A-Z0-9][A-Z0-9.-]{0,39}$/.test(symbol) && state?.assetKey === `${category}:${symbol}` &&
     OI_LIQUIDATION_EVALUATION_STATUSES.has(evaluationStatus) &&
     Number.isFinite(observedBucketMs) && observedBucketMs === generatedHour &&
-    currentOiValid && peakValid && drawdownValid && drawdownPctValid && reasonsValid &&
-    oiMarketContextValid(state?.marketContext, evaluationStatus, generatedAtMs);
+    currentOiValid && peakValid && drawdownValid && drawdownPctValid && troughValid &&
+    increaseValid && increasePctValid && reasonsValid &&
+    oiMarketContextValid(
+      state?.marketContext,
+      evaluationStatus,
+      generatedAtMs,
+      null,
+      evaluationStatus === 'triggered' || oiSurgeContextEligible(state),
+    );
   if (!commonValid) return false;
 
   if (evaluationStatus === 'triggered' || evaluationStatus === 'clear') {
     if (!cohortValid || state?.sameCohort !== true || !Number.isFinite(currentOi) ||
         !Number.isFinite(peak) || !Number.isFinite(drawdown) || peak < currentOi ||
-        drawdown !== rounded(peak - currentOi, 2)) return false;
+        drawdown !== rounded(peak - currentOi, 2) || !Number.isFinite(trough) ||
+        trough > currentOi || !Number.isFinite(increase) ||
+        increase !== rounded(currentOi - trough, 2)) return false;
     const expectedStatus = drawdown > OI_LIQUIDATION_THRESHOLDS.liquidationProxyDropUsdExclusive
       ? 'triggered'
       : 'clear';
     if (evaluationStatus !== expectedStatus) return false;
     if (peak === 0) {
-      return currentOi === 0 && drawdown === 0 && drawdownPct === null &&
-        reasonCodes.length === 1 && reasonCodes[0] === 'OI_PEAK_ZERO_PERCENT_UNAVAILABLE';
+      return currentOi === 0 && drawdown === 0 && drawdownPct === null && trough === 0 &&
+        increase === 0 && increasePct === null && reasonCodes.length === 2 &&
+        reasonCodes.includes('OI_PEAK_ZERO_PERCENT_UNAVAILABLE') &&
+        reasonCodes.includes('OI_TROUGH_ZERO_PERCENT_UNAVAILABLE');
     }
-    return drawdownPct === rounded((drawdown / peak) * 100, 6) && reasonCodes.length === 0;
+    const rangeReasonsValid = trough === 0
+      ? increasePct === null && reasonCodes.length === 1 &&
+        reasonCodes[0] === 'OI_TROUGH_ZERO_PERCENT_UNAVAILABLE'
+      : increasePct === rounded((increase / trough) * 100, 6) && reasonCodes.length === 0;
+    return drawdownPct === rounded((drawdown / peak) * 100, 6) && rangeReasonsValid;
   }
 
   if (evaluationStatus === 'warming') {
@@ -1156,18 +1210,21 @@ function oiLiquidationStateValid(state, generatedAtMs) {
       ? reasonCodes.includes('OI_COHORT_CHANGED')
       : state?.sameCohort === null;
     return cohortValid && Number.isFinite(currentOi) && peak === null && drawdown === null &&
-      drawdownPct === null && reasonCodes.length > 0 && explainsWarming && cohortClaimValid;
+      drawdownPct === null && trough === null && increase === null && increasePct === null &&
+      reasonCodes.length > 0 && explainsWarming && cohortClaimValid;
   }
 
   const currentCohortShapeValid = (cohortFingerprint === null && currentOi === null) ||
     (cohortValid && Number.isFinite(currentOi));
   return evaluationStatus === 'unavailable' && currentCohortShapeValid && state?.sameCohort === null &&
-    peak === null && drawdown === null && drawdownPct === null && reasonCodes.length > 0;
+    peak === null && drawdown === null && drawdownPct === null && trough === null &&
+    increase === null && increasePct === null && reasonCodes.length > 0;
 }
 
 function validateOiLiquidationAnomalies(section, generatedAtMs) {
   const status = String(section?.status || '').toLowerCase();
-  const formulaValid = section?.formulaVersion === OI_LIQUIDATION_FORMULA_VERSION;
+  const formulaValid = section?.formulaVersion === OI_LIQUIDATION_FORMULA_VERSION &&
+    section?.rangeFormulaVersion === OI_RANGE_FORMULA_VERSION;
   const sectionGeneratedAtMs = Date.parse(section?.generatedAt);
   const timestampValid = Number.isFinite(sectionGeneratedAtMs) && Number.isFinite(generatedAtMs) &&
     Math.abs(sectionGeneratedAtMs - generatedAtMs) <= 1_000;
@@ -1178,7 +1235,8 @@ function validateOiLiquidationAnomalies(section, generatedAtMs) {
     String(thresholds?.logic || '').toLowerCase() === 'or';
   const methodology = section?.methodology;
   const methodologyValid = methodology && typeof methodology === 'object' && !Array.isArray(methodology) &&
-    ['universe', 'eligibility', 'openInterest', 'threeDayTrend', 'liquidationProxy', 'logic',
+    ['universe', 'eligibility', 'openInterest', 'threeDayTrend', 'liquidationProxy',
+      'twentyFourHourRange', 'logic',
       'price24h', 'topTraderPositions', 'limitations']
       .every(key => typeof methodology[key] === 'string' && methodology[key].length > 0);
   const sourcesValid = exactOiLiquidationSources(section);
@@ -1270,10 +1328,16 @@ function validateOiLiquidationAnomalies(section, generatedAtMs) {
     const state = stateByKey.get(row.assetKey);
     if (!state || state.cohortFingerprint !== row.cohortFingerprint ||
         state.currentOpenInterestUsd !== row.currentOpenInterestUsd ||
-        !oiMarketContextValid(state?.marketContext, state.evaluationStatus, generatedAtMs, {
-          listings:row.listings,
-          currentOi:row.currentOpenInterestUsd,
-        })) return false;
+        !oiMarketContextValid(
+          state?.marketContext,
+          state.evaluationStatus,
+          generatedAtMs,
+          {
+            listings:row.listings,
+            currentOi:row.currentOpenInterestUsd,
+          },
+          state.evaluationStatus === 'triggered' || oiSurgeContextEligible(state),
+        )) return false;
     const positioning = state.marketContext.positioning;
     if (state.evaluationStatus === 'triggered' && positioning.venue === 'binance') {
       const legacy = row.topTraderPositions.find(position =>
@@ -1287,10 +1351,15 @@ function validateOiLiquidationAnomalies(section, generatedAtMs) {
     }
     if (row.drawdown24hUsd === null) {
       return state.evaluationStatus === 'warming' && state.peak24hOpenInterestUsd === null &&
-        state.drawdown24hUsd === null && state.drawdown24hPct === null;
+        state.drawdown24hUsd === null && state.drawdown24hPct === null &&
+        state.trough24hOpenInterestUsd === null && state.increase24hUsd === null &&
+        state.increase24hPct === null;
     }
     return state.peak24hOpenInterestUsd === row.peak24hOpenInterestUsd &&
-      state.drawdown24hUsd === row.drawdown24hUsd;
+      state.drawdown24hUsd === row.drawdown24hUsd &&
+      state.trough24hOpenInterestUsd === row.trough24hOpenInterestUsd &&
+      state.increase24hUsd === row.increase24hUsd &&
+      state.increase24hPct === row.increase24hPct;
   });
   const triggeredStates = states?.filter(state => state.evaluationStatus === 'triggered').length ?? -1;
   const completeStateCohorts = states?.filter(state => state.cohortFingerprint !== null).length ?? -1;

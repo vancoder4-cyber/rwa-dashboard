@@ -390,7 +390,7 @@ Namespace `rwa-signal-spot-volume-price-history-v1` retains eight UTC daily anch
 
 ### 6.4 OI Positioning & Large-Liquidation Proxy
 
-Producer: `api/_lib/oi-liquidation-anomaly.js`; formula `rwa-oi-liquidation-proxy-1.0`.
+Producer: `api/_lib/oi-liquidation-anomaly.js`; legacy trigger formula `rwa-oi-liquidation-proxy-1.0`; additive 24-hour range formula `rwa-oi-24h-range-1.0`.
 
 Eligibility and triggers:
 
@@ -398,13 +398,15 @@ Eligibility and triggers:
 eligible volume        = current aggregate 24h USD volume > $1,000,000
 three-day OI build     = close(d-3) < close(d-2) < close(d-1)
 24h drawdown           = max(comparable OI in prior 24h) - current aggregate OI
+24h increase           = current aggregate OI - min(comparable OI in prior 24h)
+24h increase percent   = 24h increase / 24h minimum OI × 100
 liquidation proxy      = 24h drawdown > $2,000,000
 alert                  = three-day OI build OR liquidation proxy
 ```
 
 Both monetary boundaries are strict: exactly $1 million volume is ineligible and exactly $2 million drawdown does not trigger. The three closes are completed 23:00 UTC closes and never include current intraday OI. Exact cohort/method continuity and complete OI across all expected listings are mandatory.
 
-All cross-listing OI USD, completed closes, peak, drawdown and trigger fields are Estimated even when source coverage is Full. OI USD can change because mark price changes; the result is a deleveraging/large-liquidation **proxy**, not exchange-reported liquidation and not evidence of which side liquidated.
+All cross-listing OI USD, completed closes, 24-hour peak/trough, drawdown/increase and trigger fields are Estimated even when source coverage is Full. OI USD can change because mark price changes; neither direction proves which side opened, closed or liquidated.
 
 Every recovery state includes additive `marketContext.version=rwa-oi-market-context/v2`. `price24h` does not publish a single cross-venue average. It selects the current exact perpetual listing with the largest USD OI among listings whose 24-hour change is available (`selectionMethod=largest-current-oi-listing-with-available-change`), and publishes that listing's venue/symbol/change/method/status plus its share of current aggregate USD OI. `rangePct`, `observedListings/expectedListings`, `coverageStatus` and snapshot `observedAt` preserve disagreement and missing coverage. Gate, Binance and Bitget use direct official 24-hour change fields as Full; trade.xyz mark-versus-previous-day and OKX last-versus-open24h are computed and therefore Estimated. Non-finite values and changes below -100% are Unavailable.
 
@@ -418,7 +420,7 @@ Binance Top Trader Position Ratio is optional supporting evidence for every exac
 - no exact row, failure, stale/contradictory percentages = Unavailable, never Neutral;
 - official observation may be at most three hours old.
 
-Triggered drawdown states publish one same-contract object under `marketContext.positioning`. Its `venue` and `venueSymbol` must exactly equal `price24h.representative`. Only a Binance representative can currently publish Full data, with metric `top-trader-position-ratio`, scope `top-20%-by-margin-balance-position-ratio` and period `1h`. A trade.xyz, Gate, Bitget or OKX representative publishes `VENUE_POSITIONING_UNSUPPORTED`; it never borrows a Binance listing for the same canonical asset. No price reference publishes `REFERENCE_CONTRACT_UNAVAILABLE`, and non-triggered states remain explicitly Unavailable. Binance enrichment targets are derived from the exact representative contract in the uncapped triggered `states` contract, never another venue listing or the ranked Top-100 `rows` response. The legacy ranked-row `topTraderPositions` fields remain unchanged for this compatibility release and are not the Push market-context contract.
+Triggered drawdown states and states crossing the published OI-surge context gates publish one same-contract object under `marketContext.positioning`. Its `venue` and `venueSymbol` must exactly equal `price24h.representative`. Only a Binance representative can currently publish Full data, with metric `top-trader-position-ratio`, scope `top-20%-by-margin-balance-position-ratio` and period `1h`. A trade.xyz, Gate, Bitget or OKX representative publishes `VENUE_POSITIONING_UNSUPPORTED`; it never borrows a Binance listing for the same canonical asset. No price reference publishes `REFERENCE_CONTRACT_UNAVAILABLE`, and states that need no positioning context publish `OI_POSITIONING_NOT_REQUESTED`. Binance enrichment targets are derived from the exact representative contract in the uncapped `states` contract, never another venue listing or the ranked Top-100 `rows` response. The surge context gates match the consumer contract: current OI at least $10m, 24-hour increase above $5m and above 10%. The legacy ranked-row `topTraderPositions` fields remain unchanged for compatibility and are not the Push market-context contract.
 
 Namespace `rwa-signal-oi-liquidation-hourly-v1` retains 96 idempotent UTC-hour buckets and requires 24 comparable hours plus three completed days. It stores only volume-eligible, OI-complete exact cohorts. Runtime Cache only; empty later-phase skeletons are `fact.top_trader_observation_hourly`, `analytics.asset_daily_oi_close`, `analytics.asset_hourly` and versioned alerts.
 
@@ -426,14 +428,14 @@ Binance `underlyingType=CN_EQUITY` is an exact official Equity mapping. Future u
 
 The public OI child has two deliberately different collections. `rows` keeps the existing ranked alert contract and remains capped at 100. `states` is an additive recovery contract and is never rank-capped: it contains exactly one compact state for every current volume-eligible asset, including assets whose current exact OI cohort is incomplete. `stateCoverage={expectedEligibleAssets,returnedStates,complete}` must reconcile exactly to `coverage.volumeEligibleAssets`; an incomplete state collection is a failing contract, not evidence that an alert recovered.
 
-Each state publishes `assetKey`, `symbol`, `category`, `cohortFingerprint`, UTC-hour `observedBucket`, `evaluationStatus`, `sameCohort`, current/peak/drawdown OI USD, `drawdown24hPct`, explicit `reasonCodes`, and the versioned `marketContext` above. The percentage is `drawdown24hUsd / peak24hOpenInterestUsd × 100`, rounded to six decimals; it is null when the comparable peak is zero. `evaluationStatus` is one of:
+Each state publishes `assetKey`, `symbol`, `category`, `cohortFingerprint`, UTC-hour `observedBucket`, `evaluationStatus`, `sameCohort`, current/peak/trough OI USD, drawdown/increase amounts, `drawdown24hPct`, `increase24hPct`, explicit `reasonCodes`, and the versioned `marketContext` above. Percentages use their matching peak or trough denominator and are rounded to six decimals; a zero denominator keeps that percentage null with an explicit reason. `evaluationStatus` remains the legacy drawdown-source status and is one of:
 
 - `triggered`: the comparable drawdown is strictly above the producer's existing `$2,000,000` liquidation-proxy boundary;
 - `clear`: a gap-free same-cohort 24-hour evaluation is available and does not cross that boundary;
 - `warming`: the current cohort is complete, but a cohort change or missing hourly observation prevents comparison;
 - `unavailable`: the current eligible cohort is incomplete, history is unavailable, or the snapshot is not comparable.
 
-Downstream delivery systems may apply stricter amount/percentage tiers to the published metrics, but may declare recovery only from an explicit comparable state that is below their thresholds. A missing state, `warming`, `unavailable`, or `sameCohort != true` must fail closed and must never generate a recovery notification.
+Downstream delivery systems may independently classify the additive 24-hour increase metrics, but may close state only from an explicit comparable row below their own thresholds. A missing state, `warming`, `unavailable`, or `sameCohort != true` must fail closed.
 
 ### 6.5 Competitor New Listings
 

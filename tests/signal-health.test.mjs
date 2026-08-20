@@ -276,6 +276,10 @@ function validOiLiquidationSection(status, generatedAt) {
     peak24hOpenInterestUsd:8_000_001,
     peak24hAt:'2026-08-14T06:00:00.000Z',
     drawdown24hUsd:2_000_001,
+    trough24hOpenInterestUsd:4_000_000,
+    trough24hAt:'2026-08-14T05:00:00.000Z',
+    increase24hUsd:2_000_000,
+    increase24hPct:50,
     trigger:'both',
     topTraderPositions:[{
       venueSymbol:'AAPLUSDT',
@@ -295,6 +299,9 @@ function validOiLiquidationSection(status, generatedAt) {
       completedDailyTrend:'estimated',
       peak24hOpenInterestUsd:'estimated',
       drawdown24hUsd:'estimated',
+      trough24hOpenInterestUsd:'estimated',
+      increase24hUsd:'estimated',
+      increase24hPct:'estimated',
       topTraderPositions:'full',
     },
     status:'estimated',
@@ -315,6 +322,9 @@ function validOiLiquidationSection(status, generatedAt) {
     peak24hOpenInterestUsd:full ? 8_000_001 : null,
     drawdown24hUsd:full ? 2_000_001 : null,
     drawdown24hPct:full ? Number(((2_000_001 / 8_000_001) * 100).toFixed(6)) : null,
+    trough24hOpenInterestUsd:full ? 4_000_000 : null,
+    increase24hUsd:full ? 2_000_000 : null,
+    increase24hPct:full ? 50 : null,
     reasonCodes:full ? [] : ['OI_HISTORY_HOUR_MISSING'],
     marketContext:{
       version:'rwa-oi-market-context/v2',
@@ -364,12 +374,13 @@ function validOiLiquidationSection(status, generatedAt) {
         shortPositionPct:null,
         bias:'unavailable',
         observedAt:null,
-        reasonCode:'OI_DRAWDOWN_NOT_TRIGGERED',
+        reasonCode:'OI_POSITIONING_NOT_REQUESTED',
       },
     },
   };
   return {
     formulaVersion:'rwa-oi-liquidation-proxy-1.0',
+    rangeFormulaVersion:'rwa-oi-24h-range-1.0',
     generatedAt,
     status,
     rowLimit:100,
@@ -389,6 +400,7 @@ function validOiLiquidationSection(status, generatedAt) {
       openInterest:'complete exact-listing USD OI aggregate',
       threeDayTrend:'three sealed completed UTC-day closes',
       liquidationProxy:'24h comparable OI peak minus current OI',
+      twentyFourHourRange:'24h comparable OI trough to current increase',
       logic:'OI rising OR liquidation proxy',
       price24h:'largest-current-OI exact listing plus cross-listing range',
       topTraderPositions:'optional exact Binance contract enrichment',
@@ -739,7 +751,7 @@ test('OI health enforces strict $1m eligibility and strict $2m drawdown semantic
     {
       status:'unavailable', metric:null, scope:null, period:null, longShortRatio:null,
       longPositionPct:null, shortPositionPct:null, bias:'unavailable', observedAt:null,
-      reasonCode:'OI_DRAWDOWN_NOT_TRIGGERED',
+      reasonCode:'OI_POSITIONING_NOT_REQUESTED',
     },
   );
   const strictBoundaryValid = validateSignalRadarSnapshot(drawdownBoundary, NOW);

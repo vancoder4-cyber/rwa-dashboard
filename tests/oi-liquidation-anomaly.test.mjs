@@ -7,6 +7,7 @@ import {
   OI_LIQUIDATION_HISTORY_MAX_BYTES,
   OI_LIQUIDATION_HISTORY_NAMESPACE,
   OI_LIQUIDATION_THRESHOLDS,
+  OI_RANGE_FORMULA_VERSION,
   buildOiLiquidationAnomalies,
   compactOiHourlySnapshot,
   mergeOiHourlyHistory,
@@ -122,6 +123,7 @@ function build(specs, history, options = {}) {
 
 test('OI proxy publishes the locked formula, namespace, and strict threshold contract', () => {
   assert.equal(OI_LIQUIDATION_FORMULA_VERSION, 'rwa-oi-liquidation-proxy-1.0');
+  assert.equal(OI_RANGE_FORMULA_VERSION, 'rwa-oi-24h-range-1.0');
   assert.equal(OI_LIQUIDATION_HISTORY_NAMESPACE, 'rwa-signal-oi-liquidation-hourly-v1');
   assert.equal(OI_LIQUIDATION_HISTORY_HOURS, 96);
   assert.equal(OI_LIQUIDATION_HISTORY_MAX_BYTES, 1_750_000);
@@ -134,6 +136,23 @@ test('OI proxy publishes the locked formula, namespace, and strict threshold con
     topTraderBearishBelow:0.95,
     logic:'or',
   });
+});
+
+test('complete states publish a coherent 24h trough-to-current OI increase', () => {
+  const spec = {
+    symbol:'SURGE',
+    currentOi:16_000_000,
+    oiAt:oiSchedule([10_000_000, 10_000_000, 10_000_000]),
+  };
+  const result = build([spec], hourlyHistory([spec]));
+  const state = result.states[0];
+  assert.equal(result.rangeFormulaVersion, OI_RANGE_FORMULA_VERSION);
+  assert.equal(state.currentOpenInterestUsd, 16_000_000);
+  assert.equal(state.trough24hOpenInterestUsd, 10_000_000);
+  assert.equal(state.increase24hUsd, 6_000_000);
+  assert.equal(state.increase24hPct, 60);
+  assert.equal(state.peak24hOpenInterestUsd, 16_000_000);
+  assert.equal(state.drawdown24hUsd, 0);
 });
 
 test('volume eligibility is strictly above $1m and uses the published listing-cent sum', () => {
@@ -262,7 +281,13 @@ test('a comparable zero peak is Clear without inventing a percentage denominator
   assert.equal(result.states[0].peak24hOpenInterestUsd, 0);
   assert.equal(result.states[0].drawdown24hUsd, 0);
   assert.equal(result.states[0].drawdown24hPct, null);
-  assert.deepEqual(result.states[0].reasonCodes, ['OI_PEAK_ZERO_PERCENT_UNAVAILABLE']);
+  assert.equal(result.states[0].trough24hOpenInterestUsd, 0);
+  assert.equal(result.states[0].increase24hUsd, 0);
+  assert.equal(result.states[0].increase24hPct, null);
+  assert.deepEqual(result.states[0].reasonCodes, [
+    'OI_PEAK_ZERO_PERCENT_UNAVAILABLE',
+    'OI_TROUGH_ZERO_PERCENT_UNAVAILABLE',
+  ]);
 });
 
 test('a changed exact-listing cohort cannot inherit old trend or peak history', () => {
@@ -559,7 +584,7 @@ test('state market context selects the available 24h change from the largest cur
   assert.equal(result.states[0].marketContext.positioning.status, 'unavailable');
   assert.equal(
     result.states[0].marketContext.positioning.reasonCode,
-    'OI_DRAWDOWN_NOT_TRIGGERED',
+    'OI_POSITIONING_NOT_REQUESTED',
   );
 });
 
@@ -631,6 +656,23 @@ test('triggered state positioning is explicit for enriched, missing, and non-Bin
   );
   assert.equal(noBinance.states[0].marketContext.positioning.venue, 'gate');
   assert.equal(noBinance.states[0].marketContext.positioning.venueSymbol, 'AAPL_USDT');
+
+  const surgeSpec = {
+    symbol:'SURGE', currentOi:16_000_000,
+    oiAt:oiSchedule([10_000_000, 10_000_000, 10_000_000]),
+  };
+  const surge = build([surgeSpec], hourlyHistory([surgeSpec]), {
+    topTraderPositions:{
+      SURGEUSDT:[{
+        symbol:'SURGEUSDT', longShortRatio:'1.1', longAccount:String(1 - short),
+        shortAccount:String(short), timestamp:NOW,
+      }],
+    },
+  });
+  assert.equal(surge.states[0].evaluationStatus, 'clear');
+  assert.equal(surge.states[0].increase24hUsd, 6_000_000);
+  assert.equal(surge.states[0].marketContext.positioning.status, 'full');
+  assert.equal(surge.states[0].marketContext.positioning.venueSymbol, 'SURGEUSDT');
 });
 
 test('state context never substitutes Binance positioning for a trade.xyz reference contract', () => {

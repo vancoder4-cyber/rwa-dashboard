@@ -537,9 +537,17 @@ test('Binance positioning enrichment targets come from uncapped triggered states
     evaluationStatus:'triggered',
     marketContext:{ positioning:{ venue:'tradexyz', venueSymbol:'XYZ:X999' } },
   });
+  states.push({
+    evaluationStatus:'clear',
+    currentOpenInterestUsd:20_000_000,
+    trough24hOpenInterestUsd:10_000_000,
+    increase24hUsd:10_000_000,
+    marketContext:{ positioning:{ venue:'binance', venueSymbol:'SURGEUSDT' } },
+  });
   const targets = oiTriggeredBinanceSymbols({ states, rows:[] });
-  assert.equal(targets.length, 101);
+  assert.equal(targets.length, 102);
   assert.ok(targets.includes('X100USDT'));
+  assert.ok(targets.includes('SURGEUSDT'));
   assert.ok(!targets.includes('X999'));
 });
 
