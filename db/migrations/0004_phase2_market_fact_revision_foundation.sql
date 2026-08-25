@@ -112,7 +112,8 @@ CREATE TABLE IF NOT EXISTS fact.market_fact_revision (
   UNIQUE (observation_key, normalized_payload_sha256),
   CHECK (valid_to > valid_from),
   CHECK (event_at >= valid_from AND event_at < valid_to),
-  CHECK (captured_at >= event_at - interval '7 days'),
+  CHECK (captured_at >= event_at - interval '5 minutes'),
+  CHECK (event_at <= recorded_at + interval '5 minutes'),
   CHECK (captured_at <= recorded_at + interval '5 minutes'),
   CHECK (
     (revision_no = 1 AND supersedes_revision_id IS NULL AND revision_disposition = 'initial')
@@ -216,6 +217,7 @@ CREATE TABLE IF NOT EXISTS ops.market_fact_revision_review (
   candidate_payload_sha256 char(64) NOT NULL CHECK (candidate_payload_sha256 ~ '^[0-9a-f]{64}$'),
   previous_revision_id uuid REFERENCES fact.market_fact_revision(revision_id),
   source_run_id uuid NOT NULL,
+  input_artifact_id uuid,
   source_id bigint NOT NULL REFERENCES identity.source(source_id),
   instrument_version_id bigint NOT NULL,
   asset_version_id bigint NOT NULL REFERENCES identity.asset_version(asset_version_id),
@@ -237,11 +239,16 @@ CREATE TABLE IF NOT EXISTS ops.market_fact_revision_review (
     REFERENCES ops.market_fact_collection_policy(data_family, policy_version),
   FOREIGN KEY (source_run_id, source_id)
     REFERENCES ingest.source_run(source_run_id, source_id),
+  FOREIGN KEY (input_artifact_id, source_run_id)
+    REFERENCES ingest.raw_artifact(artifact_id, source_run_id),
   FOREIGN KEY (instrument_version_id, source_id, asset_version_id)
     REFERENCES identity.instrument_version(instrument_version_id, source_id, asset_version_id),
   UNIQUE (observation_key, candidate_payload_sha256),
   CHECK (valid_to > valid_from),
   CHECK (event_at >= valid_from AND event_at < valid_to),
+  CHECK (captured_at >= event_at - interval '5 minutes'),
+  CHECK (event_at <= created_at + interval '5 minutes'),
+  CHECK (captured_at <= created_at + interval '5 minutes'),
   CHECK (cardinality(reason_codes) > 0),
   CHECK (jsonb_typeof(comparison) = 'object'),
   CHECK (jsonb_typeof(candidate_payload) = 'object')
@@ -266,6 +273,8 @@ DECLARE
   previous fact.market_fact_revision%ROWTYPE;
   source_run_cycle_id uuid;
 BEGIN
+  NEW.recorded_at := clock_timestamp();
+  NEW.created_at := NEW.recorded_at;
   SELECT attempt.cycle_id INTO source_run_cycle_id
     FROM ingest.source_run run
     JOIN ingest.collection_attempt attempt ON attempt.attempt_id = run.attempt_id
@@ -356,6 +365,7 @@ DECLARE
   header fact.market_fact_revision%ROWTYPE;
   previous_typed fact.listing_market_fact_revision%ROWTYPE;
 BEGIN
+  NEW.created_at := clock_timestamp();
   SELECT * INTO header
     FROM fact.market_fact_revision
     WHERE revision_id = NEW.revision_id;
@@ -404,6 +414,16 @@ BEGIN
 END
 $function$;
 
+CREATE OR REPLACE FUNCTION ops.validate_market_fact_revision_review_insert()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $function$
+BEGIN
+  NEW.created_at := clock_timestamp();
+  RETURN NEW;
+END
+$function$;
+
 DROP TRIGGER IF EXISTS market_fact_revision_append_only ON fact.market_fact_revision;
 CREATE TRIGGER market_fact_revision_append_only
 BEFORE UPDATE OR DELETE ON fact.market_fact_revision
@@ -444,6 +464,11 @@ DROP TRIGGER IF EXISTS market_fact_revision_review_append_only ON ops.market_fac
 CREATE TRIGGER market_fact_revision_review_append_only
 BEFORE UPDATE OR DELETE ON ops.market_fact_revision_review
 FOR EACH ROW EXECUTE FUNCTION ops.reject_market_fact_control_mutation();
+
+DROP TRIGGER IF EXISTS market_fact_revision_review_insert ON ops.market_fact_revision_review;
+CREATE TRIGGER market_fact_revision_review_insert
+BEFORE INSERT ON ops.market_fact_revision_review
+FOR EACH ROW EXECUTE FUNCTION ops.validate_market_fact_revision_review_insert();
 
 CREATE OR REPLACE VIEW fact.listing_market_fact_revision_summary AS
 WITH revisions AS (

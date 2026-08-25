@@ -1296,9 +1296,6 @@ export function buildCatalogShadowReadinessQueries(sql, limit = CATALOG_SHADOW_Q
           UNION ALL SELECT 1 FROM fact.catalog_presence_daily
           UNION ALL SELECT 1 FROM fact.top_trader_observation_hourly
           UNION ALL SELECT 1 FROM fact.traditional_observation_daily
-          UNION ALL SELECT 1 FROM fact.market_fact_revision
-          UNION ALL SELECT 1 FROM fact.listing_market_fact_revision
-          UNION ALL SELECT 1 FROM ops.market_fact_revision_review
         ) AS market_fact_presence LIMIT 1) AS market_fact_rows_present,
         EXISTS(SELECT 1 FROM (
           SELECT 1 FROM analytics.cohort_version

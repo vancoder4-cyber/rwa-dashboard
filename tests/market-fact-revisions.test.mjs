@@ -95,6 +95,10 @@ test('normalization preserves null versus zero and requires exact versioned iden
     /valid interval/,
   );
   assert.throws(
+    () => normalizeListingMarketFactObservation(fixture({ capturedAt:'2026-08-20T10:54:58.000Z' })),
+    /five minutes/,
+  );
+  assert.throws(
     () => normalizeListingMarketFactObservation(fixture({ referencePriceUsd:100, referencePriceMethod:null })),
     /referencePriceMethod is required/,
   );
@@ -228,6 +232,17 @@ test('funding precision, null transitions, and status downgrades fail closed', (
     () => classifyListingMarketFactRevision(baseline, fixture({ fundingRate:0.0002 }), { fundingPrecision:Number.NaN }),
     /finite non-negative number/,
   );
+});
+
+test('quality-flag changes are quarantined instead of accepted as an empty normal restatement', () => {
+  const result = classifyListingMarketFactRevision(
+    fixture(),
+    fixture({ qualityFlags:['IDENTITY_VERIFIED', 'SOURCE-FULL', 'UPSTREAM_PARTIAL'] }),
+  );
+  assert.equal(result.classification, 'review-required');
+  assert.equal(result.accepted, false);
+  assert.ok(result.reasonCodes.includes('QUALITY_FLAGS_CHANGED'));
+  assert.equal(result.comparisons.at(-1).field, 'qualityFlags');
 });
 
 test('method, unit, or exact-identity changes start a new series and cannot masquerade as revisions', () => {

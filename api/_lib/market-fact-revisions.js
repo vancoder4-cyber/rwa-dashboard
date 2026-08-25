@@ -158,8 +158,8 @@ export function normalizeListingMarketFactObservation(input) {
   if (Date.parse(eventAt) < Date.parse(validFrom) || Date.parse(eventAt) >= Date.parse(validTo)) {
     throw new RangeError('eventAt must fall within the valid interval');
   }
-  if (Date.parse(capturedAt) < Date.parse(eventAt) - 7 * 24 * 60 * 60 * 1000) {
-    throw new RangeError('capturedAt cannot precede eventAt by more than seven days');
+  if (Date.parse(capturedAt) < Date.parse(eventAt) - 5 * 60 * 1000) {
+    throw new RangeError('capturedAt cannot precede eventAt by more than five minutes');
   }
   const quoteCurrency = exactText(input.quoteCurrency, 'quoteCurrency').toUpperCase();
   const nativeCurrency = input.nativeCurrency === null || input.nativeCurrency === undefined || input.nativeCurrency === ''
@@ -398,6 +398,18 @@ export function classifyListingMarketFactRevision(previousInput, currentInput, {
       const statusFamily = statusKey.replace(/Status$/, '').replace(/([a-z])([A-Z])/g, '$1_$2').toUpperCase();
       result.reasonCodes.push(`${statusFamily}_STATUS_DOWNGRADE`);
     }
+  }
+  if (JSON.stringify(previous.qualityFlags) !== JSON.stringify(current.qualityFlags)) {
+    raiseClassification(result, 'review-required');
+    result.reasonCodes.push('QUALITY_FLAGS_CHANGED');
+    result.comparisons.push({
+      field:'qualityFlags',
+      before:previous.qualityFlags,
+      after:current.qualityFlags,
+      fieldFamily:'quality',
+      classification:'review-required',
+      reasonCode:'QUALITY_FLAGS_CHANGED',
+    });
   }
   result.reasonCodes = [...new Set(result.reasonCodes)].sort();
   result.accepted = !['review-required', 'anomalous'].includes(result.classification);

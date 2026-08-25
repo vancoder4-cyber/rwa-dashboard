@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -231,6 +231,7 @@ test('database roles are NOLOGIN and grants separate catalog, read, and dispatch
 
 test('Phase 2 foundation is immutable, partitioned, least-privilege, and disabled by default', async () => {
   const phase2 = await readFile(path.join(MIGRATION_DIRECTORY, '0004_phase2_market_fact_revision_foundation.sql'), 'utf8');
+  const auditDb = await readFile(path.join(ROOT_DIRECTORY, 'scripts/audit-db.mjs'), 'utf8');
   const sql = compactSql(phase2);
 
   for (const table of [
@@ -279,6 +280,13 @@ test('Phase 2 foundation is immutable, partitioned, least-privilege, and disable
 
   assert.match(sql, /candidate_payload jsonb NOT NULL/);
   assert.match(sql, /jsonb_typeof\(candidate_payload\) = 'object'/);
+  assert.match(sql, /input_artifact_id uuid/);
+  assert.match(sql, /FOREIGN KEY \(input_artifact_id, source_run_id\)[\s\S]*REFERENCES ingest\.raw_artifact/);
+  assert.match(sql, /captured_at >= event_at - interval '5 minutes'/);
+  assert.doesNotMatch(sql, /captured_at >= event_at - interval '7 days'/);
+  assert.match(sql, /NEW\.recorded_at := clock_timestamp\(\)/);
+  assert.match(sql, /NEW\.created_at := clock_timestamp\(\)/);
+  assert.match(sql, /CREATE TRIGGER market_fact_revision_review_insert[\s\S]*validate_market_fact_revision_review_insert/);
 
   assert.match(sql, /CREATE ROLE rwa_market_fact_shadow_writer NOLOGIN/);
   assert.match(sql, /GRANT SELECT, INSERT ON fact\.market_fact_revision,[\s\S]*ops\.market_fact_revision_review TO rwa_market_fact_shadow_writer/);
@@ -292,6 +300,21 @@ test('Phase 2 foundation is immutable, partitioned, least-privilege, and disable
   assert.match(sql, /'quantity', 0\.01, 0\.05/);
   assert.match(sql, /'funding-rate', NULL, NULL, 0\.00000001, 0\.0001/);
   assert.doesNotMatch(phase2, /^\s*(ticker|symbol|venue_symbol|canonical_symbol)\s+/gmi);
+  assert.match(auditDb, /FROM ops\.market_fact_revision_review\) AS market_fact_reviews/);
+  assert.doesNotMatch(auditDb, /market_fact_revision_review WHERE review_status/);
+});
+
+test('Phase 2 foundation has no API or Cron writer integration', async () => {
+  const apiDirectory = path.join(ROOT_DIRECTORY, 'api');
+  const apiFiles = (await readdir(apiDirectory, { recursive:true }))
+    .filter(name => name.endsWith('.js'))
+    .filter(name => name !== '_lib/market-fact-revisions.js');
+  for (const name of apiFiles) {
+    const source = await readFile(path.join(apiDirectory, name), 'utf8');
+    assert.doesNotMatch(source, /market-fact-revisions|MARKET_FACT_PG_WRITE_MODE/);
+  }
+  const vercelConfig = await readFile(path.join(ROOT_DIRECTORY, 'vercel.json'), 'utf8');
+  assert.doesNotMatch(vercelConfig, /market-fact|market_fact/i);
 });
 
 test('Neon clients remain lazy and migrations prefer the unpooled URL', () => {

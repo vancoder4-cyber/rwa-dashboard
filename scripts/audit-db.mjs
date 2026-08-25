@@ -65,7 +65,7 @@ const [ledger, extensions, roles, privileges, counts, latestCycle] = await Promi
       (SELECT count(*)::int FROM ingest.raw_artifact) AS artifacts,
       (SELECT count(*)::int FROM fact.market_fact_revision) AS market_fact_revisions,
       (SELECT count(*)::int FROM fact.listing_market_fact_revision) AS listing_market_fact_revisions,
-      (SELECT count(*)::int FROM ops.market_fact_revision_review WHERE review_status = 'open') AS open_market_fact_reviews,
+      (SELECT count(*)::int FROM ops.market_fact_revision_review) AS market_fact_reviews,
       (SELECT count(*)::int FROM analytics.catalog_change_event) AS listing_events,
       (SELECT count(*)::int FROM identity.review_case WHERE status = 'open') AS open_reviews
   `),
