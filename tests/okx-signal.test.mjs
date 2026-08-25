@@ -188,9 +188,10 @@ test('OKX broad Stocks metadata is refined only after official RWA admission', (
   for (const symbol of ['SHLD', 'TMF', 'XBI']) {
     assert.deepEqual(normalizeSignalIdentity(symbol, 'equity'), { symbol, category:'etf' });
   }
-  assert.deepEqual(normalizeSignalIdentity('KR200', 'equity'), { symbol:'KR200', category:'index' });
-  assert.deepEqual(normalizeSignalIdentity('SP500', 'equity'), { symbol:'SPX', category:'index' });
-  assert.deepEqual(normalizeSignalIdentity('NDX100', 'equity'), { symbol:'NDX', category:'index' });
+  assert.deepEqual(normalizeSignalIdentity('KR200', 'equity', { venue:'okx' }), { symbol:'KR200', category:'index' });
+  assert.deepEqual(normalizeSignalIdentity('SP500', 'equity', { venue:'okx' }), { symbol:'SPX', category:'index' });
+  assert.deepEqual(normalizeSignalIdentity('NDX100', 'equity', { venue:'okx' }), { symbol:'NDX', category:'index' });
+  assert.deepEqual(normalizeSignalIdentity('JP225', 'equity', { venue:'bitget' }), { symbol:'JP225', category:'index' });
   assert.equal(normalizeSignalIdentity('KR200', 'crypto'), null);
 });
 

@@ -19,6 +19,10 @@ console.log(JSON.stringify({
     critical: Boolean(check.critical),
     latencyMs: check.latencyMs,
     reason: check.reason || null,
+    identityConflictDetails: Array.isArray(check.identityConflictDetails)
+      ? check.identityConflictDetails
+      : null,
+    conflictLeakCount: Number.isInteger(check.conflictLeakCount) ? check.conflictLeakCount : null,
     remediation: check.remediation || null,
   })),
 }, null, 2));

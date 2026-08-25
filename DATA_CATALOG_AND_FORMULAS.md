@@ -310,6 +310,7 @@ The public endpoint is `/api/signal-snapshot`. Only the authenticated, no-store 
 
 - Inputs: five official Perpetual sources.
 - Identity: reject invalid categories and quarantine any canonical symbol appearing in conflicting categories.
+- Conflict diagnostics: the public coverage object exposes a maximum of 20 sanitized conflicts with canonical symbol, categories, venues and exact venue symbols, plus a truncation flag. These rows contain no prices or credentials. `/api/health` requires the count/details to reconcile and proves every conflicting symbol is absent from published assets, Perp anomaly rows and OI rows/states.
 - Group: `category:canonical`, preserving exact listings.
 - Activity order before Top 100: `aggregate rolling-24h USD volume + aggregate USD OI`, descending, then symbol (`api/_lib/signal-analysis.js:78-203`).
 - Price: median comparable positive listing prices after retaining points within `0.5×–1.5×` of the raw median.

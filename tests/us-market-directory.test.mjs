@@ -644,6 +644,7 @@ test('venue-scoped normalization keeps real QQQX/SPYX securities distinct from G
   `;
   const context = {
     TOKENIZED_ETF_WRAPPERS:{ QQQX:'QQQ', SPYX:'SPY', TQQQX:'TQQQ', SLVON:'SLV' },
+    BROAD_STOCK_INDEX_SYMBOLS:new Set(['SP500', 'NDX100', 'KR200', 'JP225']),
     categoryFromOfficial(type) { return type === 'ETF' ? 'etf' : 'equity'; },
     canonicalSymbolForCategory(symbol) { return symbol; },
   };
