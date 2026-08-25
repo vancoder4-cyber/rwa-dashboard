@@ -111,6 +111,10 @@ export function aggregateSignalListings(listings, limit = SIGNAL_ASSET_LIMIT) {
       symbol,
       categories:[...categoriesBySymbol.get(symbol)].sort(),
       venues:[...new Set(rows.map(row => row.venue))].sort(),
+      listings:rows
+        .map(row => ({ venue:row.venue, venueSymbol:row.venueSymbol, category:row.category }))
+        .sort((left, right) => left.venue.localeCompare(right.venue) ||
+          left.venueSymbol.localeCompare(right.venueSymbol) || left.category.localeCompare(right.category)),
     });
   }
 

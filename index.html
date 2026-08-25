@@ -2556,7 +2556,7 @@ const INDEX_SYMBOL_ALIASES = {
 };
 // Bitget and OKX currently place these exact RWA indices in a broad stock
 // product class. Refine them only after the venue's official RWA gate.
-const BROAD_STOCK_INDEX_SYMBOLS = new Set(['SP500','NDX100','KR200']);
+const BROAD_STOCK_INDEX_SYMBOLS = new Set(['SP500','NDX100','KR200','JP225']);
 const EQUITY_SYMBOL_ALIASES = {
   SAMSUNGUSD:'SAMSUNG', SKHYNIXUSD:'SKHYNIX', HYUNDAIUSD:'HYUNDAI',
   BBX:'BB', BRKB:'BRK-B', HK0700:'TENCENT', HK1810:'XIAOMI',
@@ -2796,7 +2796,6 @@ function categoryFromOfficial(type, symbol, name = '') {
   // A lifecycle match never overrules an explicit crypto identity. In normal
   // fetchers this is a second line of defence after the venue admission gate.
   if (officialCategory === 'other') return 'other';
-  if (['equity','etf','pre-ipo'].includes(officialCategory) && BROAD_STOCK_INDEX_SYMBOLS.has(raw)) return 'index';
   const listing = securityListingForSymbol(raw);
   // Public-vs-pre-IPO only refines a security type; it never overrides an
   // explicit commodity/index/FX identity with a same-looking ticker.
@@ -2816,7 +2815,11 @@ function normalizeOfficialRwaSymbol(symbol, officialType, name = '', venue = '')
   // QQQX and SPYX are also real U.S.-listed securities, so ticker/type alone
   // can never authorize this rewrite on another venue.
   const verifiedUnderlying = venue === 'gate' ? TOKENIZED_ETF_WRAPPERS[raw] : '';
-  const category = verifiedUnderlying ? 'etf' : categoryFromOfficial(officialType, symbol, name);
+  let category = verifiedUnderlying ? 'etf' : categoryFromOfficial(officialType, symbol, name);
+  // Bitget and OKX sometimes publish equity indices in a broad stock(s)
+  // product class. Refine only exact audited underlyings after the venue gate.
+  if (['bitget','okx'].includes(venue) && ['equity','etf','pre-ipo'].includes(category) &&
+      BROAD_STOCK_INDEX_SYMBOLS.has(raw)) category = 'index';
   return {
     symbol:verifiedUnderlying || canonicalSymbolForCategory(raw, category),
     category,

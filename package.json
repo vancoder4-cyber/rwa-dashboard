@@ -13,6 +13,7 @@
     "audit:health": "node scripts/audit-health.mjs",
     "audit:listings": "node scripts/audit-listings.mjs",
     "audit:catalog-shadow": "node scripts/audit-catalog-shadow.mjs",
+    "audit:catalog-shadow:remote": "node scripts/audit-catalog-shadow-remote.mjs",
     "db:migrate": "node scripts/migrate-db.mjs",
     "audit:db": "node scripts/audit-db.mjs"
   },

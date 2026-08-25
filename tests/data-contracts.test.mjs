@@ -168,6 +168,10 @@ test('signal identity gate rejects crypto types, quarantines category collisions
     symbol:'DUAL',
     categories:['equity', 'index'],
     venues:['one', 'two'],
+    listings:[
+      { venue:'one', venueSymbol:'DUAL-EQUITY', category:'equity' },
+      { venue:'two', venueSymbol:'DUAL-INDEX', category:'index' },
+    ],
   }]);
   assert.equal(result.assets[0].listings[0].fundingRate, 0);
   assert.equal(result.assets[0].listings[0].fundingIntervalHours, 8);
@@ -196,10 +200,12 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
   assert.deepEqual(normalizeSignalIdentity('SPCXB', 'etf'), { symbol:'SPCXB', category:'etf' });
   assert.deepEqual(normalizeSignalIdentity('CBRSB', 'etf'), { symbol:'CBRSB', category:'etf' });
   assert.deepEqual(normalizeSignalIdentity('SKHX', 'equity', { venue:'tradexyz' }), { symbol:'SKHYNIX', category:'equity' });
-  assert.deepEqual(normalizeSignalIdentity('SP500', 'equity'), { symbol:'SPX', category:'index' });
-  assert.deepEqual(normalizeSignalIdentity('NDX100', 'equity'), { symbol:'NDX', category:'index' });
+  assert.deepEqual(normalizeSignalIdentity('SP500', 'equity', { venue:'bitget' }), { symbol:'SPX', category:'index' });
+  assert.deepEqual(normalizeSignalIdentity('NDX100', 'equity', { venue:'bitget' }), { symbol:'NDX', category:'index' });
+  assert.deepEqual(normalizeSignalIdentity('JP225', 'equity', { venue:'bitget' }), { symbol:'JP225', category:'index' });
+  assert.deepEqual(normalizeSignalIdentity('JP225', 'equity', { venue:'binance' }), { symbol:'JP225', category:'equity' });
   assert.deepEqual(normalizeSignalIdentity('FOOB', 'equity', { allowBinanceBstock:true }), { symbol:'FOOB', category:'equity' });
-  assert.deepEqual(BROAD_STOCK_INDEX_UNDERLYINGS, ['SP500', 'NDX100', 'KR200']);
+  assert.deepEqual(BROAD_STOCK_INDEX_UNDERLYINGS, ['SP500', 'NDX100', 'KR200', 'JP225']);
   assert.equal(categoryFromOfficialSignalType('ETF'), 'etf');
   assert.equal(categoryFromOfficialSignalType('stock_etf'), 'etf');
   assert.equal(categoryFromOfficialSignalType('CN_EQUITY'), 'equity');
@@ -207,7 +213,7 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
   assert.equal(categoryFromOfficialSignalType('ETFCOIN'), null);
 
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /const BROAD_STOCK_INDEX_SYMBOLS = new Set\(\['SP500','NDX100','KR200'\]\)/);
+  assert.match(html, /const BROAD_STOCK_INDEX_SYMBOLS = new Set\(\['SP500','NDX100','KR200','JP225'\]\)/);
   const tradeXyzLoader = sourceBetween(html, 'async function fetchTradeXyz()', '// API: Bitget');
   assert.match(tradeXyzLoader, /u\?\.isDelisted === true[\s\S]*?continue/,
     'the main Perpetual page must exclude the same officially delisted trade.xyz rows as Radar and Listing Audit');

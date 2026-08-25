@@ -22,6 +22,8 @@ function basePayload(volumeStatus = 'warming') {
       expectedSources:5,
       availableSources:5,
       identityConflicts:0,
+      identityConflictDetails:[],
+      identityConflictDetailsTruncated:false,
       canonicalAssetCount:1,
     },
     assets:[{ symbol:'AAPL', category:'equity' }],
@@ -479,13 +481,37 @@ test('Signal volume health passes a fresh full five-source snapshot', () => {
   assert.equal(result.monitoredCoverageValid, true);
   assert.equal(result.spotVolumePrice.contractValid, true);
   assert.equal(result.spotVolumePrice.invalidRows, 0);
+
+  const legacyZeroConflictPayload = structuredClone(payload);
+  delete legacyZeroConflictPayload.coverage.identityConflictDetails;
+  delete legacyZeroConflictPayload.coverage.identityConflictDetailsTruncated;
+  assert.equal(validateSignalRadarSnapshot(legacyZeroConflictPayload, NOW).status, 'pass');
 });
 
 test('Signal volume health fails identity conflicts, Crypto leakage, and illegal server levels', () => {
   const conflict = basePayload('warming');
   conflict.coverage.identityConflicts = 1;
-  assert.equal(validateSignalRadarSnapshot(conflict, NOW).identityConflict, true);
-  assert.equal(validateSignalRadarSnapshot(conflict, NOW).status, 'fail');
+  conflict.coverage.identityConflictDetails = [{
+    symbol:'CL', categories:['commodity', 'equity'], venues:['gate', 'okx'], listings:[
+      { venue:'gate', venueSymbol:'CL_USDT', category:'commodity' },
+      { venue:'okx', venueSymbol:'CL-USDT-SWAP', category:'equity' },
+    ],
+  }];
+  const conflictResult = validateSignalRadarSnapshot(conflict, NOW);
+  assert.equal(conflictResult.identityConflict, true);
+  assert.equal(conflictResult.status, 'fail');
+  assert.equal(conflictResult.conflictDetailsValid, true);
+  assert.deepEqual(conflictResult.identityConflictDetails, conflict.coverage.identityConflictDetails);
+
+  const leaked = structuredClone(conflict);
+  leaked.assets.push({ symbol:'CL', category:'equity' });
+  const leakedResult = validateSignalRadarSnapshot(leaked, NOW);
+  assert.equal(leakedResult.conflictLeakCount, 1);
+  assert.equal(leakedResult.contractValid, false);
+
+  const missingDetails = basePayload('warming');
+  missingDetails.coverage.identityConflicts = 1;
+  assert.equal(validateSignalRadarSnapshot(missingDetails, NOW).conflictDetailsValid, false);
 
   const crypto = basePayload('warming');
   crypto.assets[0].category = 'crypto';

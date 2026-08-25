@@ -58,6 +58,7 @@ const FUNDING_PROBES = Object.freeze({
 const OKX_REVIEWED_PERP_MINIMUMS = Object.freeze({ total: 183, swap: 149, xperp: 34 });
 const OKX_REVIEWED_SPOT_MINIMUMS = Object.freeze({ total: 51, uts: 48, gold: 3 });
 const SIGNAL_SOURCE_KEYS = Object.freeze(['gate', 'binance', 'bitget', 'tradexyz', 'okx']);
+const SIGNAL_IDENTITY_CONFLICT_DETAIL_LIMIT = 20;
 const SIGNAL_SOURCE_STATUSES = new Set(['full', 'partial', 'unavailable']);
 const SIGNAL_SNAPSHOT_STATUSES = new Set(['full', 'partial']);
 const VOLUME_ANOMALY_STATUSES = new Set(['full', 'partial', 'warming', 'unavailable']);
@@ -97,6 +98,21 @@ const SIGNAL_SNAPSHOT_FUTURE_TOLERANCE_MS = 5 * 60 * 1_000;
 const SIGNAL_VOLUME_DAILY_NAMESPACE = 'rwa-signal-volume-daily-v1';
 const UTC_DAY_MS = 24 * 60 * 60 * 1_000;
 const UTC_HOUR_MS = 60 * 60 * 1_000;
+
+function signalIdentityConflictDetailValid(detail) {
+  const symbol = typeof detail?.symbol === 'string' ? detail.symbol.trim() : '';
+  const categories = Array.isArray(detail?.categories) ? detail.categories : [];
+  const venues = Array.isArray(detail?.venues) ? detail.venues : [];
+  const listings = Array.isArray(detail?.listings) ? detail.listings : [];
+  return symbol.length > 0 && symbol.length <= 64 && !/\s/.test(symbol) &&
+    categories.length >= 2 && new Set(categories).size === categories.length &&
+    categories.every(category => RWA_SIGNAL_CATEGORIES.has(signalCategory(category))) &&
+    venues.length >= 1 && new Set(venues).size === venues.length &&
+    venues.every(venue => SIGNAL_VENUES.has(String(venue || '').toLowerCase())) &&
+    listings.length >= 2 && new Set(listings.map(row => `${row?.venue}:${row?.venueSymbol}`)).size === listings.length &&
+    listings.every(row => venues.includes(row?.venue) && categories.includes(row?.category) &&
+      typeof row?.venueSymbol === 'string' && row.venueSymbol.length > 0 && row.venueSymbol.length <= 80);
+}
 
 function deploymentBaseUrl(req) {
   const forwarded = String(req.headers?.['x-forwarded-host'] || req.headers?.host || '').toLowerCase();
@@ -1476,13 +1492,33 @@ export function validateSignalRadarSnapshot(payload, now = Date.now()) {
   const expectedSources = payload?.coverage?.expectedSources;
   const availableSources = payload?.coverage?.availableSources;
   const declaredIdentityConflicts = payload?.coverage?.identityConflicts;
+  const identityConflictDetails = Array.isArray(payload?.coverage?.identityConflictDetails)
+    ? payload.coverage.identityConflictDetails
+    : null;
+  const identityConflictDetailsTruncated = payload?.coverage?.identityConflictDetailsTruncated;
   const observedAvailableSources = sourcesValid
     ? SIGNAL_SOURCE_KEYS.filter(sourceKey =>
       String(payload.sources[sourceKey].status || '').toLowerCase() !== 'unavailable').length
     : null;
+  const conflictDetailSymbols = identityConflictDetails?.map(detail => detail?.symbol) || [];
+  const legacyZeroConflictDetails = declaredIdentityConflicts === 0 &&
+    identityConflictDetails === null && identityConflictDetailsTruncated === undefined;
+  const conflictDetailsValid = legacyZeroConflictDetails || (
+    identityConflictDetails !== null &&
+      identityConflictDetails.every(signalIdentityConflictDetailValid) &&
+      new Set(conflictDetailSymbols).size === conflictDetailSymbols.length &&
+      identityConflictDetails.length === Math.min(
+        Number.isInteger(declaredIdentityConflicts) ? declaredIdentityConflicts : 0,
+        SIGNAL_IDENTITY_CONFLICT_DETAIL_LIMIT,
+      ) &&
+      identityConflictDetailsTruncated === (
+        Number.isInteger(declaredIdentityConflicts) &&
+        declaredIdentityConflicts > SIGNAL_IDENTITY_CONFLICT_DETAIL_LIMIT
+      )
+  );
   const coverageValid = Number.isInteger(expectedSources) && expectedSources === SIGNAL_SOURCE_KEYS.length &&
     Number.isInteger(availableSources) && availableSources === observedAvailableSources &&
-    Number.isInteger(declaredIdentityConflicts) && declaredIdentityConflicts >= 0;
+    Number.isInteger(declaredIdentityConflicts) && declaredIdentityConflicts >= 0 && conflictDetailsValid;
   const identityConflicts = Number.isInteger(declaredIdentityConflicts) ? declaredIdentityConflicts : null;
   const identityConflict = identityConflicts !== null && identityConflicts > 0;
   const allSourcesFull = sourcesValid && SIGNAL_SOURCE_KEYS.every(sourceKey =>
@@ -1607,6 +1643,13 @@ export function validateSignalRadarSnapshot(payload, now = Date.now()) {
     oiTopPersistence.writeStatus === payload?.oiLiquidationAnomalies?.persistence?.writeStatus;
   const cryptoCategoryCount = invalidAssetCategories.length + invalidVolumeCategories.length +
     spotVolumePrice.cryptoCategoryCount + oiLiquidation.cryptoCategoryCount;
+  const conflictSymbolSet = new Set(conflictDetailSymbols);
+  const conflictLeakCount = [
+    ...(assets || []),
+    ...(volumeRows || []),
+    ...(Array.isArray(payload?.oiLiquidationAnomalies?.rows) ? payload.oiLiquidationAnomalies.rows : []),
+    ...(Array.isArray(payload?.oiLiquidationAnomalies?.states) ? payload.oiLiquidationAnomalies.states : []),
+  ].filter(row => conflictSymbolSet.has(row?.symbol)).length;
   const rowsValid = volumeRows !== null && invalidVolumeRows.length === 0 && uniqueVolumeRanks &&
     volumeRows.length <= readyAssets &&
     (volumeStatus !== 'unavailable' || volumeRows.length === 0);
@@ -1632,7 +1675,7 @@ export function validateSignalRadarSnapshot(payload, now = Date.now()) {
   const volumeContractValid = Boolean(volume) && formulaValid && volumeTimestampValid && historyContractValid &&
     thresholdsValid && volumeStatusValid && monitoredCoverageValid && readinessValid && countsValid &&
     historyStateValid && persistenceContractValid && volumeStatusCoherent && rowsValid;
-  const contractValid = schemaValid && sourcesValid && coverageValid && responseStatusValid &&
+  const contractValid = schemaValid && sourcesValid && coverageValid && conflictLeakCount === 0 && responseStatusValid &&
     responseStatusCoherent && assetsValid && volumeContractValid && spotVolumePrice.contractValid &&
     spotTopPersistenceValid && oiLiquidation.contractValid && oiTopPersistenceValid;
   const hardFailure = !contractValid || !fresh || identityConflict || spotVolumePrice.identityConflict ||
@@ -1655,6 +1698,7 @@ export function validateSignalRadarSnapshot(payload, now = Date.now()) {
   else if (!sourcesValid || !coverageValid || !responseStatusCoherent) {
     reason = 'Signal Radar five-source coverage or status contract is invalid';
   }
+  else if (conflictLeakCount > 0) reason = 'A quarantined identity conflict leaked into a published signal row';
   else if (!fresh) reason = 'Signal Radar snapshot is older than two hours or has a future timestamp';
   else if (!volumeContractValid) reason = 'Perpetual volume anomaly contract or row semantics are invalid';
   else if (!spotVolumePrice.contractValid || !spotTopPersistenceValid) {
@@ -1683,6 +1727,10 @@ export function validateSignalRadarSnapshot(payload, now = Date.now()) {
     availableSources:Number.isInteger(availableSources) ? availableSources : null,
     identityConflicts,
     identityConflict,
+    identityConflictDetails:identityConflictDetails || [],
+    identityConflictDetailsTruncated:identityConflictDetailsTruncated === true,
+    conflictDetailsValid,
+    conflictLeakCount,
     responseStatus,
     formulaValid,
     volumeTimestampValid,
