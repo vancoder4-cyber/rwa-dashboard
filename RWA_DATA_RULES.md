@@ -1,7 +1,7 @@
 # RWA Asset Identity & Data Rules
 
 > 本文记录 RWA Dashboard 的资产准入、ticker 归一、类别/地区标签及上线校验规则。  
-> 最近审计：2026-08-14。生产站点：<https://avenir-rwa-analyst.vercel.app/>
+> 最近审计：2026-08-25。生产站点：<https://avenir-rwa-analyst.vercel.app/>
 
 ## 1. 核心原则
 
@@ -81,7 +81,7 @@ trade.xyz 当前专用 `xyz` DEX universe 有 5 个 `perpCategories` 空缺：`U
    - Commodity：`CL -> WTI`、`BZ -> BRENTOIL`、`GC -> XAU`。
    - Index：`SP500 -> SPX`、`NAS100 -> NDX`。
    - Security：`QNTX/QNTSTOCK -> QNT`。
-   - Bitget/OKX 的宽泛 Stock(s) 类别只对当前审计过的 `SP500`、`NDX100`、`KR200` 精确改标为 Index；禁止按名称或 ticker 子串泛化。
+   - Bitget/OKX 的宽泛 Stock(s) 类别只对当前审计过的 `SP500`、`NDX100`、`KR200`、`JP225` 精确改标为 Index；禁止按名称或 ticker 子串泛化，也不得让该覆盖离开 Bitget/OKX 场所作用域。
 2. `CL` 也可能是 Colgate-Palmolive，`PL` 也可能是 Planet Labs，因此不能使用全局 alias。
 3. Wrapper 可以保留 venue ticker 展示，但跨场所匹配必须使用 underlying。
 4. 跨场所与跨板块的主键必须是 `category:canonicalUnderlying`，不能只使用 ticker。`CL` Equity 与 `CL` Commodity、真实 `SKHX` ETF 与 trade.xyz 的 `SKHX → SKHYNIX` Equity 必须保持为不同资产。
@@ -200,7 +200,7 @@ Bitget 当前同时返回 `isRwa=YES` 和 `symbolType=crypto`，但该产品对�
 
 ### 宽泛 Stock 类别中的指数
 
-截至 2026-08-08，Bitget 官方 RWA catalog 将 `SP500`、`NDX100` 标为 `stock`，OKX Stocks catalog 将 `KR200` 纳入同一宽泛类别。它们仅在通过各自官方 RWA admission gate 后，按这三个精确 ticker 改标为 Index；crypto 类别的同名 ticker 仍然拒绝。
+截至 2026-08-25，Bitget 官方 RWA catalog 将 `SP500`、`NDX100`、`JP225` 标为 `stock`，OKX Stocks catalog 将 `KR200` 纳入同一宽泛类别。`JP225` 同时由 Gate 官方 `JPN225_USDT + contract_type=indices` 与 trade.xyz 官方 `xyz:JP225 + indices` 交叉确认。它们仅在通过 Bitget/OKX 各自官方 RWA admission gate 后，按这四个精确 ticker 改标为 Index；crypto 类别或其他场所的同名 ticker 仍然拒绝。
 
 ## 11. 2026-08-08 基线
 

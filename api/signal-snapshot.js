@@ -67,6 +67,7 @@ const BITGET_BASE = 'https://api.bitget.com';
 const BINANCE_CORE_TIMEOUT_MS = 12_000;
 const BINANCE_POSITIONING_TIMEOUT_MS = 20_000;
 const SIGNAL_SOURCE_NAMES = Object.freeze(['gate', 'binance', 'bitget', 'tradexyz', 'okx']);
+const SIGNAL_IDENTITY_CONFLICT_DETAIL_LIMIT = 20;
 export const OI_CATALOG_QUARANTINE_WARNING = 'UNSUPPORTED_OFFICIAL_ROWS_QUARANTINED';
 export const TRADE_XYZ_UNTYPED_RWA_CATEGORIES = Object.freeze({
   URANIUM:'commodity',
@@ -209,7 +210,7 @@ export function normalizeOkxSignalSnapshot(payload) {
     // ctValCcy is official contract metadata. Parsing an ambiguous ticker is
     // intentionally not a fallback identity source.
     const venueBase = String(instrument?.ctValCcy || '').toUpperCase();
-    const identity = normalizeSignalIdentity(venueBase, officialCategory);
+    const identity = normalizeSignalIdentity(venueBase, officialCategory, { venue:'okx' });
     if (!identity) continue;
 
     const ticker = tickerMap.get(venueSymbol) || {};
@@ -649,7 +650,7 @@ async function collectBitget() {
     // KUAISHOU exception) belong in the admission-coverage denominator.
     if (!['stock', 'metal', 'commodity'].includes(officialType) && !exactKuaishouException) continue;
     admittedCatalogListings += 1;
-    const identity = normalizeSignalIdentity(venueBase, category);
+    const identity = normalizeSignalIdentity(venueBase, category, { venue:'bitget' });
     if (!identity) continue;
     const ticker = tickerMap.get(venueSymbol) || {};
     const funding = fundingMap.get(venueSymbol) || {};
@@ -1263,6 +1264,15 @@ export async function serveSignalSnapshot(req, res, {
       acceptedListings: listings.length - normalized.rejected.length,
       rejectedListings: normalized.rejected.length,
       identityConflicts: normalized.conflicts.length,
+      identityConflictDetails: normalized.conflicts
+        .slice(0, SIGNAL_IDENTITY_CONFLICT_DETAIL_LIMIT)
+        .map(conflict => ({
+          symbol:conflict.symbol,
+          categories:[...conflict.categories],
+          venues:[...conflict.venues],
+          listings:conflict.listings.map(listing => ({ ...listing })),
+        })),
+      identityConflictDetailsTruncated: normalized.conflicts.length > SIGNAL_IDENTITY_CONFLICT_DETAIL_LIMIT,
       assetCount: normalized.assets.length,
       canonicalAssetCount: normalized.totalAssetCount,
       monitoredAssetLimit: SIGNAL_ASSET_LIMIT,

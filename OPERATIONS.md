@@ -25,7 +25,8 @@
    - `audit:catalog-shadow` distinguishes a Runtime Cache baseline reset from a durable lineage failure. Its remediation is read-only guidance: rebuild a fresh cache baseline with one authenticated same-bucket Cron retry, never backfill synthetic New/Re-listed events from older PostgreSQL membership, then require exact cache/database reconciliation.
 
 4. **Codex scheduled reviews**
-   - Daily at 09:10 Asia/Shanghai: production status, live data contracts, deployment state, recent errors, all ten Spot/Perpetual official catalog states and any new/re-listed assets detected in the rolling seven-day window. It also runs the production `audit:catalog-shadow` read-only reconciliation and reports consecutive healthy scheduled buckets plus the advisory three-bucket expand-shadow and seven-bucket required/read-review evidence. Phase 2 design itself has no elapsed gate, and neither advisory threshold enables a writer or read cutover.
+   - Daily at 11:00 Asia/Shanghai: production status, live data contracts, deployment state, recent errors, all ten Spot/Perpetual official catalog states and any new/re-listed assets detected in the rolling seven-day window. The later time allows the 01:20 UTC GitHub workflow to complete despite normal scheduler delay. The review runs from a clean isolated checkout whose full `HEAD` equals `origin/main`; results from an old or dirty checkout are never production evidence. It reports Public/Runtime Cache, PostgreSQL/Blob shadow, GitHub and Production API/Vercel as four independent states rather than allowing one to prove another.
+   - The database section prefers authenticated `GET /api/catalog-shadow-readiness`, which executes the existing Serializable read-only reconciliation inside the deployed `iad1` Function region. A direct local `audit:catalog-shadow` remains a secondary transport diagnostic. A local timeout with a passing in-region result is a local-path failure, not a database outage; neither path mutates PostgreSQL, Runtime Cache, Blob or Cron state.
    - Monday at 10:00 Asia/Shanghai: full venue catalogs, identity collisions, listing lifecycle, classification/tags, OKX SWAP/X-Perp and UTS/gold composition, Traditional candidate/ranking rules, previous-session selection and comparison coverage, false `NEW` detection, deterministic tie-breaks, adjusted-options handling, reference pricing and historical coverage.
    - Scheduled reviews are read-only. They report P0/P1/P2 findings and must not modify, push or deploy without user confirmation.
 
@@ -84,9 +85,10 @@ npm run db:migrate
 npm run db:migrate   # must report only [skip] on the second run
 npm run audit:db
 vercel env run -e production --scope vancoder4-cybers-projects -- npm run audit:catalog-shadow
+vercel env run -e production --scope vancoder4-cybers-projects -- npm run audit:catalog-shadow:remote
 ```
 
-Run migrations with `DATABASE_URL_UNPOOLED` whenever it is available. `audit:db` emits only a non-secret database fingerprint, migration checksums, role/extension results and aggregate row counts; it fails on checksum drift or privilege expansion. `audit:catalog-shadow` is read-only: it reconciles the latest bounded PostgreSQL catalog cycles with the public listing snapshot, reports consecutive healthy scheduled buckets, and returns a nonzero exit only for a reconciliation failure. Duration is operational evidence, not a market-history or product-formula gate. Never print or commit the connection URL.
+Run migrations with `DATABASE_URL_UNPOOLED` whenever it is available. `audit:db` emits only a non-secret database fingerprint, migration checksums, role/extension results and aggregate row counts; it fails on checksum drift or privilege expansion. `audit:catalog-shadow` is a local-to-Neon read-only path. `audit:catalog-shadow:remote` calls the authenticated no-store in-region endpoint and never sends database credentials to the client. Both reconcile the latest bounded PostgreSQL catalog cycles with the public listing snapshot, report consecutive healthy scheduled buckets, and return nonzero for a reconciliation failure. They are independent transport evidence; neither endpoint is a product read cutover. Duration is operational evidence, not a market-history or product-formula gate. Never print or commit the connection URL or `CRON_SECRET`.
 
 ### Phase 1 — ten official catalogs, shadow-write only
 

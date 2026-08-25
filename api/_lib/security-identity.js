@@ -76,8 +76,9 @@ const INDEX_ALIASES = Object.freeze({
 // Some official RWA catalogs expose a broad "stock(s)" product class for
 // equity indices. Refine only these exact, currently audited underlyings after
 // the venue identity gate; never infer an index from a ticker substring.
-export const BROAD_STOCK_INDEX_UNDERLYINGS = Object.freeze(['SP500', 'NDX100', 'KR200']);
+export const BROAD_STOCK_INDEX_UNDERLYINGS = Object.freeze(['SP500', 'NDX100', 'KR200', 'JP225']);
 const BROAD_STOCK_INDEX_SET = new Set(BROAD_STOCK_INDEX_UNDERLYINGS);
+const BROAD_STOCK_INDEX_VENUES = new Set(['bitget', 'okx']);
 
 const EQUITY_ALIASES = Object.freeze({
   SAMSUNGUSD:'SAMSUNG', SKHYNIXUSD:'SKHYNIX', HYUNDAIUSD:'HYUNDAI',
@@ -176,7 +177,7 @@ export function normalizeSignalIdentity(symbol, category, { allowBinanceBstock =
   if (['equity', 'etf', 'pre-ipo'].includes(resolvedCategory)) {
     // Bitget and OKX broad stock classes include these exact equity indices.
     // A crypto-category lookalike still fails the CATEGORY_SET gate above.
-    if (BROAD_STOCK_INDEX_SET.has(raw)) {
+    if (BROAD_STOCK_INDEX_VENUES.has(String(venue).toLowerCase()) && BROAD_STOCK_INDEX_SET.has(raw)) {
       return { symbol:INDEX_ALIASES[raw] || raw, category:'index' };
     }
     // These exact wrapper tickers are verified in Gate's RWA catalog. QQQX

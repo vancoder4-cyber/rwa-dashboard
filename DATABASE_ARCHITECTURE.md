@@ -340,6 +340,7 @@ Scope:
 - Close/reopen instrument SCD2 lifecycle validity only from confirmed verified delist/relist output; never infer it from an unavailable/partial catalog. A separately verified identity-fingerprint correction may also close the old version and create a new one without pretending that a delisting occurred.
 - Reuse the current server-normalized admission result. PostgreSQL is not a second identity engine and may not expand a catalog.
 - Maintain the current `rwa-listing-audit-v2` bundle/read contract and `/api/listing-changes` read path. The writer now adds a fixed publication-lease diagnostic and, whenever PostgreSQL is enabled, holds a 180-second database lease across durable mutation, a post-acquire cache checksum re-read, Runtime Cache publication and sink acknowledgement.
+- `GET /api/catalog-shadow-readiness` is an authenticated, no-store, read-only operational probe pinned to `iad1`. It executes the same bounded reconciliation queries near Neon so a local transport timeout can be distinguished from a database readiness failure. It returns aggregate lineage/readiness evidence only, never credentials or raw artifacts, and is not a Product API, writer retry or database read cutover.
 - A database/archive failure is visible in shadow sink health, but during the observation window it must not turn a successful current Runtime Cache publication into a false production outage. Conversely, database success must not hide a failed current writer.
 - Do not write continuous market facts, signal histories, derived rankings or alert deliveries.
 
