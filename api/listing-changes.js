@@ -206,6 +206,20 @@ export function listingSnapshotIsCacheable(snapshot) {
   return Number.isFinite(Date.parse(String(snapshot?.generatedAt || '')));
 }
 
+export async function verifyListingAuditRuntimeCacheWrite(cache, expectedChecksum) {
+  const publishedBundle = await cache.get(BUNDLE_KEY);
+  const actualChecksum = listingAuditPersistenceChecksum(publishedBundle ?? null);
+  if (!publishedBundle || actualChecksum !== expectedChecksum) {
+    const error = new Error('Listing audit Runtime Cache read-back verification failed');
+    error.code = 'LISTING_RUNTIME_CACHE_READBACK_MISMATCH';
+    throw error;
+  }
+  return {
+    status: 'verified',
+    checksum: actualChecksum,
+  };
+}
+
 export async function runListingAudit(req, res, dependencies = {}) {
   if (listingAuditRunning) {
     setNoStore(res);
@@ -379,8 +393,12 @@ export async function runListingAudit(req, res, dependencies = {}) {
     }
     publishedBundleChecksum = bundleChecksum;
     let runtimeCacheCommit;
+    let runtimeCacheVerification;
     try {
       await cache.set(BUNDLE_KEY, bundle, cacheOptions('RWA daily listing audit bundle'));
+      runtimeCacheVerification = await (
+        dependencies.verifyRuntimeCacheWrite || verifyListingAuditRuntimeCacheWrite
+      )(cache, bundleChecksum);
       publicationLeaseStatus = 'published';
     } catch (cacheWriteError) {
       try {
@@ -424,6 +442,10 @@ export async function runListingAudit(req, res, dependencies = {}) {
       })),
       durableWrite,
       runtimeCacheCommit,
+      runtimeCacheVerification: {
+        ...runtimeCacheVerification,
+        stateBytes,
+      },
       publicationLease: {
         mode:publicationLease?.mode || 'unknown',
         status:publicationLease?.status || 'unknown',
