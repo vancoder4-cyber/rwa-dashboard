@@ -40,13 +40,14 @@ test('migration files are ordered, immutable-checksummed, and parse into stateme
     '0001_phase0_foundation.sql',
     '0002_phase1_facts_alerting.sql',
     '0003_phase1_catalog_retry_replace.sql',
+    '0004_signal_history_checkpoint.sql',
   ]);
-  assert.deepEqual(migrations.map(row => row.version), ['0001', '0002', '0003']);
+  assert.deepEqual(migrations.map(row => row.version), ['0001', '0002', '0003', '0004']);
   for (const migration of migrations) {
     assert.match(migration.filename, MIGRATION_FILE_PATTERN);
     assert.match(migration.checksum, /^[0-9a-f]{64}$/);
     assert.equal(migration.checksum, migrationChecksum(migration.sql));
-    const minimumStatements = migration.version === '0003' ? 3 : 11;
+    const minimumStatements = ['0003', '0004'].includes(migration.version) ? 3 : 11;
     assert.ok(migration.statements.length >= minimumStatements);
     assert.ok(migration.statements.every(statement => statement.trim().length > 0));
   }
@@ -196,6 +197,7 @@ test('Phase 1 facts, cohorts, publication, and alert outbox retain versioned for
 test('database roles are NOLOGIN and grants separate catalog, read, and dispatch duties', async () => {
   const phase1 = compactSql(await readFile(path.join(MIGRATION_DIRECTORY, '0002_phase1_facts_alerting.sql'), 'utf8'));
   const catalogRetry = compactSql(await readFile(path.join(MIGRATION_DIRECTORY, '0003_phase1_catalog_retry_replace.sql'), 'utf8'));
+  const signalHistory = compactSql(await readFile(path.join(MIGRATION_DIRECTORY, '0004_signal_history_checkpoint.sql'), 'utf8'));
   for (const role of ['rwa_catalog_shadow_writer', 'rwa_analytics_reader', 'rwa_alert_dispatcher']) {
     assert.match(phase1, new RegExp(`CREATE ROLE ${role} NOLOGIN`));
   }
@@ -226,6 +228,13 @@ test('database roles are NOLOGIN and grants separate catalog, read, and dispatch
     assert.match(catalogRetry, new RegExp(`MESSAGE = '${errorCode}'`));
     assert.match(catalogRetry, new RegExp(`GRANT EXECUTE ON FUNCTION ${escapedFunctionName}\\(\\) TO rwa_catalog_shadow_writer`));
   }
+  assert.match(signalHistory, /CREATE ROLE rwa_signal_history_writer NOLOGIN/);
+  assert.match(signalHistory, /GRANT rwa_signal_history_writer TO %I/);
+  assert.match(signalHistory, /CREATE TABLE IF NOT EXISTS publication\.signal_history_checkpoint \(/);
+  assert.match(signalHistory, /namespace text PRIMARY KEY/);
+  assert.match(signalHistory, /payload_bytes integer NOT NULL CHECK \(payload_bytes > 0 AND payload_bytes <= 1750000\)/);
+  assert.match(signalHistory, /GRANT SELECT, INSERT, UPDATE ON publication\.signal_history_checkpoint TO rwa_signal_history_writer/);
+  assert.doesNotMatch(signalHistory, /GRANT (?:ALL|DELETE)/);
 });
 
 test('Neon clients remain lazy and migrations prefer the unpooled URL', () => {

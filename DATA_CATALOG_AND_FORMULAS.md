@@ -93,7 +93,7 @@ Current venue market rows are Browser/CDN state. None of the following page rend
 | Total Open Interest | Exact listing USD OI | Sum available values; publish observed/expected | Same completeness rule | Browser; general Radar keeps separate aggregate history | `fact.listing_observation_hourly`, later |
 | Avg Positive Funding | Fresh exact listings with annualized funding greater than zero | Arithmetic mean of positive annualized **listing observations** | Aggregate funding field completeness | Browser | `analytics.asset_hourly`, later |
 | Active Alerts / Data Health | Client alert list plus venue freshness and volume completeness | Count browser-classified alerts; otherwise report degraded source state | Not a server-authoritative alert count | Browser only | `alert.event`, only after later rule migration |
-| KPI sparklines | General Radar aggregate history | Plot server `aggregateHistory` volume/OI points; requires at least three points | Inherits Radar history maturity | Runtime Cache through Radar | `analytics.asset_hourly`, later |
+| KPI sparklines | General Radar aggregate history | Plot server `aggregateHistory` volume/OI points; requires at least three points | Inherits Radar history maturity | PostgreSQL bounded checkpoint + Runtime Cache replica | `analytics.asset_hourly`, later |
 
 Implementation: `renderKPIs` at `index.html:6251`. The current “positive assets” subtitle is presentation copy; the actual average iterates listings, not deduplicated canonical assets.
 
@@ -348,7 +348,7 @@ History/persistence:
 - Volume/OI robust-z needs **24 strictly historical comparable samples plus current**. Its first score is therefore the 25th distinct hourly point, about 24 elapsed hours after a clean start; point-in-time Funding, Price Move and Dispersion can score on the first complete snapshot. The aggregate history banner may already read Partial at 24 stored buckets, but that does not manufacture the missing 24th prior sample for Volume/OI;
 - Full/Normal history requires 168 total points (167 prior plus current), reached after about 167 elapsed hours. Before then a nominal Normal remains Warming/Partial according to the public contract;
 - response returns at most 48 points per asset;
-- Runtime Cache, regional best effort, 1.75 MB application guard.
+- PostgreSQL bounded checkpoint with SHA-256/1.75 MB guard plus a regional Runtime Cache replica.
 
 Target later tables: exact listing facts, `analytics.asset_hourly`, versioned `alert.evaluation_run/event`, and publication manifests. No Phase 0/1 database write.
 
@@ -369,7 +369,7 @@ Producer: `api/_lib/volume-anomaly.js`; formula version `rwa-perp-volume-anomaly
 | Consecutive expansion | At least two consecutive eligible High/Medium days |
 | 30-day high frequency | At least 21 eligible evaluation days and at least 6 anomaly days in the last 30 |
 
-Any source/listing volume gap, identity conflict or changed exact cohort suppresses comparison and restarts Warming. Namespace `rwa-signal-volume-daily-v1` retains 45 daily anchors; 37 comparable daily buckets are needed for a complete 30-day frequency result. Runtime Cache only; Later DB target `analytics.asset_daily_volume_anchor` and versioned alerts.
+Any source/listing volume gap, identity conflict or changed exact cohort suppresses comparison and restarts Warming. Namespace `rwa-signal-volume-daily-v1` retains 45 daily anchors; 37 comparable daily buckets are needed for a complete 30-day frequency result. The current bounded payload is durably checkpointed and replicated to Runtime Cache; later typed target remains `analytics.asset_daily_volume_anchor` and versioned alerts.
 
 ### 6.3 RWA Spot Volume & Price Anomalies
 
@@ -387,7 +387,7 @@ Producer: `api/_lib/spot-volume-price-anomaly.js`; formula `rwa-spot-volume-pric
 
 Volume fields are quote/USD turnover: Gate `quote_volume`, Binance `quoteVolume`, Bitget Reality `platformTurnover24h`, OKX `volCcy24h`; Kraken is estimated as `v[1] × p[1]`. Kraken's `o` is UTC-midnight open, not rolling-24h open, so Kraken price change is Unavailable and cannot trigger price (`api/_lib/spot-volume-price-anomaly.js:7-19`, `:661-730`).
 
-Namespace `rwa-signal-spot-volume-price-history-v1` retains eight UTC daily anchors. A Partial five-source snapshot may display verified alerts but may not say “No anomalies.” Runtime Cache only; Later DB target exact Spot daily anchors plus versioned events.
+Namespace `rwa-signal-spot-volume-price-history-v1` retains eight UTC daily anchors. A Partial five-source snapshot may display verified alerts but may not say “No anomalies.” The bounded payload uses a PostgreSQL checkpoint plus Runtime Cache replica; the later typed target remains exact Spot daily anchors plus versioned events.
 
 ### 6.4 OI Positioning & Large-Liquidation Proxy
 
@@ -423,7 +423,7 @@ Binance Top Trader Position Ratio is optional supporting evidence for every exac
 
 Triggered drawdown states and states crossing the published OI-surge context gates publish one same-contract object under `marketContext.positioning`. Its `venue` and `venueSymbol` must exactly equal `price24h.representative`. Only a Binance representative can currently publish Full data, with metric `top-trader-position-ratio`, scope `top-20%-by-margin-balance-position-ratio` and period `1h`. A trade.xyz, Gate, Bitget or OKX representative publishes `VENUE_POSITIONING_UNSUPPORTED`; it never borrows a Binance listing for the same canonical asset. No price reference publishes `REFERENCE_CONTRACT_UNAVAILABLE`, and states that need no positioning context publish `OI_POSITIONING_NOT_REQUESTED`. Binance enrichment targets are derived from the exact representative contract in the uncapped `states` contract, never another venue listing or the ranked Top-100 `rows` response. The surge context gates match the consumer contract: current OI at least $10m, 24-hour increase above $5m and above 10%. The legacy ranked-row `topTraderPositions` fields remain unchanged for compatibility and are not the Push market-context contract.
 
-Namespace `rwa-signal-oi-liquidation-hourly-v1` retains 96 idempotent UTC-hour buckets and requires 24 comparable hours plus three completed days. It stores only volume-eligible, OI-complete exact cohorts. Runtime Cache only; empty later-phase skeletons are `fact.top_trader_observation_hourly`, `analytics.asset_daily_oi_close`, `analytics.asset_hourly` and versioned alerts.
+Namespace `rwa-signal-oi-liquidation-hourly-v1` retains 96 idempotent UTC-hour buckets and requires 24 comparable hours plus three completed days. It stores only volume-eligible, OI-complete exact cohorts. The bounded payload uses a PostgreSQL checkpoint plus Runtime Cache replica; typed fact/evaluation targets remain `fact.top_trader_observation_hourly`, `analytics.asset_daily_oi_close`, `analytics.asset_hourly` and versioned alerts.
 
 Binance `underlyingType=CN_EQUITY` is an exact official Equity mapping. Future unknown official types remain fail closed: at most one active `TRADIFI_PERPETUAL` row with a valid, unique venue symbol/base and a non-empty, non-Crypto unknown type may be excluded under `UNSUPPORTED_OFFICIAL_ROWS_QUARANTINED`. The source publishes `catalogListingCount = listingCount + quarantinedListings`, and OI coverage publishes the recomputed quarantine total. This narrow quarantine makes the response Partial/Warn but lets verified unchanged cohorts continue writing; it never admits the unknown row as RWA. A second unknown row, blank/malformed identity, duplicate identity, Crypto type, catalog/identity/upstream blocker, cross-category conflict, or source-wide absence of Volume/OI remains non-comparable and blocks the history writer. Missing OI on only some accepted listings remains asset-isolated: those assets are Unavailable while complete same-cohort assets continue.
 
@@ -455,7 +455,7 @@ Producer: `api/_lib/listing-audit.js`; public reader: `api/listing-changes.js`; 
 
 Current persistence is Runtime Cache namespace `rwa-listing-audit-v2`: target 45 event days, maximum 2,000 events, inactive identity retention 180 days and 1.75 MB guard. The 7/30-day UI windows and 45-day retention are view/audit horizons, not product warm-up. Truncation is disclosed and cannot be Full or “no new assets.” Constants: `api/_lib/listing-audit.js:1-22`.
 
-This is the sole product family written to PostgreSQL in Phase 1. The shadow sink stores source runs, deterministic `normalized-catalog-v1` manifests/checksums, accepted identity/instrument versions with official-catalog evidence, exact accepted catalog memberships and `analytics.catalog_change_event` lifecycle rows. Stored normalized artifacts are linked to their evidence rows. Confirmed verified delisting closes the current instrument version and a verified relisting opens a new version; Partial/Unavailable or review-required absence never does. `identity.alias_version` is schema-only and is not populated by this writer. An unresolved `review-required` candidate is stored only in `identity.review_case`; it creates no accepted identity/instrument/membership/event. A trusted same-day retry atomically replaces that source's logical membership/evidence set; an untrusted retry preserves PostgreSQL last-good, and a later verification is classified as identity resolution rather than New. The artifact is derived from the verified/reviewed catalog observation and is not the upstream response body. Private object upload is separately controlled by `RAW_ARCHIVE_MODE`; `/api/listing-changes` continues to read Runtime Cache. When PostgreSQL is enabled, a fixed 180-second database lease plus a post-acquire Runtime Cache checksum re-read serializes durable write, cache publication, immediate post-write checksum verification and sink acknowledgement; busy/stale/conflicting writers return 409, and degraded/missing lease evidence cannot pass Daily Check readiness. Four physical refreshes per UTC date remain one logical daily bucket and never accelerate the delisting confirmation clock.
+This remains the sole typed product-data family written to PostgreSQL in Phase 1; the four-row Signal checkpoint is a continuity payload, not typed catalog/fact ingestion. The shadow sink stores source runs, deterministic `normalized-catalog-v1` manifests/checksums, accepted identity/instrument versions with official-catalog evidence, exact accepted catalog memberships and `analytics.catalog_change_event` lifecycle rows. Stored normalized artifacts are linked to their evidence rows. Confirmed verified delisting closes the current instrument version and a verified relisting opens a new version; Partial/Unavailable or review-required absence never does. `identity.alias_version` is schema-only and is not populated by this writer. An unresolved `review-required` candidate is stored only in `identity.review_case`; it creates no accepted identity/instrument/membership/event. A trusted same-day retry atomically replaces that source's logical membership/evidence set; an untrusted retry preserves PostgreSQL last-good, and a later verification is classified as identity resolution rather than New. The artifact is derived from the verified/reviewed catalog observation and is not the upstream response body. Private object upload is separately controlled by `RAW_ARCHIVE_MODE`; `/api/listing-changes` continues to read Runtime Cache. When PostgreSQL is enabled, a fixed 180-second database lease plus a post-acquire Runtime Cache checksum re-read serializes durable write, cache publication, immediate post-write checksum verification and sink acknowledgement; busy/stale/conflicting writers return 409, and degraded/missing lease evidence cannot pass Daily Check readiness. Four physical refreshes per UTC date remain one logical daily bucket and never accelerate the delisting confirmation clock.
 
 ## 7. Asset Intelligence Drawer and browser alert panel
 
@@ -493,10 +493,10 @@ It is recomputed from fresh current Browser state, has no durable history and is
 | Reference prices | CDN 120s/600s | None | No |
 | Traditional activity | CDN 1h/24h | None | No |
 | Traditional live prices | CDN 60s/120s | None | No |
-| General Radar | CDN 5m/10m public read | Runtime Cache 168 hourly snapshots | No |
-| Perp Volume Anomalies | Child of Radar public read | Runtime Cache 45 daily anchors | No |
-| Spot Volume & Price Anomalies | Child of Radar public read | Runtime Cache 8 daily anchors | No |
-| OI Proxy | Child of Radar public read | Runtime Cache 96 hourly buckets | No |
+| General Radar | CDN 5m/10m public read | PostgreSQL checkpoint + Runtime Cache replica, 168 hourly snapshots | Continuity checkpoint |
+| Perp Volume Anomalies | Child of Radar public read | PostgreSQL checkpoint + Runtime Cache replica, 45 daily anchors | Continuity checkpoint |
+| Spot Volume & Price Anomalies | Child of Radar public read | PostgreSQL checkpoint + Runtime Cache replica, 8 daily anchors | Continuity checkpoint |
+| OI Proxy | Child of Radar public read | PostgreSQL checkpoint + Runtime Cache replica, 96 hourly buckets | Continuity checkpoint |
 | Competitor Listings | CDN 5m/10m public read | Runtime Cache 45-day target / 2,000 event cap | **Yes, Phase 1 shadow** |
 | `/api/health` | Read-only live contract check; HTTP 503 by current severity policy | Function logs/GitHub Action record | No product data write |
 
@@ -509,7 +509,7 @@ Current persistence does **not** provide a market-history revision ledger:
 | Current product | Retry/history behavior now | What cannot be claimed |
 |---|---|---|
 | Phase 1 Competitor Listings | One current official catalog observation per source/day, plus accepted membership and lifecycle evidence | Current catalogs have no historical market-fact overlap, and catalog success does not validate price/volume/OI/funding/reference/Traditional revisions |
-| General Radar and OI Runtime Cache | A retry in the same UTC hour replaces that cache bucket | The first value, intermediate revisions, revision count and delta are not retained |
+| General Radar and OI bounded checkpoints | A retry in the same UTC hour replaces that logical bucket in the latest checkpoint/replica | The first value, intermediate revisions, revision count and delta are not retained |
 | Perp and Spot daily anomaly anchors | A same-UTC-day retry replaces the compact daily bucket | This is idempotent last-good history, not append-only source-restatement history |
 | Funding, Top 30, Reference and Traditional endpoints | CDN/current response behavior described above | CDN revalidation is not durable correction evidence |
 

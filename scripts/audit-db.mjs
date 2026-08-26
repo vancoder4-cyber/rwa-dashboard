@@ -11,6 +11,7 @@ const EXPECTED_ROLES = [
   'rwa_catalog_shadow_writer',
   'rwa_analytics_reader',
   'rwa_alert_dispatcher',
+  'rwa_signal_history_writer',
 ];
 
 function fingerprintConnection() {
@@ -43,6 +44,10 @@ const [ledger, extensions, roles, privileges, counts, latestCycle] = await Promi
       has_table_privilege('rwa_analytics_reader', 'identity.source', 'INSERT') AS reader_identity_insert,
       has_table_privilege('rwa_alert_dispatcher', 'alert.delivery', 'UPDATE') AS dispatcher_delivery_update,
       has_table_privilege('rwa_alert_dispatcher', 'identity.source', 'INSERT') AS dispatcher_identity_insert
+      ,has_table_privilege('rwa_signal_history_writer', 'publication.signal_history_checkpoint', 'SELECT') AS history_select
+      ,has_table_privilege('rwa_signal_history_writer', 'publication.signal_history_checkpoint', 'INSERT') AS history_insert
+      ,has_table_privilege('rwa_signal_history_writer', 'publication.signal_history_checkpoint', 'UPDATE') AS history_update
+      ,has_table_privilege('rwa_signal_history_writer', 'publication.signal_history_checkpoint', 'DELETE') AS history_delete
   `),
   sql.query(`
     SELECT
@@ -91,6 +96,9 @@ if (!privilege.writer_catalog_insert || !privilege.writer_membership_insert) fai
 if (privilege.writer_fact_insert || privilege.writer_alert_insert) fail('catalog writer can mutate a later-phase table');
 if (!privilege.reader_analytics_select || privilege.reader_identity_insert) fail('analytics reader grants are invalid');
 if (!privilege.dispatcher_delivery_update || privilege.dispatcher_identity_insert) fail('alert dispatcher grants are invalid');
+if (!privilege.history_select || !privilege.history_insert || !privilege.history_update || privilege.history_delete) {
+  fail('signal history writer grants are invalid');
+}
 
 const result = {
   status: 'pass',

@@ -68,6 +68,10 @@ const SPOT_ANOMALY_VENUES = new Set(['gate', 'kraken', 'bitget', 'binance', 'okx
 const SPOT_ANOMALY_FIELD_STATUSES = new Set(['full', 'partial', 'estimated', 'unavailable']);
 const SPOT_ANOMALY_SECTION_STATUSES = new Set(['full', 'partial', 'warming', 'unavailable']);
 const SPOT_ANOMALY_PERSISTENCE_STATUSES = new Set(['partial', 'unavailable']);
+const SIGNAL_HISTORY_PERSISTENCE_MODES = new Set([
+  'vercel-runtime-cache',
+  'postgres-checkpoint+vercel-runtime-cache',
+]);
 const SPOT_ANOMALY_SOURCE_STATUSES = new Set(['full', 'partial', 'unavailable']);
 const SPOT_ANOMALY_WRITE_STATUSES = new Set([
   'stored',
@@ -643,7 +647,7 @@ function validateSpotVolumePriceAnomalies(section, generatedAtMs) {
     (persistenceStatus === 'partial' && writeStatus === 'read-only' && persistence?.error === null) ||
     (persistenceStatus === 'unavailable' && writeStatus === 'unavailable' &&
       typeof persistence?.error === 'string' && persistence.error.length > 0);
-  const persistenceValid = persistence?.mode === 'vercel-runtime-cache' &&
+  const persistenceValid = SIGNAL_HISTORY_PERSISTENCE_MODES.has(persistence?.mode) &&
     SPOT_ANOMALY_PERSISTENCE_STATUSES.has(persistenceStatus) &&
     persistence?.namespace === SPOT_ANOMALY_HISTORY_NAMESPACE &&
     persistence?.writer?.requested === false && persistence?.writer?.succeeded === null &&
@@ -1429,7 +1433,7 @@ function validateOiLiquidationAnomalies(section, generatedAtMs) {
     (persistenceStatus === 'partial' && writeStatus === 'read-only' && persistence?.error === null) ||
     (persistenceStatus === 'unavailable' && writeStatus === 'unavailable' &&
       typeof persistence?.error === 'string' && persistence.error.length > 0);
-  const persistenceValid = persistence?.mode === 'vercel-runtime-cache' &&
+  const persistenceValid = SIGNAL_HISTORY_PERSISTENCE_MODES.has(persistence?.mode) &&
     OI_LIQUIDATION_PERSISTENCE_STATUSES.has(persistenceStatus) &&
     persistence?.namespace === OI_LIQUIDATION_HISTORY_NAMESPACE &&
     persistence?.writer?.requested === false && persistence?.writer?.succeeded === null &&
