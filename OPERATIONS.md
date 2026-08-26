@@ -67,7 +67,7 @@ Minimum role boundary:
 
 Migration `0002` grants the migration owner membership in `rwa_catalog_shadow_writer`; the shadow transaction immediately applies `SET LOCAL ROLE` plus short statement/lock timeouts. This is the current additive bridge, not the final read-path credential model. Before any database read cutover, provision a dedicated least-privilege login and prove that the owner connection is no longer used by the application.
 
-Safe defaults are `PG_WRITE_MODE=off` and `RAW_ARCHIVE_MODE=off`; both are server-only. `DATABASE_URL`, `DATABASE_URL_UNPOOLED` or `BLOB_READ_WRITE_TOKEN` being present never enables a writer. Phase 1 may enable only the reviewed catalog shadow path; upstream raw-body capture remains off until later collector instrumentation is separately approved.
+Safe defaults are `PG_WRITE_MODE=off`, `MARKET_FACT_PG_WRITE_MODE=off` and `RAW_ARCHIVE_MODE=off`; all are server-only and independent. `DATABASE_URL`, `DATABASE_URL_UNPOOLED` or `BLOB_READ_WRITE_TOKEN` being present never enables a writer. Phase 1 may enable only the reviewed catalog shadow path; migration `0004` may install the Phase 2 revision schema without enabling its writer or reader, and upstream raw-body capture remains off until later collector instrumentation is separately approved.
 
 Mode semantics are independent:
 
@@ -138,6 +138,8 @@ Before any exact market-fact writer or rolling-overlap Cron is enabled:
 5. version the normal/review/anomalous restatement thresholds, including zero/null handling, source precision and batch revision-rate gates;
 6. test identical replay, small normal restatement, gray-zone review, anomalous drift, late completion, `value → NULL`, method/unit/identity change, old backfill and Partial/Unavailable source behavior;
 7. shadow-run long enough to reconcile every revision and prove that disabling the writer leaves current Runtime Cache/CDN/API/UI behavior unchanged.
+
+Migration `0004` and `api/_lib/market-fact-revisions.js` satisfy only the default-off listing-family schema, normalization, keying and row-level classification foundation for items 1–6. They do not collect data, write a database row, enable an overlap Cron, change an API reader, or satisfy item 7. `audit:db` must verify the append-only role allow/deny boundary after the migration is applied.
 
 Operational clocks are data-family specific:
 

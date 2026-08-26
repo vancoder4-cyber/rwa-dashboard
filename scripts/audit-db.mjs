@@ -9,6 +9,7 @@ const SCRIPT_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATION_DIRECTORY = path.resolve(SCRIPT_DIRECTORY, '../db/migrations');
 const EXPECTED_ROLES = [
   'rwa_catalog_shadow_writer',
+  'rwa_market_fact_shadow_writer',
   'rwa_analytics_reader',
   'rwa_alert_dispatcher',
 ];
@@ -39,6 +40,15 @@ const [ledger, extensions, roles, privileges, counts, latestCycle] = await Promi
       has_table_privilege('rwa_catalog_shadow_writer', 'ingest.catalog_membership', 'INSERT') AS writer_membership_insert,
       has_table_privilege('rwa_catalog_shadow_writer', 'fact.listing_observation_hourly', 'INSERT') AS writer_fact_insert,
       has_table_privilege('rwa_catalog_shadow_writer', 'alert.event', 'INSERT') AS writer_alert_insert,
+      has_table_privilege('rwa_market_fact_shadow_writer', 'fact.market_fact_revision', 'INSERT') AS fact_writer_header_insert,
+      has_table_privilege('rwa_market_fact_shadow_writer', 'fact.listing_market_fact_revision', 'INSERT') AS fact_writer_listing_insert,
+      has_table_privilege('rwa_market_fact_shadow_writer', 'ops.market_fact_revision_review', 'INSERT') AS fact_writer_review_insert,
+      has_table_privilege('rwa_market_fact_shadow_writer', 'fact.market_fact_revision', 'UPDATE') AS fact_writer_header_update,
+      has_table_privilege('rwa_market_fact_shadow_writer', 'fact.listing_market_fact_revision', 'DELETE') AS fact_writer_listing_delete,
+      has_table_privilege('rwa_market_fact_shadow_writer', 'identity.instrument_version', 'INSERT') AS fact_writer_identity_insert,
+      has_table_privilege('rwa_market_fact_shadow_writer', 'analytics.signal_result', 'INSERT') AS fact_writer_analytics_insert,
+      has_table_privilege('rwa_market_fact_shadow_writer', 'publication.snapshot_manifest', 'INSERT') AS fact_writer_publication_insert,
+      has_table_privilege('rwa_market_fact_shadow_writer', 'alert.event', 'INSERT') AS fact_writer_alert_insert,
       has_table_privilege('rwa_analytics_reader', 'analytics.catalog_change_event', 'SELECT') AS reader_analytics_select,
       has_table_privilege('rwa_analytics_reader', 'identity.source', 'INSERT') AS reader_identity_insert,
       has_table_privilege('rwa_alert_dispatcher', 'alert.delivery', 'UPDATE') AS dispatcher_delivery_update,
@@ -53,6 +63,9 @@ const [ledger, extensions, roles, privileges, counts, latestCycle] = await Promi
       (SELECT count(*)::int FROM ingest.source_run) AS source_runs,
       (SELECT count(*)::int FROM ingest.catalog_membership) AS memberships,
       (SELECT count(*)::int FROM ingest.raw_artifact) AS artifacts,
+      (SELECT count(*)::int FROM fact.market_fact_revision) AS market_fact_revisions,
+      (SELECT count(*)::int FROM fact.listing_market_fact_revision) AS listing_market_fact_revisions,
+      (SELECT count(*)::int FROM ops.market_fact_revision_review) AS market_fact_reviews,
       (SELECT count(*)::int FROM analytics.catalog_change_event) AS listing_events,
       (SELECT count(*)::int FROM identity.review_case WHERE status = 'open') AS open_reviews
   `),
@@ -89,6 +102,15 @@ if (roles.length !== EXPECTED_ROLES.length || roles.some(role => role.rolcanlogi
 const privilege = privileges[0] || {};
 if (!privilege.writer_catalog_insert || !privilege.writer_membership_insert) fail('catalog writer lacks required Phase 1 grants');
 if (privilege.writer_fact_insert || privilege.writer_alert_insert) fail('catalog writer can mutate a later-phase table');
+if (!privilege.fact_writer_header_insert || !privilege.fact_writer_listing_insert || !privilege.fact_writer_review_insert) {
+  fail('market-fact writer lacks required Phase 2 append grants');
+}
+if (privilege.fact_writer_header_update || privilege.fact_writer_listing_delete) {
+  fail('market-fact writer can mutate immutable revision rows');
+}
+if (privilege.fact_writer_identity_insert || privilege.fact_writer_analytics_insert || privilege.fact_writer_publication_insert || privilege.fact_writer_alert_insert) {
+  fail('market-fact writer can mutate an authority or downstream domain');
+}
 if (!privilege.reader_analytics_select || privilege.reader_identity_insert) fail('analytics reader grants are invalid');
 if (!privilege.dispatcher_delivery_update || privilege.dispatcher_identity_insert) fail('alert dispatcher grants are invalid');
 

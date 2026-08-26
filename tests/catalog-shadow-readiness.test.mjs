@@ -1346,6 +1346,7 @@ test('read-only query bundle is fixed at nine bounded catalog-reconciliation que
   assert.equal(boundedProbeCount, existsCount);
   assert.doesNotMatch(handoffSql, /\bcount\s*\(\s*\*\s*\)/i);
   assert.match(handoffSql, /market_fact_rows_present/);
+  assert.doesNotMatch(handoffSql, /market_fact_revision/);
   assert.match(handoffSql, /derived_analytics_rows_present/);
   assert.match(handoffSql, /publication_rows_present/);
   assert.match(handoffSql, /alert_rows_present/);

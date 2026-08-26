@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -40,8 +40,9 @@ test('migration files are ordered, immutable-checksummed, and parse into stateme
     '0001_phase0_foundation.sql',
     '0002_phase1_facts_alerting.sql',
     '0003_phase1_catalog_retry_replace.sql',
+    '0004_phase2_market_fact_revision_foundation.sql',
   ]);
-  assert.deepEqual(migrations.map(row => row.version), ['0001', '0002', '0003']);
+  assert.deepEqual(migrations.map(row => row.version), ['0001', '0002', '0003', '0004']);
   for (const migration of migrations) {
     assert.match(migration.filename, MIGRATION_FILE_PATTERN);
     assert.match(migration.checksum, /^[0-9a-f]{64}$/);
@@ -228,6 +229,94 @@ test('database roles are NOLOGIN and grants separate catalog, read, and dispatch
   }
 });
 
+test('Phase 2 foundation is immutable, partitioned, least-privilege, and disabled by default', async () => {
+  const phase2 = await readFile(path.join(MIGRATION_DIRECTORY, '0004_phase2_market_fact_revision_foundation.sql'), 'utf8');
+  const auditDb = await readFile(path.join(ROOT_DIRECTORY, 'scripts/audit-db.mjs'), 'utf8');
+  const sql = compactSql(phase2);
+
+  for (const table of [
+    'ops.market_fact_collection_policy',
+    'ops.market_fact_drift_policy',
+    'fact.market_fact_revision',
+    'fact.listing_market_fact_revision',
+    'ops.market_fact_revision_review',
+  ]) {
+    assert.match(sql, new RegExp(`CREATE TABLE IF NOT EXISTS ${table.replace('.', '\\.')} \\(`));
+  }
+  assert.match(sql, /PARTITION BY RANGE \(valid_from\)/);
+  assert.match(sql, /ensure_listing_market_fact_partitions\(reference_time timestamptz\)/);
+  assert.match(sql, /FOR month_offset IN -1\.\.2 LOOP/);
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS fact\.%I PARTITION OF fact\.listing_market_fact_revision/);
+
+  assert.match(sql, /observation_key char\(64\) NOT NULL/);
+  assert.match(sql, /UNIQUE \(observation_key, revision_no\)/);
+  assert.match(sql, /UNIQUE \(observation_key, normalized_payload_sha256\)/);
+  assert.match(sql, /supersedes_revision_id uuid UNIQUE REFERENCES fact\.market_fact_revision/);
+  assert.match(sql, /FOREIGN KEY \(instrument_version_id, source_id, asset_version_id\)[\s\S]*REFERENCES identity\.instrument_version/);
+  assert.match(sql, /event_at timestamptz NOT NULL[\s\S]*valid_from timestamptz NOT NULL[\s\S]*captured_at timestamptz NOT NULL[\s\S]*recorded_at timestamptz NOT NULL/);
+  assert.match(sql, /revision_disposition IN \('initial', 'normal-restatement', 'late-completion'\)/);
+  assert.doesNotMatch(sql, /revision_disposition IN \([^)]*review-required/);
+  assert.match(sql, /classification IN \('review-required', 'anomalous'\)/);
+
+  assert.match(sql, /IMMUTABLE_MARKET_FACT_REVISION/);
+  assert.match(sql, /INVALID_MARKET_FACT_REVISION_CHAIN/);
+  assert.match(sql, /INVALID_MARKET_FACT_SOURCE_RUN/);
+  assert.match(sql, /INVALID_MARKET_FACT_IDENTITY_VERSION/);
+  assert.match(sql, /INVALID_LISTING_MARKET_FACT_HEADER/);
+  assert.match(sql, /INVALID_LISTING_MARKET_FACT_METHOD_REVISION/);
+  assert.match(sql, /MISSING_LISTING_MARKET_FACT_TYPED_CHILD/);
+  assert.match(sql, /CREATE CONSTRAINT TRIGGER market_fact_revision_typed_child[\s\S]*DEFERRABLE INITIALLY DEFERRED/);
+  assert.match(sql, /BEFORE UPDATE OR DELETE ON fact\.market_fact_revision/);
+  assert.match(sql, /BEFORE UPDATE OR DELETE ON fact\.listing_market_fact_revision/);
+  assert.match(sql, /BEFORE UPDATE OR DELETE ON ops\.market_fact_revision_review/);
+
+  assert.match(sql, /CREATE OR REPLACE VIEW fact\.listing_market_fact_revision_summary/);
+  assert.match(sql, /first_value\(typed\.last_price\)/);
+  assert.match(sql, /count\(\*\) OVER \(PARTITION BY header\.observation_key\) - 1 AS revision_count/);
+  assert.match(sql, /last_price_latest_minus_first/);
+  assert.match(sql, /funding_rate_latest_minus_previous/);
+  assert.match(sql, /last_price_latest_vs_first_pct/);
+  assert.match(sql, /funding_rate_latest_vs_previous_pct/);
+
+  assert.match(sql, /candidate_payload jsonb NOT NULL/);
+  assert.match(sql, /jsonb_typeof\(candidate_payload\) = 'object'/);
+  assert.match(sql, /input_artifact_id uuid/);
+  assert.match(sql, /FOREIGN KEY \(input_artifact_id, source_run_id\)[\s\S]*REFERENCES ingest\.raw_artifact/);
+  assert.match(sql, /captured_at >= event_at - interval '5 minutes'/);
+  assert.doesNotMatch(sql, /captured_at >= event_at - interval '7 days'/);
+  assert.match(sql, /NEW\.recorded_at := clock_timestamp\(\)/);
+  assert.match(sql, /NEW\.created_at := clock_timestamp\(\)/);
+  assert.match(sql, /CREATE TRIGGER market_fact_revision_review_insert[\s\S]*validate_market_fact_revision_review_insert/);
+
+  assert.match(sql, /CREATE ROLE rwa_market_fact_shadow_writer NOLOGIN/);
+  assert.match(sql, /GRANT SELECT, INSERT ON fact\.market_fact_revision,[\s\S]*ops\.market_fact_revision_review TO rwa_market_fact_shadow_writer/);
+  assert.match(sql, /REVOKE UPDATE, DELETE, TRUNCATE ON fact\.market_fact_revision,[\s\S]*FROM rwa_market_fact_shadow_writer/);
+  assert.doesNotMatch(sql, /GRANT (?:ALL|UPDATE|DELETE|TRUNCATE)[^;]*TO rwa_market_fact_shadow_writer/);
+
+  assert.match(sql, /writer_default_mode text NOT NULL DEFAULT 'off' CHECK \(writer_default_mode = 'off'\)/);
+  assert.match(sql, /read_default_mode text NOT NULL DEFAULT 'off' CHECK \(read_default_mode = 'off'\)/);
+  assert.match(sql, /'listing-market-hourly', 'listing-market-fact\/v1'/);
+  assert.match(sql, /'price', 0\.005, 0\.02/);
+  assert.match(sql, /'quantity', 0\.01, 0\.05/);
+  assert.match(sql, /'funding-rate', NULL, NULL, 0\.00000001, 0\.0001/);
+  assert.doesNotMatch(phase2, /^\s*(ticker|symbol|venue_symbol|canonical_symbol)\s+/gmi);
+  assert.match(auditDb, /FROM ops\.market_fact_revision_review\) AS market_fact_reviews/);
+  assert.doesNotMatch(auditDb, /market_fact_revision_review WHERE review_status/);
+});
+
+test('Phase 2 foundation has no API or Cron writer integration', async () => {
+  const apiDirectory = path.join(ROOT_DIRECTORY, 'api');
+  const apiFiles = (await readdir(apiDirectory, { recursive:true }))
+    .filter(name => name.endsWith('.js'))
+    .filter(name => name !== '_lib/market-fact-revisions.js');
+  for (const name of apiFiles) {
+    const source = await readFile(path.join(apiDirectory, name), 'utf8');
+    assert.doesNotMatch(source, /market-fact-revisions|MARKET_FACT_PG_WRITE_MODE/);
+  }
+  const vercelConfig = await readFile(path.join(ROOT_DIRECTORY, 'vercel.json'), 'utf8');
+  assert.doesNotMatch(vercelConfig, /market-fact|market_fact/i);
+});
+
 test('Neon clients remain lazy and migrations prefer the unpooled URL', () => {
   assert.equal(DATABASE_TRANSACTION_TIMEOUT_MS, 25_000);
   const originalPooled = process.env[DATABASE_URL_ENV_KEY];
@@ -301,5 +390,6 @@ test('package exposes only an explicit migration command and safe example modes'
   assert.match(envExample, /^PREVIEW_NEON_DATABASE_URL_UNPOOLED=$/m);
   assert.match(envExample, /^BLOB_READ_WRITE_TOKEN=$/m);
   assert.match(envExample, /^PG_WRITE_MODE=off$/m);
+  assert.match(envExample, /^MARKET_FACT_PG_WRITE_MODE=off$/m);
   assert.match(envExample, /^RAW_ARCHIVE_MODE=off$/m);
 });
