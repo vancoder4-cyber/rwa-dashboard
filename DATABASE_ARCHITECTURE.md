@@ -34,16 +34,16 @@ official external metadata / market endpoints
  publication snapshot / API / UI
 ```
 
-The following are explicit non-goals for Phase 0 and Phase 1:
+The following remain explicit non-goals for the typed Phase 0 and Phase 1 data model:
 
-- no production API or browser reads from PostgreSQL;
-- no change to Runtime Cache history writers, cache namespaces, HTTP 503 behavior or CDN freshness policy;
+- no browser or product API reads from typed PostgreSQL facts; the server-only Signal endpoint may restore its bounded history checkpoint;
+- no change to history namespaces, formula gates or CDN freshness policy; migration `0004` adds a bounded PostgreSQL continuity checkpoint behind the existing writer;
 - no continuous writes of price, volume, open interest, funding, order-book, traditional-market or reference-price facts;
 - no change to an asset's admission, alias, category, lifecycle or market tag;
 - no automatic delivery of alerts;
 - no joining by a bare ticker.
 
-Phase 0 provisions the database and archive contract. Phase 1 shadow-writes only the ten official Perpetual/Spot catalogs and the identity/listing lifecycle produced from them. Empty typed `fact`, `analytics`, `publication` and `alert` tables are the Phase 0/1 schema skeleton; continuous market-fact/aggregate writes, partition conversion and publication/alert execution wait for a later, separately approved migration.
+Phase 0 provisions the database and archive contract. Phase 1 shadow-writes the ten official Perpetual/Spot catalogs and the identity/listing lifecycle produced from them. Migration `0004` is a separately approved continuity repair: it stores four bounded, checksummed Signal history payloads in `publication.signal_history_checkpoint` so an ephemeral cache eviction cannot erase formula maturity. It is not a typed market-fact ingest or a full replay ledger. Continuous typed fact/aggregate writes, partition conversion and publication/alert execution still wait for a later migration.
 
 ## 2. Current system and target responsibilities
 
@@ -51,13 +51,13 @@ Phase 0 provisions the database and archive contract. Phase 1 shadow-writes only
 |---|---|---|---|
 | RWA admission and identity | Official venue metadata plus the reviewed gates in `api/_lib/security-identity.js`, `api/_lib/listing-sources.js` and `RWA_DATA_RULES.md` | The same rules, represented as immutable identity versions and evidence | Shadow copy only; database cannot admit an asset |
 | Current venue market data | Fixed-purpose server proxies and browser state | Normalized listing facts plus a latest-value serving layer | Unchanged; fact tables are not continuously populated |
-| Radar history | Four Vercel Runtime Cache namespaces in `api/signal-snapshot.js:51-56` and the anomaly libraries | PostgreSQL time-series facts/anchors and derived evaluations | Unchanged |
+| Radar history | Four bounded PostgreSQL checkpoints with Vercel Runtime Cache replicas | PostgreSQL time-series facts/anchors and derived evaluations | `0004` continuity checkpoint active; typed fact cutover remains later |
 | Listing audit | `rwa-listing-audit-v2` Runtime Cache bundle in `api/listing-changes.js:15-17` | Durable catalog memberships and listing events | Phase 1 dual-write; Runtime Cache remains the read and operational authority |
 | Raw source payloads | Mostly transient upstream responses and function logs | Immutable object archive with database manifest | Contract/schema only in Phase 0; upstream raw-body instrumentation is a later collector phase |
 | Published API payload | Server builders, CDN and client validators | Versioned publication manifests with reproducible inputs | Unchanged |
 | Delivery and acknowledgement | Not implemented | Alert event, incident, subscription and transactional outbox | Schema only |
 
-Runtime Cache remains useful for low-latency latest snapshots. It must not be treated as a durable system of record: the current code explicitly describes it as regional best-effort storage in `RWA_DATA_RULES.md` section 17.
+Runtime Cache remains useful for low-latency latest snapshots but is disposable. The four Signal histories recover from checksummed PostgreSQL checkpoints; listing-audit Runtime Cache remains governed by its separate publication contract. A bounded checkpoint is continuity storage, not a substitute for typed facts or raw archives.
 
 ## 3. Identity and key model
 
@@ -314,7 +314,7 @@ Scope:
 
 1. Provision Neon/PostgreSQL in the production region strategy and a separate non-production branch/database.
 2. Pin a supported PostgreSQL version and required extensions; apply versioned, transactional migrations.
-3. Create the implemented NOLOGIN group roles: `rwa_catalog_shadow_writer` for only the named Phase 1 identity/ingest/event tables, `rwa_analytics_reader` for read-only analytics/reconciliation, and `rwa_alert_dispatcher` for only delivery/outbox dispatch. The migration owner is granted `rwa_catalog_shadow_writer` so the current runtime owner can use `SET LOCAL ROLE` inside the shadow transaction; the other groups need an explicit future login grant. No Phase 0/1 group can write continuous market facts. Before any read cutover, replace the owner connection with a dedicated least-privilege application login rather than treating owner-plus-role-assumption as the final production boundary.
+3. Create the implemented NOLOGIN group roles: `rwa_catalog_shadow_writer` for only the named Phase 1 identity/ingest/event tables, `rwa_signal_history_writer` for only the bounded checkpoint table, `rwa_analytics_reader` for read-only analytics/reconciliation, and `rwa_alert_dispatcher` for only delivery/outbox dispatch. The migration owner is granted the two active writer groups so runtime transactions can immediately `SET LOCAL ROLE`; the other groups need an explicit future login grant. No role can write typed continuous market facts. Before a typed read cutover, replace the owner connection with a dedicated least-privilege application login rather than treating owner-plus-role-assumption as the final production boundary.
 4. Configure pooled runtime connections and a direct migration connection. Set short statement/lock/idle-in-transaction timeouts.
 5. Create the Phase 0 identity/ingest foundation plus empty typed `fact`, `analytics`, `alert` and `publication` table skeletons. `ops.schema_migration` exists now; additional ops tables remain later targets. No skeleton table is an enabled writer contract.
 6. Provision the private object-storage/archive contract and validate a synthetic content-addressed artifact's checksum, conditional-create, lifecycle and restore behavior. Do not instrument or claim capture of upstream raw bodies in this phase.

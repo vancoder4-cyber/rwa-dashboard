@@ -45,6 +45,10 @@ import {
   setNoStore,
   setPublicCache,
 } from './_lib/upstream.js';
+import {
+  readSignalHistoryCheckpoints,
+  writeSignalHistoryCheckpoints,
+} from './_lib/signal-history-checkpoint.js';
 
 export const config = { regions: ['iad1'], maxDuration: 60 };
 
@@ -783,14 +787,83 @@ export function mergeSignalHistory(history, currentSnapshot, nowMs = Date.now())
   return snapshots;
 }
 
+function normalizeRuntimeSignalHistory(history, nowMs = Date.now()) {
+  const cutoff = nowMs - HISTORY_TTL_SECONDS * 1_000;
+  const byBucket = new Map();
+  for (const snapshot of Array.isArray(history) ? history : []) {
+    const timestamp = Number(snapshot?.t);
+    if (Number.isSafeInteger(timestamp) && timestamp >= cutoff && timestamp <= nowMs && Array.isArray(snapshot?.a)) {
+      byBucket.set(timestamp, snapshot);
+    }
+  }
+  return [...byBucket.values()]
+    .sort((left, right) => left.t - right.t)
+    .slice(-HISTORY_MAX_SNAPSHOTS);
+}
+
+function safelyNormalizeHistory(value, normalize, emptyValue, nowMs) {
+  try {
+    return { value:normalize(value, nowMs), valid:true };
+  } catch {
+    return { value:normalize(emptyValue, nowMs), valid:false };
+  }
+}
+
+function chooseHistory(cacheValue, durableValue, normalize, emptyValue, latestAt, nowMs) {
+  const cache = safelyNormalizeHistory(cacheValue, normalize, emptyValue, nowMs);
+  const durable = safelyNormalizeHistory(durableValue, normalize, emptyValue, nowMs);
+  const cacheLatest = latestAt(cache.value);
+  const durableLatest = latestAt(durable.value);
+  if (durable.valid && (!cache.valid || durableLatest > cacheLatest)) {
+    return { stored:durable.value, source:'postgres-checkpoint' };
+  }
+  if (cache.valid && (!durable.valid || cacheLatest > durableLatest)) {
+    return { stored:cache.value, source:'vercel-runtime-cache' };
+  }
+  if (durable.valid && durableValue !== null && durableValue !== undefined) {
+    return { stored:durable.value, source:'postgres-checkpoint' };
+  }
+  const cacheCount = Array.isArray(cache.value) ? cache.value.length : cache.value?.h?.length || 0;
+  const durableCount = Array.isArray(durable.value) ? durable.value.length : durable.value?.h?.length || 0;
+  return durable.valid && durableCount > cacheCount
+    ? { stored:durable.value, source:'postgres-checkpoint' }
+    : { stored:cache.value, source:'vercel-runtime-cache' };
+}
+
+async function readRuntimeCache(cache, key) {
+  try {
+    return { value:await cache.get(key), error:null };
+  } catch (error) {
+    return { value:null, error:error?.message || 'runtime cache read unavailable' };
+  }
+}
+
+async function writeRuntimeCache(cache, key, value, options) {
+  try {
+    await cache.set(key, value, options);
+    return { status:'stored', error:null };
+  } catch (error) {
+    return { status:'unavailable', error:error?.message || 'runtime cache write unavailable' };
+  }
+}
+
 async function updateRuntimeHistory(currentSnapshot, nowMs, {
   writeRequested = false,
   writeAllowed = false,
+  durableStored = null,
 } = {}) {
   try {
     const cache = getCache({ namespace: HISTORY_NAMESPACE });
-    const stored = await cache.get(HISTORY_KEY);
-    const storedSnapshots = Array.isArray(stored) ? stored : [];
+    const cacheRead = await readRuntimeCache(cache, HISTORY_KEY);
+    const selected = chooseHistory(
+      cacheRead.value,
+      durableStored,
+      normalizeRuntimeSignalHistory,
+      [],
+      value => value.at(-1)?.t || 0,
+      nowMs,
+    );
+    const storedSnapshots = selected.stored;
     const previous = storedSnapshots
       .filter(snapshot => Number(snapshot?.t) < currentSnapshot.t)
       .slice(-(HISTORY_MAX_SNAPSHOTS - 1));
@@ -800,16 +873,24 @@ async function updateRuntimeHistory(currentSnapshot, nowMs, {
         previous,
         stored: storedSnapshots,
         writeStatus: writeRequested ? 'skipped-incomplete-sources' : 'read-only',
-        error: null,
+        cacheWriteStatus:'not-requested',
+        historySource:selected.source,
+        error:null,
+        cacheError:cacheRead.error,
       };
     }
-    const merged = mergeSignalHistory(stored, currentSnapshot, nowMs);
-    await cache.set(HISTORY_KEY, merged, {
+    const merged = mergeSignalHistory(storedSnapshots, currentSnapshot, nowMs);
+    const cacheWrite = await writeRuntimeCache(cache, HISTORY_KEY, merged, {
       ttl: HISTORY_TTL_SECONDS,
       tags: ['rwa-signal-history-v2'],
       name: 'RWA Signal Radar five-source hourly history',
     });
-    return { status: 'partial', previous, stored: merged, writeStatus: 'stored', error: null };
+    return {
+      status:'partial', previous, stored:merged, writeStatus:cacheWrite.status,
+      cacheWriteStatus:cacheWrite.status, historySource:selected.source,
+      error:null,
+      cacheError:cacheRead.error || cacheWrite.error,
+    };
   } catch (error) {
     console.error('[signal-snapshot] runtime history unavailable', error);
     return { status: 'unavailable', previous: [], stored: [], writeStatus: 'unavailable', error: error.message };
@@ -819,17 +900,25 @@ async function updateRuntimeHistory(currentSnapshot, nowMs, {
 async function updateDailyVolumeHistory(assets, nowMs, {
   writeRequested = false,
   writeAllowed = false,
+  durableStored = null,
 } = {}) {
   try {
     const cache = getCache({ namespace: DAILY_VOLUME_HISTORY_NAMESPACE });
-    const storedValue = await cache.get(DAILY_VOLUME_HISTORY_KEY);
-    const stored = normalizeDailyVolumeHistory(storedValue, nowMs);
+    const cacheRead = await readRuntimeCache(cache, DAILY_VOLUME_HISTORY_KEY);
+    const selected = chooseHistory(
+      cacheRead.value, durableStored, normalizeDailyVolumeHistory, [],
+      value => value.at(-1)?.t || 0, nowMs,
+    );
+    const stored = selected.stored;
     if (!writeRequested || !writeAllowed) {
       return {
         status:'partial',
         stored,
         writeStatus:writeRequested ? 'skipped-incomplete-sources' : 'read-only',
+        cacheWriteStatus:'not-requested',
+        historySource:selected.source,
         error:null,
+        cacheError:cacheRead.error,
       };
     }
     // The hourly writer upserts one row for the current UTC day. Repeated
@@ -837,12 +926,17 @@ async function updateDailyVolumeHistory(assets, nowMs, {
     // sealed rolling-24h anchor used from the following UTC day onward.
     const current = compactDailyVolumeSnapshot(assets, nowMs, { dayMs:nowMs });
     const merged = mergeDailyVolumeHistory(stored, current, nowMs);
-    await cache.set(DAILY_VOLUME_HISTORY_KEY, merged, {
+    const cacheWrite = await writeRuntimeCache(cache, DAILY_VOLUME_HISTORY_KEY, merged, {
       ttl:DAILY_VOLUME_HISTORY_TTL_SECONDS,
       tags:['rwa-signal-volume-daily-v1'],
       name:'RWA perpetual volume daily anchor history',
     });
-    return { status:'partial', stored:merged, writeStatus:'stored', error:null };
+    return {
+      status:'partial', stored:merged, writeStatus:cacheWrite.status,
+      cacheWriteStatus:cacheWrite.status, historySource:selected.source,
+      error:null,
+      cacheError:cacheRead.error || cacheWrite.error,
+    };
   } catch (error) {
     console.error('[signal-snapshot] daily volume history unavailable', error);
     return {
@@ -857,17 +951,25 @@ async function updateDailyVolumeHistory(assets, nowMs, {
 async function updateSpotAnomalyHistory(listings, nowMs, {
   writeRequested = false,
   writeAllowed = false,
+  durableStored = null,
 } = {}) {
   try {
     const cache = getCache({ namespace:SPOT_ANOMALY_HISTORY_NAMESPACE });
-    const storedValue = await cache.get(SPOT_ANOMALY_HISTORY_KEY);
-    const stored = normalizeSpotDailyHistory(storedValue, nowMs);
+    const cacheRead = await readRuntimeCache(cache, SPOT_ANOMALY_HISTORY_KEY);
+    const selected = chooseHistory(
+      cacheRead.value, durableStored, normalizeSpotDailyHistory, [],
+      value => value.at(-1)?.t || 0, nowMs,
+    );
+    const stored = selected.stored;
     if (!writeRequested || !writeAllowed) {
       return {
         status:'partial',
         stored,
         writeStatus:writeRequested ? 'skipped-incomplete-sources' : 'read-only',
+        cacheWriteStatus:'not-requested',
+        historySource:selected.source,
         error:null,
+        cacheError:cacheRead.error,
       };
     }
     // The authenticated hourly Cron replaces the current UTC day's compact
@@ -875,12 +977,17 @@ async function updateSpotAnomalyHistory(listings, nowMs, {
     // the sealed prior-day rolling-24h anchor. Public reads never mutate it.
     const current = compactSpotDailySnapshot(listings, nowMs);
     const merged = mergeSpotDailyHistory(stored, current, nowMs);
-    await cache.set(SPOT_ANOMALY_HISTORY_KEY, merged, {
+    const cacheWrite = await writeRuntimeCache(cache, SPOT_ANOMALY_HISTORY_KEY, merged, {
       ttl:SPOT_ANOMALY_HISTORY_TTL_SECONDS,
       tags:['rwa-signal-spot-volume-price-history-v1'],
       name:'RWA Spot volume and price daily anchor history',
     });
-    return { status:'partial', stored:merged, writeStatus:'stored', error:null };
+    return {
+      status:'partial', stored:merged, writeStatus:cacheWrite.status,
+      cacheWriteStatus:cacheWrite.status, historySource:selected.source,
+      error:null,
+      cacheError:cacheRead.error || cacheWrite.error,
+    };
   } catch (error) {
     console.error('[signal-snapshot] Spot anomaly history unavailable', error);
     return {
@@ -895,27 +1002,44 @@ async function updateSpotAnomalyHistory(listings, nowMs, {
 async function updateOiLiquidationHistory(assets, nowMs, {
   writeRequested = false,
   writeAllowed = false,
+  durableStored = null,
 } = {}) {
   try {
     const cache = getCache({ namespace:OI_LIQUIDATION_HISTORY_NAMESPACE });
-    const storedValue = await cache.get(OI_LIQUIDATION_HISTORY_KEY);
-    const stored = normalizeOiHourlyHistory(storedValue, nowMs);
+    const cacheRead = await readRuntimeCache(cache, OI_LIQUIDATION_HISTORY_KEY);
+    const selected = chooseHistory(
+      cacheRead.value,
+      durableStored,
+      normalizeOiHourlyHistory,
+      { v:1, i:[], c:[], h:[] },
+      value => value.h.at(-1)?.t || 0,
+      nowMs,
+    );
+    const stored = selected.stored;
     if (!writeRequested || !writeAllowed) {
       return {
         status:'partial',
         stored,
         writeStatus:writeRequested ? 'skipped-incomplete-sources' : 'read-only',
+        cacheWriteStatus:'not-requested',
+        historySource:selected.source,
         error:null,
+        cacheError:cacheRead.error,
       };
     }
     const current = compactOiHourlySnapshot(assets, nowMs);
     const merged = mergeOiHourlyHistory(stored, current, nowMs);
-    await cache.set(OI_LIQUIDATION_HISTORY_KEY, merged, {
+    const cacheWrite = await writeRuntimeCache(cache, OI_LIQUIDATION_HISTORY_KEY, merged, {
       ttl:OI_LIQUIDATION_HISTORY_TTL_SECONDS,
       tags:['rwa-signal-oi-liquidation-hourly-v1'],
       name:'RWA perpetual OI and liquidation-proxy hourly history',
     });
-    return { status:'partial', stored:merged, writeStatus:'stored', error:null };
+    return {
+      status:'partial', stored:merged, writeStatus:cacheWrite.status,
+      cacheWriteStatus:cacheWrite.status, historySource:selected.source,
+      error:null,
+      cacheError:cacheRead.error || cacheWrite.error,
+    };
   } catch (error) {
     console.error('[signal-snapshot] OI liquidation-proxy history unavailable', error);
     return {
@@ -988,6 +1112,7 @@ export async function serveSignalSnapshot(req, res, {
   }
 
   const baseUrl = deploymentBaseUrl(req);
+  const durableHistoryPromise = readSignalHistoryCheckpoints();
   // Spot collection is failure-isolated from the existing Perpetual Radar and
   // starts concurrently so five additional official catalogs do not serialize
   // endpoint latency. Its child reports its own coverage/status contract.
@@ -1082,6 +1207,7 @@ export async function serveSignalSnapshot(req, res, {
 
   const capturedAtMs = Date.now();
   const spotSnapshot = await spotSnapshotPromise;
+  const durableHistory = await durableHistoryPromise;
   const compact = compactSignalSnapshot(normalized.assets, capturedAtMs, SIGNAL_ASSET_LIMIT);
   const snapshotCoverageFull = SIGNAL_SOURCE_NAMES.every(name => sources[name]?.status === 'full');
   const analysisComparable = isSignalSnapshotComparable(sources, SIGNAL_SOURCE_NAMES) &&
@@ -1100,24 +1226,82 @@ export async function serveSignalSnapshot(req, res, {
     isOiHistorySnapshotComparable(oiSources, normalized.conflicts);
   const spotHistoryComparable = spotSnapshot.listings.length > 0 &&
     isSpotAnomalyHistoryComparable(spotSnapshot.sources, spotSnapshot.conflicts);
-  const [runtimeHistory, dailyVolumeHistory, spotAnomalyHistory, oiLiquidationHistory] = await Promise.all([
+  let [runtimeHistory, dailyVolumeHistory, spotAnomalyHistory, oiLiquidationHistory] = await Promise.all([
     updateRuntimeHistory(compact, capturedAtMs, {
       writeRequested:writeHistory,
       writeAllowed:analysisComparable,
+      durableStored:durableHistory.values[HISTORY_NAMESPACE],
     }),
     updateDailyVolumeHistory(normalized.allAssets, capturedAtMs, {
       writeRequested:writeHistory,
       writeAllowed:analysisComparable,
+      durableStored:durableHistory.values[DAILY_VOLUME_HISTORY_NAMESPACE],
     }),
     updateSpotAnomalyHistory(spotSnapshot.listings, capturedAtMs, {
       writeRequested:writeHistory,
       writeAllowed:spotHistoryComparable,
+      durableStored:durableHistory.values[SPOT_ANOMALY_HISTORY_NAMESPACE],
     }),
     updateOiLiquidationHistory(normalized.allAssets, capturedAtMs, {
       writeRequested:writeHistory,
       writeAllowed:oiHistoryComparable,
+      durableStored:durableHistory.values[OI_LIQUIDATION_HISTORY_NAMESPACE],
     }),
   ]);
+  const checkpointPayloads = writeHistory ? Object.fromEntries([
+    analysisComparable && runtimeHistory.status !== 'unavailable'
+      ? [HISTORY_NAMESPACE, runtimeHistory.stored] : null,
+    analysisComparable && dailyVolumeHistory.status !== 'unavailable'
+      ? [DAILY_VOLUME_HISTORY_NAMESPACE, dailyVolumeHistory.stored] : null,
+    spotHistoryComparable && spotAnomalyHistory.status !== 'unavailable'
+      ? [SPOT_ANOMALY_HISTORY_NAMESPACE, spotAnomalyHistory.stored] : null,
+    oiHistoryComparable && oiLiquidationHistory.status !== 'unavailable'
+      ? [OI_LIQUIDATION_HISTORY_NAMESPACE, oiLiquidationHistory.stored] : null,
+  ].filter(Boolean)) : {};
+  const durableWrite = writeHistory
+    ? await writeSignalHistoryCheckpoints(checkpointPayloads, new Date(capturedAtMs).toISOString())
+    : { mode:durableHistory.mode, status:'read-only', entries:{}, error:null };
+  const finalizeHistoryWrite = (history, namespace, writeAllowed) => {
+    if (!writeHistory || !writeAllowed || durableWrite.mode === 'off') return history;
+    const durableWriteStatus = durableWrite.entries?.[namespace]?.status || 'unavailable';
+    return {
+      ...history,
+      writeStatus:durableWriteStatus === 'stored' ? 'stored' : durableWriteStatus,
+      durableWriteStatus,
+      error:durableWriteStatus === 'stored' ? null : durableWrite.error || 'durable checkpoint unavailable',
+    };
+  };
+  runtimeHistory = finalizeHistoryWrite(runtimeHistory, HISTORY_NAMESPACE, analysisComparable);
+  dailyVolumeHistory = finalizeHistoryWrite(
+    dailyVolumeHistory,
+    DAILY_VOLUME_HISTORY_NAMESPACE,
+    analysisComparable,
+  );
+  spotAnomalyHistory = finalizeHistoryWrite(
+    spotAnomalyHistory,
+    SPOT_ANOMALY_HISTORY_NAMESPACE,
+    spotHistoryComparable,
+  );
+  oiLiquidationHistory = finalizeHistoryWrite(
+    oiLiquidationHistory,
+    OI_LIQUIDATION_HISTORY_NAMESPACE,
+    oiHistoryComparable,
+  );
+  const persistenceMode = durableHistory.mode === 'off'
+    ? 'vercel-runtime-cache'
+    : 'postgres-checkpoint+vercel-runtime-cache';
+  const durableCheckpoint = namespace => ({
+    mode:durableHistory.mode,
+    readStatus:durableHistory.entries?.[namespace]?.status || durableHistory.status,
+    writeStatus:writeHistory
+      ? durableWrite.entries?.[namespace]?.status || 'not-requested'
+      : 'read-only',
+    observedAt:(writeHistory ? durableWrite.entries?.[namespace]?.observedAt : null) ||
+      durableHistory.entries?.[namespace]?.observedAt || null,
+    error:durableHistory.status === 'unavailable' || durableWrite.status === 'unavailable'
+      ? 'durable history checkpoint unavailable'
+      : null,
+  });
   const assets = attachSignalAnalysis(normalized.assets, runtimeHistory.previous, capturedAtMs, {
     snapshotComparable:analysisComparable,
     historyAvailable: runtimeHistory.status !== 'unavailable',
@@ -1148,7 +1332,7 @@ export async function serveSignalSnapshot(req, res, {
       perpAssets:normalized.allAssets,
       perpCoverageStatus,
       persistence:{
-        mode:'vercel-runtime-cache',
+        mode:persistenceMode,
         status:spotAnomalyHistory.status,
         namespace:SPOT_ANOMALY_HISTORY_NAMESPACE,
         writer:{
@@ -1156,7 +1340,10 @@ export async function serveSignalSnapshot(req, res, {
           succeeded:writeHistory ? spotWriterSucceeded : null,
         },
         writeStatus:spotAnomalyHistory.writeStatus,
-        error:spotAnomalyHistory.error ? 'spot daily history runtime cache unavailable' : null,
+        historySource:spotAnomalyHistory.historySource,
+        cacheWriteStatus:spotAnomalyHistory.cacheWriteStatus,
+        durable:durableCheckpoint(SPOT_ANOMALY_HISTORY_NAMESPACE),
+        error:spotAnomalyHistory.error ? 'spot daily history persistence unavailable' : null,
       },
     },
   );
@@ -1168,7 +1355,7 @@ export async function serveSignalSnapshot(req, res, {
       .reduce((sum, source) => sum + source.quarantinedListings, 0),
   };
   const oiPersistence = {
-    mode:'vercel-runtime-cache',
+    mode:persistenceMode,
     status:oiLiquidationHistory.status,
     namespace:OI_LIQUIDATION_HISTORY_NAMESPACE,
     writer:{
@@ -1176,7 +1363,10 @@ export async function serveSignalSnapshot(req, res, {
       succeeded:writeHistory ? oiLiquidationHistory.writeStatus === 'stored' : null,
     },
     writeStatus:oiLiquidationHistory.writeStatus,
-    error:oiLiquidationHistory.error ? 'OI hourly history runtime cache unavailable' : null,
+    historySource:oiLiquidationHistory.historySource,
+    cacheWriteStatus:oiLiquidationHistory.cacheWriteStatus,
+    durable:durableCheckpoint(OI_LIQUIDATION_HISTORY_NAMESPACE),
+    error:oiLiquidationHistory.error ? 'OI hourly history persistence unavailable' : null,
   };
   const oiBaseOptions = {
     sources:oiSources,
@@ -1290,25 +1480,33 @@ export async function serveSignalSnapshot(req, res, {
       openInterestUsd: oiValues.length ? oiValues.reduce((sum, value) => sum + value, 0) : null,
     },
     persistence: {
-      mode: 'vercel-runtime-cache',
+      mode:persistenceMode,
       status: runtimeHistory.status,
       writer: {
         requested:writeHistory,
         succeeded:writeHistory ? writerSucceeded : null,
       },
-      continuity: 'regional best effort; cache survives deployments but can be evicted and is not a permanent database',
+      continuity: durableHistory.mode === 'off'
+        ? 'regional best effort; Runtime Cache can be evicted'
+        : 'durable PostgreSQL checkpoint with Runtime Cache read replica',
       region: process.env.VERCEL_REGION || 'iad1',
       retentionHours: HISTORY_MAX_SNAPSHOTS,
       storedSnapshots: runtimeHistory.stored.length,
       writeStatus: runtimeHistory.writeStatus,
-      error: runtimeHistory.error ? 'runtime cache unavailable' : null,
+      historySource:runtimeHistory.historySource,
+      cacheWriteStatus:runtimeHistory.cacheWriteStatus,
+      durable:durableCheckpoint(HISTORY_NAMESPACE),
+      error: runtimeHistory.error ? 'signal history persistence unavailable' : null,
       dailyVolume: {
         namespace:DAILY_VOLUME_HISTORY_NAMESPACE,
         status:dailyVolumeHistory.status,
         retentionDays:PERP_VOLUME_HISTORY_DAYS,
         storedDays:dailyVolumeHistory.stored.length,
         writeStatus:dailyVolumeHistory.writeStatus,
-        error:dailyVolumeHistory.error ? 'daily volume runtime cache unavailable' : null,
+        historySource:dailyVolumeHistory.historySource,
+        cacheWriteStatus:dailyVolumeHistory.cacheWriteStatus,
+        durable:durableCheckpoint(DAILY_VOLUME_HISTORY_NAMESPACE),
+        error:dailyVolumeHistory.error ? 'daily volume history persistence unavailable' : null,
       },
       spotVolumePrice: {
         namespace:SPOT_ANOMALY_HISTORY_NAMESPACE,
@@ -1316,7 +1514,10 @@ export async function serveSignalSnapshot(req, res, {
         retentionDays:SPOT_ANOMALY_HISTORY_DAYS,
         storedDays:spotAnomalyHistory.stored.length,
         writeStatus:spotAnomalyHistory.writeStatus,
-        error:spotAnomalyHistory.error ? 'spot daily history runtime cache unavailable' : null,
+        historySource:spotAnomalyHistory.historySource,
+        cacheWriteStatus:spotAnomalyHistory.cacheWriteStatus,
+        durable:durableCheckpoint(SPOT_ANOMALY_HISTORY_NAMESPACE),
+        error:spotAnomalyHistory.error ? 'spot daily history persistence unavailable' : null,
       },
       oiLiquidation: {
         namespace:OI_LIQUIDATION_HISTORY_NAMESPACE,
@@ -1324,7 +1525,10 @@ export async function serveSignalSnapshot(req, res, {
         retentionHours:OI_LIQUIDATION_HISTORY_HOURS,
         storedHours:Array.isArray(oiLiquidationHistory.stored?.h) ? oiLiquidationHistory.stored.h.length : 0,
         writeStatus:oiLiquidationHistory.writeStatus,
-        error:oiLiquidationHistory.error ? 'OI hourly history runtime cache unavailable' : null,
+        historySource:oiLiquidationHistory.historySource,
+        cacheWriteStatus:oiLiquidationHistory.cacheWriteStatus,
+        durable:durableCheckpoint(OI_LIQUIDATION_HISTORY_NAMESPACE),
+        error:oiLiquidationHistory.error ? 'OI hourly history persistence unavailable' : null,
       },
     },
     history: {
