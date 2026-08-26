@@ -3711,6 +3711,7 @@ const TRADE_XYZ_OFFICIAL_NAMES = {
   XYZ100: 'XYZ 100 Equity Index',
   COIN: 'Coinbase Global, Inc.',
   SKHX: 'SK Hynix',
+  UNITREE: 'Unitree Robotics',
 };
 
 function tradeXyzCategory(symbol, name = '', officialType = '') {
@@ -3721,6 +3722,20 @@ function tradeXyzCategory(symbol, name = '', officialType = '') {
   if (TRADE_XYZ_INDEX_SYMBOLS.has(raw)) return 'index';
   if (ETF_SYMBOLS.has(raw)) return 'etf';
   return inferCategory(raw, name);
+}
+
+// The venue table reports the xyz DEX's own product taxonomy. Keep that
+// separate from the dashboard-wide lifecycle category: for example,
+// xyz:UNITREE is officially `stocks`, even while the canonical company record
+// separately carries an IPO-registration lifecycle status.
+function tradeXyzVenueCategory(symbol, name = '', officialType = '') {
+  const raw = String(symbol || '').toUpperCase();
+  const officialCategory = categoryForOfficialType(officialType);
+  if (officialCategory && officialCategory !== 'other') return officialCategory;
+  if (TRADE_XYZ_FX_SYMBOLS.has(raw)) return 'fx';
+  if (TRADE_XYZ_COMMODITY_SYMBOLS.has(raw)) return 'commodity';
+  if (TRADE_XYZ_INDEX_SYMBOLS.has(raw)) return 'index';
+  return 'equity';
 }
 
 async function fetchTradeXyz() {
@@ -3806,6 +3821,7 @@ async function fetchTradeXyz() {
     if (officialType && !TRADE_XYZ_ALLOWED_RWA_TYPES.has(officialType.toLowerCase())) continue;
     if (!officialType && !TRADE_XYZ_KNOWN_RWA_SYMBOLS.has(venueCoin)) continue;
     const cat = tradeXyzCategory(venueCoin, u.fullName || '', officialType);
+    const venueCategory = tradeXyzVenueCategory(venueCoin, u.fullName || '', officialType);
     const coin = canonicalSymbolForCategory(venueCoin, cat);
     // trade.xyz SKHX is the audited SK Hynix equity alias, not the unrelated
     // U.S.-listed 2x ETF that happens to own the same ticker.
@@ -3832,7 +3848,8 @@ async function fetchTradeXyz() {
     const fullName = officialName || KNOWN_NAMES[coin] || coin;
 
     assets.push({
-      coin, symbol: rawName, venueSymbol: rawName, fullName, category: cat, venue: 'tradexyz', marketType: officialType,
+      coin, symbol: rawName, venueSymbol: rawName, fullName, category: cat, venueCategory,
+      venue: 'tradexyz', marketType: officialType,
       underlyingSymbol,
       markPx, indexPx: oraclePx, change, volume, oi: oiUsd, funding, predictedFunding, isActive,
       fieldStatus: {
@@ -6308,7 +6325,10 @@ function renderVenueCards() {
     const oiAggregate = aggregateAvailableField(vData, 'oi');
     const totalVol = volumeAggregate.value;
     const catCounts = {};
-    vData.forEach(d => { catCounts[d.category] = (catCounts[d.category]||0)+1; });
+    vData.forEach(d => {
+      const displayCategory = venueDisplayCategory(vKey, d);
+      catCounts[displayCategory] = (catCounts[displayCategory] || 0) + 1;
+    });
     const catEntries = Object.entries(catCounts).sort((a,b)=>b[1]-a[1]);
 
     // Volume growth top 3
@@ -7704,6 +7724,10 @@ function setVenueSort(venue, key) {
   renderVenueTable(venue);
 }
 
+function venueDisplayCategory(venue, asset) {
+  return venue === 'tradexyz' ? (asset?.venueCategory || asset?.category) : asset?.category;
+}
+
 function renderVenueTable(venue) {
   const venueMap = {
     tradexyz: { tbodyId: 'xyzTableBody', prefix: 'xyz', hideId: 'xyzHideInactive' },
@@ -7720,7 +7744,7 @@ function renderVenueTable(venue) {
   if (!tbody) return;
   tbody.innerHTML = '';
 
-  const catFilter = venueTableCatFilter[venue] || 'all';
+  let catFilter = venueTableCatFilter[venue] || 'all';
   const marketFilter = venueTableMarketFilter[venue] || 'all';
   const search = venueTableSearch[venue] || '';
   const hideInactive = document.getElementById(hideId)?.checked ?? true;
@@ -7780,15 +7804,28 @@ function renderVenueTable(venue) {
     freshness.innerHTML = `<span class="data-freshness ${health.status}" title="${escapeHtml(health.error || age)}">${health.status === 'live' ? 'Live' : health.status === 'stale' ? 'Stale cache' : 'Unavailable'}</span>`;
   }
   const catCounts = { all: allVenueData.length, equity: 0, commodity: 0, index: 0, etf: 0, 'pre-ipo': 0, fx: 0, bond: 0 };
-  allVenueData.forEach(d => { if (catCounts[d.category] !== undefined) catCounts[d.category]++; });
+  allVenueData.forEach(d => {
+    const displayCategory = venueDisplayCategory(venue, d);
+    if (catCounts[displayCategory] !== undefined) catCounts[displayCategory]++;
+  });
   Object.entries(catCounts).forEach(([cat, count]) => {
     const capCat = cat === 'pre-ipo' ? 'PreIpo' : cat.charAt(0).toUpperCase() + cat.slice(1);
     const el = document.getElementById(`${prefix}Count${capCat}`);
-    if (el) el.textContent = `(${count})`;
+    if (el) {
+      el.textContent = `(${count})`;
+      if (venue === 'tradexyz' && cat === 'pre-ipo') el.closest('.chip').hidden = count === 0;
+    }
   });
+  if (venue === 'tradexyz' && catFilter === 'pre-ipo' && catCounts['pre-ipo'] === 0) {
+    catFilter = 'all';
+    venueTableCatFilter[venue] = 'all';
+    document.querySelectorAll(`#sub-${venue} [onclick^="setVenueFilter"]`).forEach(chip => {
+      chip.classList.toggle('active', Boolean(chip.querySelector(`#${prefix}CountAll`)));
+    });
+  }
 
   let data = allVenueData.filter(d => {
-    if (catFilter !== 'all' && d.category !== catFilter) return false;
+    if (catFilter !== 'all' && venueDisplayCategory(venue, d) !== catFilter) return false;
     if (marketFilter === 'US' && !marketTagsForAsset(d).includes('US')) return false;
     if (hideInactive && !d.isActive) return false;
     if (search && !d.coin.toLowerCase().includes(search) && !d.fullName.toLowerCase().includes(search)) return false;
@@ -7842,7 +7879,8 @@ function renderVenueTable(venue) {
   data.forEach(d => {
     const hasChange = d.change !== null && d.change !== undefined;
     const isUp = hasChange ? d.change >= 0 : true;
-    const catColor = CAT_COLORS[d.category] || '#63656e';
+    const displayCategory = venueDisplayCategory(venue, d);
+    const catColor = CAT_COLORS[displayCategory] || '#63656e';
     const annRate = annualize(d.funding, venue, d);
     const annPct = annRate !== null ? (annRate * 100).toFixed(2) : 'N/A';
     const sparkSuffix = fundingDomSuffix(venue, d);
@@ -7869,7 +7907,7 @@ function renderVenueTable(venue) {
       }
     };
     tr.innerHTML = `
-      <td><div class="asset-cell"><div class="asset-icon" style="background:${catColor}12;color:${catColor};border:1px solid ${catColor}25">${d.coin.slice(0,2)}</div><div class="asset-info"><div class="asset-name">${d.coin} <span class="asset-tag tag-${d.category}">${d.category.toUpperCase()}</span>${renderMarketTags(d)}</div><div class="asset-type">${d.fullName}${d.marketType ? ` · ${escapeHtml(d.marketType)}` : ''}${d.venue === 'okx' && d.symbol ? ` · ${escapeHtml(d.symbol)}` : ''}</div>${marketStateHTML}</div></div></td>
+      <td><div class="asset-cell"><div class="asset-icon" style="background:${catColor}12;color:${catColor};border:1px solid ${catColor}25">${d.coin.slice(0,2)}</div><div class="asset-info"><div class="asset-name">${d.coin} <span class="asset-tag tag-${displayCategory}">${displayCategory.toUpperCase()}</span>${renderMarketTags(d)}</div><div class="asset-type">${d.fullName}${d.marketType ? ` · ${escapeHtml(d.marketType)}` : ''}${d.venue === 'okx' && d.symbol ? ` · ${escapeHtml(d.symbol)}` : ''}</div>${marketStateHTML}</div></div></td>
       <td class="mono" style="font-weight:600">${fieldValueWithStatus(markHTML, fs.markPx, 'Official mark price coverage')}</td>
       <td class="mono" style="color:var(--foreground-sec)">${fieldValueWithStatus(indexHTML, fs.indexPx, 'Official index/oracle coverage')}</td>
       <td>${fieldValueWithStatus(changeHTML, fs.change, '24h change coverage')}</td>

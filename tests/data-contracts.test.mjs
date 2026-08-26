@@ -217,6 +217,14 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
   const tradeXyzLoader = sourceBetween(html, 'async function fetchTradeXyz()', '// API: Bitget');
   assert.match(tradeXyzLoader, /u\?\.isDelisted === true[\s\S]*?continue/,
     'the main Perpetual page must exclude the same officially delisted trade.xyz rows as Radar and Listing Audit');
+  assert.match(tradeXyzLoader, /const venueCategory = tradeXyzVenueCategory\(/,
+    'the trade.xyz venue table must preserve the exact DEX product category separately from lifecycle');
+  assert.match(html, /function venueDisplayCategory\(venue, asset\)[\s\S]*?asset\?\.venueCategory/,
+    'venue filters and badges must use the exact trade.xyz product category');
+  assert.match(html, /function renderVenueCards\(\)[\s\S]*?venueDisplayCategory\(vKey, d\)/,
+    'overview venue cards must use the same exact trade.xyz product category');
+  assert.match(html, /venue === 'tradexyz' && cat === 'pre-ipo'[\s\S]*?hidden = count === 0/,
+    'the trade.xyz Pre-IPO filter must disappear when the current DEX catalog has no such contracts');
   const registrySource = sourceBetween(
     html,
     'const SECURITY_LISTING_REGISTRY = Object.freeze({',
