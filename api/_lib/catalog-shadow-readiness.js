@@ -1049,7 +1049,13 @@ export function buildCatalogShadowReadinessQueries(sql, limit = CATALOG_SHADOW_Q
     sql.query(`${cte}, ordered_cycles AS (
         SELECT cycle_id, bucket_at, lag(cycle_id) OVER (ORDER BY bucket_at) AS previous_cycle_id
         FROM recent_cycles
-      ), membership_set AS (
+      ), source_cycles AS (
+        SELECT cycle.cycle_id, cycle.bucket_at, cycle.previous_cycle_id,
+          source.source_id, source.source_key
+        FROM ordered_cycles AS cycle
+        CROSS JOIN identity.source AS source
+        WHERE source.source_key = ANY($2::text[])
+      ), membership_set AS MATERIALIZED (
         SELECT cycle.cycle_id, run.source_id, instrument_version.instrument_id,
           instrument_version.valid_from, cycle.bucket_at AS cycle_bucket_at
         FROM recent_cycles AS cycle
@@ -1057,7 +1063,7 @@ export function buildCatalogShadowReadinessQueries(sql, limit = CATALOG_SHADOW_Q
         JOIN ingest.source_run AS run ON run.attempt_id = attempt.attempt_id
         JOIN ingest.catalog_membership AS membership ON membership.source_run_id = run.source_run_id
         JOIN identity.instrument_version AS instrument_version ON instrument_version.instrument_version_id = membership.instrument_version_id
-      ), pending_set AS (
+      ), pending_set AS MATERIALIZED (
         SELECT cycle.cycle_id, run.source_id,
           pending.normalized_venue_symbol
         FROM recent_cycles AS cycle
@@ -1069,189 +1075,186 @@ export function buildCatalogShadowReadinessQueries(sql, limit = CATALOG_SHADOW_Q
             ELSE '[]'::jsonb
           END
         ) AS pending(normalized_venue_symbol)
+      ), source_run_state AS (
+        SELECT attempt.cycle_id, run.source_id,
+          bool_or(run.endpoint_key = '${LISTING_PG_ENDPOINT_KEY}'
+            AND COALESCE(run.metadata->>'mergedStatus', '') <> 'warming') AS lifecycle_comparable
+        FROM ingest.collection_attempt AS attempt
+        JOIN ingest.source_run AS run ON run.attempt_id = attempt.attempt_id
+        JOIN recent_cycles AS cycle ON cycle.cycle_id = attempt.cycle_id
+        GROUP BY attempt.cycle_id, run.source_id
+      ), added_members AS MATERIALIZED (
+        SELECT source_cycle.cycle_id, source_cycle.bucket_at, source_cycle.source_id,
+          current_member.instrument_id, current_member.valid_from,
+          current_member.cycle_bucket_at
+        FROM source_cycles AS source_cycle
+        JOIN membership_set AS current_member
+          ON current_member.cycle_id = source_cycle.cycle_id
+         AND current_member.source_id = source_cycle.source_id
+        LEFT JOIN membership_set AS previous_member
+          ON previous_member.cycle_id = source_cycle.previous_cycle_id
+         AND previous_member.source_id = current_member.source_id
+         AND previous_member.instrument_id = current_member.instrument_id
+        WHERE source_cycle.previous_cycle_id IS NOT NULL
+          AND previous_member.instrument_id IS NULL
+      ), removed_members AS MATERIALIZED (
+        SELECT source_cycle.cycle_id, source_cycle.source_id, previous_member.instrument_id
+        FROM source_cycles AS source_cycle
+        JOIN membership_set AS previous_member
+          ON previous_member.cycle_id = source_cycle.previous_cycle_id
+         AND previous_member.source_id = source_cycle.source_id
+        LEFT JOIN membership_set AS current_member
+          ON current_member.cycle_id = source_cycle.cycle_id
+         AND current_member.source_id = previous_member.source_id
+         AND current_member.instrument_id = previous_member.instrument_id
+        WHERE source_cycle.previous_cycle_id IS NOT NULL
+          AND current_member.instrument_id IS NULL
+      ), added_counts AS (
+        SELECT cycle_id, source_id, count(*)::int AS added_count
+        FROM added_members GROUP BY cycle_id, source_id
+      ), removed_counts AS (
+        SELECT cycle_id, source_id, count(*)::int AS removed_count
+        FROM removed_members GROUP BY cycle_id, source_id
+      ), accepted_instruments AS MATERIALIZED (
+        SELECT instrument.source_id, instrument.official_product_key
+        FROM identity.instrument AS instrument
+        JOIN identity.instrument_version AS version
+          ON version.instrument_id = instrument.instrument_id
+         AND version.valid_to IS NULL
+         AND version.identity_status = 'verified'
+        GROUP BY instrument.source_id, instrument.official_product_key
+      ), pending_event_additions AS MATERIALIZED (
+        SELECT DISTINCT source_cycle.cycle_id, source_cycle.source_id,
+          pending_version.instrument_id
+        FROM source_cycles AS source_cycle
+        JOIN analytics.catalog_change_event AS pending_event
+          ON pending_event.detection_cycle_id = source_cycle.cycle_id
+         AND pending_event.source_id = source_cycle.source_id
+         AND pending_event.event_type IN ('listed', 'relisted')
+         AND pending_event.status = 'confirmed'
+        JOIN identity.instrument_version AS pending_version
+          ON pending_version.instrument_version_id = pending_event.instrument_version_id
+         AND pending_version.valid_from >= source_cycle.bucket_at
+         AND pending_version.valid_from < source_cycle.bucket_at + interval '1 day'
+        JOIN pending_set AS pending
+          ON pending.cycle_id = source_cycle.cycle_id
+         AND pending.source_id = source_cycle.source_id
+         AND pending.normalized_venue_symbol = pending_version.normalized_venue_symbol
+        LEFT JOIN membership_set AS previous_member
+          ON previous_member.cycle_id = source_cycle.previous_cycle_id
+         AND previous_member.source_id = source_cycle.source_id
+         AND previous_member.instrument_id = pending_version.instrument_id
+        WHERE previous_member.instrument_id IS NULL
+      ), pending_event_counts AS (
+        SELECT cycle_id, source_id, count(*)::int AS pending_event_added_count
+        FROM pending_event_additions GROUP BY cycle_id, source_id
+      ), pending_review_counts AS (
+        SELECT pending.cycle_id, pending.source_id,
+          count(DISTINCT review.review_case_id)::int AS pending_review_count
+        FROM pending_set AS pending
+        JOIN identity.review_case AS review
+          ON review.source_id = pending.source_id
+         AND review.status = 'open'
+         AND review.candidate_payload->>'normalizedVenueSymbol' = pending.normalized_venue_symbol
+        LEFT JOIN accepted_instruments AS accepted
+          ON accepted.source_id = review.source_id
+         AND accepted.official_product_key = review.candidate_official_product_key
+        WHERE accepted.official_product_key IS NULL
+        GROUP BY pending.cycle_id, pending.source_id
+      ), pending_identity_resolved_counts AS (
+        SELECT source_cycle.cycle_id, source_cycle.source_id,
+          count(DISTINCT resolved_review.review_case_id)::int AS pending_identity_resolved_count
+        FROM source_cycles AS source_cycle
+        JOIN pending_set AS pending
+          ON pending.cycle_id = source_cycle.cycle_id
+         AND pending.source_id = source_cycle.source_id
+        JOIN identity.review_case AS resolved_review
+          ON resolved_review.source_id = pending.source_id
+         AND resolved_review.status = 'verified'
+         AND resolved_review.decided_at >= source_cycle.bucket_at
+         AND resolved_review.decided_at < source_cycle.bucket_at + interval '1 day'
+        JOIN identity.instrument_version AS resolved_version
+          ON resolved_version.instrument_id = resolved_review.resolved_instrument_id
+         AND resolved_version.normalized_venue_symbol = pending.normalized_venue_symbol
+        LEFT JOIN membership_set AS previous_member
+          ON previous_member.cycle_id = source_cycle.previous_cycle_id
+         AND previous_member.source_id = source_cycle.source_id
+         AND previous_member.instrument_id = resolved_review.resolved_instrument_id
+        WHERE previous_member.instrument_id IS NULL
+        GROUP BY source_cycle.cycle_id, source_cycle.source_id
+      ), eligible_added_members AS MATERIALIZED (
+        SELECT added.*
+        FROM added_members AS added
+        JOIN source_run_state AS run_state
+          ON run_state.cycle_id = added.cycle_id
+         AND run_state.source_id = added.source_id
+         AND run_state.lifecycle_comparable
+        WHERE added.valid_from >= added.cycle_bucket_at
+          AND added.valid_from < added.cycle_bucket_at + interval '1 day'
+      ), identity_resolved_additions AS MATERIALIZED (
+        SELECT DISTINCT added.cycle_id, added.source_id, added.instrument_id
+        FROM eligible_added_members AS added
+        JOIN identity.review_case AS resolved_review
+          ON resolved_review.source_id = added.source_id
+         AND resolved_review.resolved_instrument_id = added.instrument_id
+         AND resolved_review.status = 'verified'
+         AND resolved_review.decided_at >= added.cycle_bucket_at
+         AND resolved_review.decided_at < added.cycle_bucket_at + interval '1 day'
+      ), identity_resolved_counts AS (
+        SELECT cycle_id, source_id, count(*)::int AS identity_resolved_added_count
+        FROM identity_resolved_additions GROUP BY cycle_id, source_id
+      ), direct_event_eligible AS (
+        SELECT added.cycle_id, added.source_id, added.instrument_id
+        FROM eligible_added_members AS added
+        LEFT JOIN identity_resolved_additions AS resolved
+          ON resolved.cycle_id = added.cycle_id
+         AND resolved.source_id = added.source_id
+         AND resolved.instrument_id = added.instrument_id
+        WHERE resolved.instrument_id IS NULL
+      ), event_eligible AS (
+        SELECT cycle_id, source_id, instrument_id FROM direct_event_eligible
+        UNION
+        SELECT pending.cycle_id, pending.source_id, pending.instrument_id
+        FROM pending_event_additions AS pending
+        JOIN source_run_state AS run_state
+          ON run_state.cycle_id = pending.cycle_id
+         AND run_state.source_id = pending.source_id
+         AND run_state.lifecycle_comparable
+      ), event_eligible_counts AS (
+        SELECT cycle_id, source_id, count(*)::int AS event_eligible_added_count
+        FROM event_eligible GROUP BY cycle_id, source_id
       )
-      SELECT current.cycle_id::text, previous_cycle_id::text, source.source_key,
-        CASE WHEN previous_cycle_id IS NULL THEN NULL ELSE (
-          SELECT count(*)::int FROM membership_set AS current_member
-          WHERE current_member.cycle_id = current.cycle_id AND current_member.source_id = source.source_id
-            AND NOT EXISTS (SELECT 1 FROM membership_set AS previous_member
-              WHERE previous_member.cycle_id = current.previous_cycle_id
-                AND previous_member.source_id = current_member.source_id
-                AND previous_member.instrument_id = current_member.instrument_id)
-        ) END AS added_count,
-        CASE WHEN previous_cycle_id IS NULL THEN NULL ELSE (
-          SELECT count(*)::int FROM membership_set AS previous_member
-          WHERE previous_member.cycle_id = current.previous_cycle_id AND previous_member.source_id = source.source_id
-            AND NOT EXISTS (SELECT 1 FROM membership_set AS current_member
-              WHERE current_member.cycle_id = current.cycle_id
-                AND current_member.source_id = previous_member.source_id
-                AND current_member.instrument_id = previous_member.instrument_id)
-        ) END AS removed_count,
-        (
-          SELECT count(DISTINCT pending_version.instrument_id)::int
-          FROM analytics.catalog_change_event AS pending_event
-          JOIN identity.instrument_version AS pending_version
-            ON pending_version.instrument_version_id = pending_event.instrument_version_id
-          JOIN pending_set AS pending
-            ON pending.cycle_id = current.cycle_id
-           AND pending.source_id = pending_event.source_id
-           AND pending.normalized_venue_symbol = pending_version.normalized_venue_symbol
-          WHERE pending_event.detection_cycle_id = current.cycle_id
-            AND pending_event.source_id = source.source_id
-            AND pending_event.event_type IN ('listed', 'relisted')
-            AND pending_event.status = 'confirmed'
-            AND pending_version.valid_from >= current.bucket_at
-            AND pending_version.valid_from < current.bucket_at + interval '1 day'
-            AND NOT EXISTS (
-              SELECT 1 FROM membership_set AS previous_member
-              WHERE previous_member.cycle_id = current.previous_cycle_id
-                AND previous_member.source_id = pending_event.source_id
-                AND previous_member.instrument_id = pending_version.instrument_id
-            )
-        ) AS pending_event_added_count,
-        (
-          SELECT count(DISTINCT review.review_case_id)::int
-          FROM pending_set AS pending
-          JOIN identity.review_case AS review
-            ON review.source_id = pending.source_id
-           AND review.status = 'open'
-           AND review.candidate_payload->>'normalizedVenueSymbol' = pending.normalized_venue_symbol
-          WHERE pending.cycle_id = current.cycle_id
-            AND pending.source_id = source.source_id
-            AND NOT EXISTS (
-              SELECT 1
-              FROM identity.instrument AS accepted_instrument
-              JOIN identity.instrument_version AS accepted_version
-                ON accepted_version.instrument_id = accepted_instrument.instrument_id
-               AND accepted_version.valid_to IS NULL
-               AND accepted_version.identity_status = 'verified'
-              WHERE accepted_instrument.source_id = review.source_id
-                AND accepted_instrument.official_product_key = review.candidate_official_product_key
-            )
-        ) AS pending_review_count,
-        (
-          SELECT count(DISTINCT resolved_review.review_case_id)::int
-          FROM pending_set AS pending
-          JOIN identity.review_case AS resolved_review
-            ON resolved_review.source_id = pending.source_id
-           AND resolved_review.status = 'verified'
-           AND resolved_review.decided_at >= current.bucket_at
-           AND resolved_review.decided_at < current.bucket_at + interval '1 day'
-          JOIN identity.instrument_version AS resolved_version
-            ON resolved_version.instrument_id = resolved_review.resolved_instrument_id
-           AND resolved_version.normalized_venue_symbol = pending.normalized_venue_symbol
-          WHERE pending.cycle_id = current.cycle_id
-            AND pending.source_id = source.source_id
-            AND NOT EXISTS (
-              SELECT 1 FROM membership_set AS previous_member
-              WHERE previous_member.cycle_id = current.previous_cycle_id
-                AND previous_member.source_id = pending.source_id
-                AND previous_member.instrument_id = resolved_review.resolved_instrument_id
-            )
-        ) AS pending_identity_resolved_count,
-        CASE WHEN previous_cycle_id IS NULL THEN NULL ELSE (
-          SELECT count(*)::int
-          FROM membership_set AS current_member
-          WHERE current_member.cycle_id = current.cycle_id
-            AND current_member.source_id = source.source_id
-            -- A Runtime Cache cold start intentionally establishes a fresh
-            -- baseline. Its membership must reconcile, but it cannot invent
-            -- New/Re-listed lifecycle events from older PostgreSQL history.
-            AND EXISTS (
-              SELECT 1
-              FROM ingest.collection_attempt AS current_attempt
-              JOIN ingest.source_run AS current_run
-                ON current_run.attempt_id = current_attempt.attempt_id
-              WHERE current_attempt.cycle_id = current.cycle_id
-                AND current_run.source_id = current_member.source_id
-                AND current_run.endpoint_key = '${LISTING_PG_ENDPOINT_KEY}'
-                AND COALESCE(current_run.metadata->>'mergedStatus', '') <> 'warming'
-            )
-            AND current_member.valid_from >= current_member.cycle_bucket_at
-            AND current_member.valid_from < current_member.cycle_bucket_at + interval '1 day'
-            AND NOT EXISTS (
-              SELECT 1 FROM membership_set AS previous_member
-              WHERE previous_member.cycle_id = current.previous_cycle_id
-                AND previous_member.source_id = current_member.source_id
-                AND previous_member.instrument_id = current_member.instrument_id
-            )
-            AND EXISTS (
-              SELECT 1 FROM identity.review_case AS resolved_review
-              WHERE resolved_review.source_id = current_member.source_id
-                AND resolved_review.resolved_instrument_id = current_member.instrument_id
-                AND resolved_review.status = 'verified'
-                AND resolved_review.decided_at >= current_member.cycle_bucket_at
-                AND resolved_review.decided_at < current_member.cycle_bucket_at + interval '1 day'
-            )
-        ) END AS identity_resolved_added_count,
-        CASE WHEN previous_cycle_id IS NULL THEN NULL ELSE (
-          SELECT count(*)::int FROM (
-            SELECT current_member.instrument_id
-            FROM membership_set AS current_member
-            WHERE current_member.cycle_id = current.cycle_id
-              AND current_member.source_id = source.source_id
-              -- See identity_resolved_added_count above: a warm baseline is
-              -- an observation, not a cross-day lifecycle comparison.
-              AND EXISTS (
-                SELECT 1
-                FROM ingest.collection_attempt AS current_attempt
-                JOIN ingest.source_run AS current_run
-                  ON current_run.attempt_id = current_attempt.attempt_id
-                WHERE current_attempt.cycle_id = current.cycle_id
-                  AND current_run.source_id = current_member.source_id
-                  AND current_run.endpoint_key = '${LISTING_PG_ENDPOINT_KEY}'
-                  AND COALESCE(current_run.metadata->>'mergedStatus', '') <> 'warming'
-              )
-              AND current_member.valid_from >= current_member.cycle_bucket_at
-              AND current_member.valid_from < current_member.cycle_bucket_at + interval '1 day'
-              AND NOT EXISTS (SELECT 1 FROM membership_set AS previous_member
-                WHERE previous_member.cycle_id = current.previous_cycle_id
-                  AND previous_member.source_id = current_member.source_id
-                  AND previous_member.instrument_id = current_member.instrument_id)
-              AND NOT EXISTS (
-                SELECT 1 FROM identity.review_case AS resolved_review
-                WHERE resolved_review.source_id = current_member.source_id
-                  AND resolved_review.resolved_instrument_id = current_member.instrument_id
-                  AND resolved_review.status = 'verified'
-                  AND resolved_review.decided_at >= current_member.cycle_bucket_at
-                  AND resolved_review.decided_at < current_member.cycle_bucket_at + interval '1 day'
-              )
-            UNION
-            SELECT pending_version.instrument_id
-            FROM analytics.catalog_change_event AS pending_event
-            JOIN identity.instrument_version AS pending_version
-              ON pending_version.instrument_version_id = pending_event.instrument_version_id
-            JOIN pending_set AS pending
-              ON pending.cycle_id = current.cycle_id
-             AND pending.source_id = pending_event.source_id
-             AND pending.normalized_venue_symbol = pending_version.normalized_venue_symbol
-            WHERE pending_event.detection_cycle_id = current.cycle_id
-              AND pending_event.source_id = source.source_id
-              AND EXISTS (
-                SELECT 1
-                FROM ingest.collection_attempt AS current_attempt
-                JOIN ingest.source_run AS current_run
-                  ON current_run.attempt_id = current_attempt.attempt_id
-                WHERE current_attempt.cycle_id = current.cycle_id
-                  AND current_run.source_id = pending_event.source_id
-                  AND current_run.endpoint_key = '${LISTING_PG_ENDPOINT_KEY}'
-                  AND COALESCE(current_run.metadata->>'mergedStatus', '') <> 'warming'
-              )
-              AND pending_event.event_type IN ('listed', 'relisted')
-              AND pending_event.status = 'confirmed'
-              AND pending_version.valid_from >= current.bucket_at
-              AND pending_version.valid_from < current.bucket_at + interval '1 day'
-              AND NOT EXISTS (
-                SELECT 1 FROM membership_set AS previous_member
-                WHERE previous_member.cycle_id = current.previous_cycle_id
-                  AND previous_member.source_id = pending_event.source_id
-                  AND previous_member.instrument_id = pending_version.instrument_id
-              )
-          ) AS event_eligible
-        ) END AS event_eligible_added_count
-      FROM ordered_cycles AS current CROSS JOIN identity.source AS source
-      WHERE source.source_key = ANY($2::text[])
-      ORDER BY current.bucket_at DESC, source.source_key`, [limit, EXPECTED_SOURCE_KEYS]),
+      SELECT source_cycle.cycle_id::text, source_cycle.previous_cycle_id::text,
+        source_cycle.source_key,
+        CASE WHEN source_cycle.previous_cycle_id IS NULL THEN NULL
+          ELSE COALESCE(added.added_count, 0) END AS added_count,
+        CASE WHEN source_cycle.previous_cycle_id IS NULL THEN NULL
+          ELSE COALESCE(removed.removed_count, 0) END AS removed_count,
+        COALESCE(pending_event.pending_event_added_count, 0) AS pending_event_added_count,
+        COALESCE(pending_review.pending_review_count, 0) AS pending_review_count,
+        COALESCE(pending_resolved.pending_identity_resolved_count, 0) AS pending_identity_resolved_count,
+        CASE WHEN source_cycle.previous_cycle_id IS NULL THEN NULL
+          ELSE COALESCE(identity_resolved.identity_resolved_added_count, 0)
+        END AS identity_resolved_added_count,
+        CASE WHEN source_cycle.previous_cycle_id IS NULL THEN NULL
+          ELSE COALESCE(event_eligible.event_eligible_added_count, 0)
+        END AS event_eligible_added_count
+      FROM source_cycles AS source_cycle
+      LEFT JOIN added_counts AS added
+        ON added.cycle_id = source_cycle.cycle_id AND added.source_id = source_cycle.source_id
+      LEFT JOIN removed_counts AS removed
+        ON removed.cycle_id = source_cycle.cycle_id AND removed.source_id = source_cycle.source_id
+      LEFT JOIN pending_event_counts AS pending_event
+        ON pending_event.cycle_id = source_cycle.cycle_id AND pending_event.source_id = source_cycle.source_id
+      LEFT JOIN pending_review_counts AS pending_review
+        ON pending_review.cycle_id = source_cycle.cycle_id AND pending_review.source_id = source_cycle.source_id
+      LEFT JOIN pending_identity_resolved_counts AS pending_resolved
+        ON pending_resolved.cycle_id = source_cycle.cycle_id AND pending_resolved.source_id = source_cycle.source_id
+      LEFT JOIN identity_resolved_counts AS identity_resolved
+        ON identity_resolved.cycle_id = source_cycle.cycle_id AND identity_resolved.source_id = source_cycle.source_id
+      LEFT JOIN event_eligible_counts AS event_eligible
+        ON event_eligible.cycle_id = source_cycle.cycle_id AND event_eligible.source_id = source_cycle.source_id
+      ORDER BY source_cycle.bucket_at DESC, source_cycle.source_key`, [limit, EXPECTED_SOURCE_KEYS]),
     sql.query(`${cte}
       SELECT event.catalog_change_event_id::text, event.detection_cycle_id::text AS cycle_id,
         source.source_key, event.event_type, event.status AS event_status, event.baseline,

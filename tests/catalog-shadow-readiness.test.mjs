@@ -1331,10 +1331,14 @@ test('read-only query bundle is fixed at nine bounded catalog-reconciliation que
   assert.match(calls[5].text, /identity_resolved_added_count/);
   assert.match(calls[5].text, /review\.status = 'open'/);
   assert.match(calls[5].text, /resolved_review\.status = 'verified'/);
-  assert.match(calls[5].text, /NOT EXISTS \([\s\S]*resolved_review\.resolved_instrument_id = current_member\.instrument_id/);
-  assert.match(calls[5].text, /valid_from\s*>=\s*current_member\.cycle_bucket_at/);
-  assert.match(calls[5].text, /valid_from\s*<\s*current_member\.cycle_bucket_at\s*\+\s*interval\s+'1 day'/);
-  assert.doesNotMatch(calls[5].text, /valid_from\s*=\s*current_member\.source_observed_at/);
+  assert.match(calls[5].text, /added_members AS MATERIALIZED/);
+  assert.match(calls[5].text, /identity_resolved_additions AS MATERIALIZED/);
+  assert.doesNotMatch(calls[5].text, /\bNOT EXISTS\b/i);
+  assert.match(calls[5].text, /LEFT JOIN identity_resolved_additions AS resolved/);
+  assert.match(calls[5].text, /WHERE resolved\.instrument_id IS NULL/);
+  assert.match(calls[5].text, /added\.valid_from\s*>=\s*added\.cycle_bucket_at/);
+  assert.match(calls[5].text, /added\.valid_from\s*<\s*added\.cycle_bucket_at\s*\+\s*interval\s+'1 day'/);
+  assert.doesNotMatch(calls[5].text, /valid_from\s*=\s*added\.source_observed_at/);
   const handoffSql = calls[8].text;
   const existsCount = (handoffSql.match(/\bEXISTS\s*\(/gi) || []).length;
   const boundedProbeCount = (handoffSql.match(/\bLIMIT\s+1\b/gi) || []).length;
