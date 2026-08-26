@@ -502,7 +502,9 @@ test('an accepted exact identity downgrade preserves PG last-good and publishes 
   const response = responseRecorder();
   await runListingAudit({ headers:{ host:'example.invalid' } }, response, {
     cache: {
-      async get() { return compactListingAuditBundle(downgrade.first.state, downgrade.first.snapshot); },
+      async get() {
+        return storedBundle || compactListingAuditBundle(downgrade.first.state, downgrade.first.snapshot);
+      },
       async set(_key, value) { cacheWrites += 1; storedBundle = value; },
     },
     collectObservations: async () => downgrade.retryObservations,
@@ -1433,7 +1435,7 @@ test('Listing Audit holds the publication lease through durable write, cache, si
   await runListingAudit(request, response, {
     env:{ PG_WRITE_MODE:'shadow', RAW_ARCHIVE_MODE:'off' },
     cache: {
-      async get() { calls.push('cache:get'); return null; },
+      async get() { calls.push('cache:get'); return cachedBundle; },
       async set(_key, bundle) {
         calls.push('cache:set');
         cachedBundle = bundle;
@@ -1494,6 +1496,7 @@ test('Listing Audit holds the publication lease through durable write, cache, si
     'durable:stored',
     'lease:renew',
     'cache:set',
+    'cache:get',
     'sink:stored',
     'lease:release:published',
   ]);
@@ -1511,7 +1514,7 @@ test('shadow renewal service failure publishes only a fixed degraded diagnostic 
   await runListingAudit({ headers:{ host:'avenir-rwa-analyst.vercel.app' } }, response, {
     env:{ PG_WRITE_MODE:'shadow', RAW_ARCHIVE_MODE:'off' },
     cache:{
-      async get() { return null; },
+      async get() { return cachedBundle; },
       async set(_key, bundle) { cachedBundle = bundle; },
     },
     collectObservations:async () => observations,
@@ -1572,7 +1575,7 @@ test('shadow acquisition service failure skips renewal and redacts the database 
   await runListingAudit({ headers:{ host:'avenir-rwa-analyst.vercel.app' } }, response, {
     env:{ PG_WRITE_MODE:'shadow', RAW_ARCHIVE_MODE:'off' },
     cache:{
-      async get() { return null; },
+      async get() { return cachedBundle; },
       async set(_key, bundle) { cachedBundle = bundle; },
     },
     collectObservations:async () => observations,
@@ -1690,11 +1693,12 @@ test('separate serverless instances cannot publish while another owner holds the
   const durableGate = deferred();
   const acquiredA = deferred();
   let cacheWrites = 0;
+  let cachedBundle = null;
   let bDurable = 0;
   let bSink = 0;
   const cache = {
-    async get() { return null; },
-    async set() { cacheWrites += 1; },
+    async get() { return cachedBundle; },
+    async set(_key, bundle) { cachedBundle = bundle; cacheWrites += 1; },
   };
   const responseA = responseRecorder();
   const responseB = responseRecorder();
@@ -1886,6 +1890,43 @@ test('durable failure, lost lease renewal, and cache failure release failed with
   assert.deepEqual(cacheRelease, ['failed']);
 });
 
+test('a successful Runtime Cache set without a matching read-back is a failed publication', async () => {
+  const observations = fullObservations();
+  const response = responseRecorder();
+  const commits = [];
+  const releases = [];
+  let cacheWrites = 0;
+  await runListingAudit({ headers:{ host:'avenir-rwa-analyst.vercel.app' } }, response, {
+    env:{ PG_WRITE_MODE:'shadow', RAW_ARCHIVE_MODE:'off' },
+    cache:{
+      async get() { return null; },
+      async set() { cacheWrites += 1; },
+    },
+    collectObservations:async () => observations,
+    now:() => '2026-08-15T00:45:00.000Z',
+    acquirePublicationLease:async input => ({
+      mode:'shadow', acquired:true, enforced:true, status:'acquired',
+      ownerToken:'00000000-0000-4000-8000-000000000030',
+      observedAt:input.observedAt, checksum:input.checksum,
+    }),
+    durableWrite:async () => ({ pgMode:'shadow', status:'stored', publishAllowed:true }),
+    renewPublicationLease:async lease => ({ ...lease, renewed:true, status:'renewed' }),
+    recordRuntimeCacheCommit:async commit => {
+      commits.push(commit.status);
+      return { mode:'shadow', status:commit.status };
+    },
+    releasePublicationLease:async (_lease, options) => {
+      releases.push(options.status);
+      return { mode:'shadow', released:true, status:options.status };
+    },
+  });
+  assert.equal(cacheWrites, 1);
+  assert.equal(response.statusCode, 503);
+  assert.equal(response.payload.error, 'Listing audit persistence unavailable');
+  assert.deepEqual(commits, ['failed']);
+  assert.deepEqual(releases, ['failed']);
+});
+
 test('required durable failure prevents Runtime Cache mutation, while shadow failure preserves current writer', async () => {
   const observations = fullObservations();
   const request = { headers:{ host:'avenir-rwa-analyst.vercel.app' } };
@@ -1908,6 +1949,7 @@ test('required durable failure prevents Runtime Cache mutation, while shadow fai
   const runtimeCommits = [];
   await runListingAudit(request, shadowResponse, {
     cache,
+    verifyRuntimeCacheWrite:async (_cache, checksum) => ({ status:'verified', checksum }),
     collectObservations: async () => observations,
     now: () => '2026-08-15T00:45:00Z',
     durableWrite: async () => ({ pgMode:'shadow', archiveMode:'shadow', status:'failed' }),
@@ -1921,6 +1963,7 @@ test('required durable failure prevents Runtime Cache mutation, while shadow fai
   const postCacheBookkeepingResponse = responseRecorder();
   await runListingAudit(request, postCacheBookkeepingResponse, {
     cache,
+    verifyRuntimeCacheWrite:async (_cache, checksum) => ({ status:'verified', checksum }),
     collectObservations: async () => observations,
     now: () => '2026-08-15T00:45:00Z',
     durableWrite: async () => ({ pgMode:'required', archiveMode:'off', status:'stored' }),

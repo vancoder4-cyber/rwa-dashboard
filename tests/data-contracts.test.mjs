@@ -781,7 +781,8 @@ test('Signal Radar and Asset Intelligence use server history and one canonical d
 
   const vercelConfig = JSON.parse(await readFile(new URL('../vercel.json', import.meta.url), 'utf8'));
   assert.ok(vercelConfig.crons.some(cron => cron.path === '/api/signal-snapshot-cron' && cron.schedule === '7 * * * *'));
-  assert.ok(vercelConfig.crons.some(cron => cron.path === '/api/listing-audit-cron' && cron.schedule === '45 0 * * *'));
+  assert.ok(vercelConfig.crons.some(cron =>
+    cron.path === '/api/listing-audit-cron' && cron.schedule === '45 0,6,12,18 * * *'));
 });
 
 test('Competitor listings keep the newest relisting event for each venue instrument', async () => {
