@@ -104,7 +104,7 @@ trade.xyz 当前专用 `xyz` DEX universe 有 5 个 `perpCategories` 空缺：`U
 - `CBRS/CBRSB/CBRSON/CBRSX/sCBRS`：统一为已上市的 Cerebras Equity。
 - `QNT/QNTX/QNTSTOCK/QNTB`：统一为已上市的 Quantinuum Equity，但只有场所先确认 security 后才应用 alias。
 - `MINIMAX/ZHIPU/CXMT`：已上市 Equity。
-- `OPENAI/ANTHROPIC/ANDURIL/KALSHI/KIMI/NEURALINK/POLYMARKET`：Pre-IPO；后五项由 Gate 官方 `stocks + is_pre_market=true` catalog 交叉审计纳入。
+- `OPENAI/ANTHROPIC/SHEIN/ANDURIL/KALSHI/KIMI/NEURALINK/POLYMARKET`：Pre-IPO；后五项由 Gate 官方 `stocks + is_pre_market=true` catalog 交叉审计纳入。
 - `UNITREE`：已获 IPO 注册、尚未找到开始交易公告，因此仍为 Pre-IPO。
 - `EWH/DFEN`：全局 ETF 类别修正；Gate 的 `QQQX/SPYX/TQQQX/SLVON` 是仅在 Gate 官方 RWA catalog 门控后生效的 ETF wrapper，不能作为全局 ticker 类别修正。
 - `H100`：计算资源类 Commodity，不是股票指数。
@@ -119,6 +119,8 @@ trade.xyz 当前专用 `xyz` DEX universe 有 5 个 `perpCategories` 空缺：`U
 官方类型只允许精确归一化映射，例如 `PRE-IPO/PRE_IPO/PREIPO -> PREIPO`、`PRE-MARKET -> PREMARKET`。禁止用 `includes('PRE')` 判断，否则 `PREFERRED_STOCK` 等无关类型也可能被误判为 Pre-IPO。布尔字段也必须显式解析，字符串 `"false"` 不能按 JavaScript truthy 值处理。
 
 Registry 只纠正“已经由场所确认是 security”的产品；显式 `crypto/coin/token/meme` 类型永远先返回 Other/拒绝，不能因为 ticker 命中 `QNT` 等已上市公司 alias 而被 registry 反向放行。
+
+截至 2026-08-28，Bitget 官方目录中的 `SHEINUSDT` 为 `isRwa=YES + symbolType=stock + status=online`，trade.xyz 官方 `perpCategories` 将精确产品 `xyz:SHEIN` 标为 `preipo`。因此 `SHEIN` 在通过各自场所 security/RWA 准入后由唯一 lifecycle registry 统一细化为 Pre-IPO；Bitget 的宽泛 `stock` 不能被解释为已经公开上市，也不能覆盖 trade.xyz 的精确 Pre-IPO 产品类别。
 
 通用 `identityVerified` 布尔值不能覆盖显式 Crypto 类型。确有交易所元数据错误时，必须以 `venue + exact symbol` 建立窄例外，并在入场时把标准化类别与原始 `venueMarketType` 分开保存；当前只有 Bitget `KUAISHOU` 使用这一规则。Spot 的 Reality/UTS/xStocks catalog 身份也不能让显式 Crypto `QNT/BTC` 被 lifecycle registry 反向升级。
 

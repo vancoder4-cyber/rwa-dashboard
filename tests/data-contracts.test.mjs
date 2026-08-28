@@ -187,6 +187,8 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
   assert.deepEqual(normalizeSignalIdentity('QNTB', 'equity'), { symbol:'QNT', category:'equity' });
   assert.deepEqual(normalizeSignalIdentity('OPENAI', 'equity'), { symbol:'OPENAI', category:'pre-ipo' });
   assert.deepEqual(normalizeSignalIdentity('ANTHROPIC', 'equity'), { symbol:'ANTHROPIC', category:'pre-ipo' });
+  assert.deepEqual(normalizeSignalIdentity('SHEIN', 'equity', { venue:'bitget' }), { symbol:'SHEIN', category:'pre-ipo' });
+  assert.deepEqual(normalizeSignalIdentity('SHEIN', 'pre-ipo', { venue:'tradexyz' }), { symbol:'SHEIN', category:'pre-ipo' });
   assert.deepEqual(normalizeSignalIdentity('AAPLB', 'equity', { allowBinanceBstock:true }), { symbol:'AAPL', category:'equity' });
   assert.deepEqual(normalizeSignalIdentity('QQQB', 'equity', { allowBinanceBstock:true }), { symbol:'QQQ', category:'etf' });
   assert.deepEqual(normalizeSignalIdentity('SOXLB', 'equity', { allowBinanceBstock:true }), { symbol:'SOXL', category:'etf' });
@@ -234,6 +236,9 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
     .map(match => match[1])
     .sort();
   assert.deepEqual(clientCanonicals, Object.keys(SECURITY_LISTING_REGISTRY).sort());
+  assert.deepEqual(SECURITY_LISTING_REGISTRY.SHEIN, {
+    category:'pre-ipo', status:'pre-ipo', aliases:[],
+  });
   for (const [canonical, record] of Object.entries(SECURITY_LISTING_REGISTRY)) {
     const entry = registrySource.match(new RegExp(
       `\\b${canonical}: Object\\.freeze\\(\\{[\\s\\S]*?category:'([^']+)'[\\s\\S]*?aliases:Object\\.freeze\\(\\[([^\\]]*)\\]\\)`,

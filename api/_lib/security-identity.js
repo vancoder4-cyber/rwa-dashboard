@@ -47,6 +47,7 @@ export const SECURITY_LISTING_REGISTRY = Object.freeze({
   QNT: Object.freeze({ category:'equity', status:'public', aliases:Object.freeze(['QNTX', 'QNTSTOCK', 'QNTB']) }),
   OPENAI: Object.freeze({ category:'pre-ipo', status:'pre-ipo', aliases:Object.freeze([]) }),
   ANTHROPIC: Object.freeze({ category:'pre-ipo', status:'pre-ipo', aliases:Object.freeze([]) }),
+  SHEIN: Object.freeze({ category:'pre-ipo', status:'pre-ipo', aliases:Object.freeze([]) }),
   ANDURIL: Object.freeze({ category:'pre-ipo', status:'pre-ipo', aliases:Object.freeze([]) }),
   KALSHI: Object.freeze({ category:'pre-ipo', status:'pre-ipo', aliases:Object.freeze([]) }),
   KIMI: Object.freeze({ category:'pre-ipo', status:'pre-ipo', aliases:Object.freeze([]) }),
