@@ -19,6 +19,7 @@ import {
   isDedicatedTradeXyzSource,
   krakenListingCandidate,
   mergeKrakenOfficialPairEntries,
+  tradeXyzListingFromOfficial,
 } from '../api/_lib/listing-sources.js';
 
 function responseRecorder() {
@@ -90,6 +91,31 @@ test('listing audit emits Spot and Perp additions once and leaves an unavailable
   const repeated = mergeListingAudit(second.state, secondObservations, new Date('2026-08-15T01:15:00Z'));
   assert.equal(repeated.newEvents.length, 0);
   assert.equal(repeated.snapshot.events.filter(event => event.changeType === 'new').length, 2);
+});
+
+test('listing events publish venue contract category and lifecycle as separate fields', () => {
+  const first = mergeListingAudit(null, fullObservations(), new Date('2026-08-14T00:45:00Z'));
+  const unitree = tradeXyzListingFromOfficial({
+    name:'xyz:UNITREE', fullName:'Unitree Robotics', isDelisted:false,
+  }, 'stocks');
+  const second = mergeListingAudit(first.state, fullObservations({
+    'perp:tradexyz': {
+      market:'perp', venue:'tradexyz', status:'full',
+      listings:[row('perp:tradexyz'), unitree],
+    },
+  }), new Date('2026-08-15T00:45:00Z'));
+  const event = second.newEvents.find(candidate => candidate.venueSymbol === 'XYZ:UNITREE');
+  assert.equal(event.category, 'pre-ipo');
+  assert.equal(event.venueCategory, 'equity');
+  assert.equal(event.lifecycleStatus, 'ipo-registered');
+  const health = validateListingAuditSnapshot(second.snapshot, Date.parse('2026-08-15T01:00:00Z'));
+  assert.equal(health.eventClassificationValid, true);
+
+  const missingVenueCategory = structuredClone(second.snapshot);
+  delete missingVenueCategory.events.find(candidate => candidate.venueSymbol === 'XYZ:UNITREE').venueCategory;
+  const invalidHealth = validateListingAuditSnapshot(missingVenueCategory, Date.parse('2026-08-15T01:00:00Z'));
+  assert.equal(invalidHealth.eventClassificationValid, false);
+  assert.equal(invalidHealth.status, 'fail');
 });
 
 test('listing audit distinguishes delisting from a later relisting', () => {
@@ -223,6 +249,30 @@ test('listing identity normalization fails closed for Crypto and keeps ambiguous
   assert.equal(candidate.inclusionStatus, 'review-required');
 });
 
+test('trade.xyz preserves the official contract class separately from company lifecycle', () => {
+  const unitree = tradeXyzListingFromOfficial({
+    name:'xyz:UNITREE',
+    fullName:'Unitree Robotics',
+    isDelisted:false,
+  }, 'stocks');
+  assert.deepEqual(unitree, {
+    market:'perp',
+    venue:'tradexyz',
+    venueSymbol:'XYZ:UNITREE',
+    canonicalSymbol:'UNITREE',
+    category:'pre-ipo',
+    venueCategory:'equity',
+    lifecycleStatus:'ipo-registered',
+    name:'Unitree Robotics',
+    identityStatus:'verified',
+    identityEvidence:'Hyperliquid perpCategories:stocks',
+  });
+
+  const normalized = normalizeListingObservation(unitree);
+  assert.equal(normalized.venueCategory, 'equity');
+  assert.equal(normalized.lifecycleStatus, 'ipo-registered');
+});
+
 test('listing collectors reject global trade.xyz fallback and Kraken same-suffix Crypto collisions', () => {
   assert.equal(isDedicatedTradeXyzSource('dex:xyz'), true);
   assert.equal(isDedicatedTradeXyzSource('dex:XYZ'), true);
@@ -304,6 +354,7 @@ test('Gate listing audit admits only the two exact live legacy commodity pairs',
     id:'PAXG_USDT', base:'PAXG', quote:'USDT', trade_status:'tradable',
   }), {
     market:'spot', venue:'gate', venueSymbol:'PAXG_USDT', canonicalSymbol:'XAU', category:'commodity',
+    venueCategory:'commodity', lifecycleStatus:null,
     name:null, identityStatus:'verified',
     identityEvidence:'exact audited Gate legacy RWA pair (2026-08-14) in the live official catalog',
   });
@@ -311,6 +362,7 @@ test('Gate listing audit admits only the two exact live legacy commodity pairs',
     id:'XAUT_USDT', base:'XAUT', quote:'USDT', trade_status:'tradable',
   }), {
     market:'spot', venue:'gate', venueSymbol:'XAUT_USDT', canonicalSymbol:'XAU', category:'commodity',
+    venueCategory:'commodity', lifecycleStatus:null,
     name:null, identityStatus:'verified',
     identityEvidence:'exact audited Gate legacy RWA pair (2026-08-14) in the live official catalog',
   });
@@ -431,6 +483,8 @@ test('listing audit exposes an explicit Partial history state when the event saf
     venueSymbol:`SAFE-${index}`,
     canonicalSymbol:`SAFE${index}`,
     category:'equity',
+    venueCategory:'equity',
+    lifecycleStatus:null,
     name:null,
     identityStatus:'verified',
     identityEvidence:'official test fixture',

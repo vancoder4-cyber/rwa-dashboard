@@ -4,6 +4,7 @@ import {
   SECURITY_ETF_UNDERLYINGS,
   categoryFromOfficialSignalType,
   normalizeSignalIdentity,
+  securityLifecycleStatus,
 } from './security-identity.js';
 import {
   canonicalOkxPerpSymbol,
@@ -173,12 +174,15 @@ export function mergeKrakenOfficialPairEntries(pairEntries, officialEtfSet = ETF
 }
 
 function listing(market, venue, venueSymbol, canonicalSymbol, category, extras = {}) {
+  const venueCategory = normalized(extras.venueCategory || category).toLowerCase();
   const row = {
     market,
     venue,
     venueSymbol: normalizedUpper(venueSymbol),
     canonicalSymbol: normalizedUpper(canonicalSymbol),
     category,
+    venueCategory,
+    lifecycleStatus: securityLifecycleStatus(canonicalSymbol, category),
     name: normalized(extras.name) || null,
     identityStatus: extras.identityStatus || 'verified',
     identityEvidence: extras.identityEvidence || null,
@@ -203,6 +207,7 @@ export function gateExactLegacySpotListing(pair) {
   const identity = normalizeSignalIdentity(exact.underlying, exact.category, { venue:'gate' });
   if (!identity) return null;
   return listing('spot', 'gate', venueSymbol, identity.symbol, identity.category, {
+    venueCategory:exact.category,
     identityEvidence:'exact audited Gate legacy RWA pair (2026-08-14) in the live official catalog',
   });
 }
@@ -249,6 +254,25 @@ async function fetchBitget(path, { deadlineAt = null } = {}) {
   return payload.data;
 }
 
+export function tradeXyzListingFromOfficial(instrument, officialType = '') {
+  if (instrument?.isDelisted === true || ['1', 'true', 'yes'].includes(normalized(instrument?.isDelisted).toLowerCase())) {
+    return null;
+  }
+  const venueSymbol = normalized(instrument?.name);
+  const venueBase = normalizedUpper(venueSymbol.includes(':') ? venueSymbol.split(':').at(-1) : venueSymbol);
+  const venueCategory = categoryFromOfficialSignalType(officialType) ||
+    TRADE_XYZ_UNTYPED_RWA_CATEGORIES[venueBase] || null;
+  const identity = normalizeSignalIdentity(venueBase, venueCategory, { venue: 'tradexyz' });
+  if (!identity || !venueSymbol) return null;
+  return listing('perp', 'tradexyz', venueSymbol, identity.symbol, identity.category, {
+    venueCategory,
+    name: instrument?.fullName,
+    identityEvidence: officialType
+      ? `Hyperliquid perpCategories:${officialType}`
+      : 'audited untyped trade.xyz RWA exception',
+  });
+}
+
 async function collectTradeXyz(baseUrl) {
   const payload = await fetchSameOrigin(baseUrl, '/api/hyperliquid-market');
   if (!isDedicatedTradeXyzSource(payload?.source)) {
@@ -269,22 +293,12 @@ async function collectTradeXyz(baseUrl) {
   }
   const rows = [];
   for (const instrument of universe) {
-    if (instrument?.isDelisted === true || ['1', 'true', 'yes'].includes(normalized(instrument?.isDelisted).toLowerCase())) {
-      continue;
-    }
     const venueSymbol = normalized(instrument?.name);
     const venueBase = normalizedUpper(venueSymbol.includes(':') ? venueSymbol.split(':').at(-1) : venueSymbol);
     const officialType = categoryByCoin.get(venueSymbol.toLowerCase()) ||
       categoryByCoin.get(`xyz:${venueBase}`.toLowerCase()) || '';
-    const category = categoryFromOfficialSignalType(officialType) || TRADE_XYZ_UNTYPED_RWA_CATEGORIES[venueBase] || null;
-    const identity = normalizeSignalIdentity(venueBase, category, { venue: 'tradexyz' });
-    if (!identity || !venueSymbol) continue;
-    rows.push(listing('perp', 'tradexyz', venueSymbol, identity.symbol, identity.category, {
-      name: instrument?.fullName,
-      identityEvidence: officialType
-        ? `Hyperliquid perpCategories:${officialType}`
-        : 'audited untyped trade.xyz RWA exception',
-    }));
+    const row = tradeXyzListingFromOfficial(instrument, officialType);
+    if (row) rows.push(row);
   }
   return assertCatalogBounds('perp', 'tradexyz', rows);
 }
@@ -302,6 +316,7 @@ async function collectBitgetPerp() {
     const identity = normalizeSignalIdentity(venueBase, category, { venue: 'bitget' });
     if (!identity) continue;
     rows.push(listing('perp', 'bitget', instrument.symbol, identity.symbol, identity.category, {
+      venueCategory:category,
       name: identityException?.name || instrument?.symbolName,
       identityEvidence: identityException
         ? 'audited exact Bitget RWA type exception'
@@ -324,6 +339,7 @@ async function collectGatePerp(baseUrl) {
     const identity = normalizeSignalIdentity(venueBase, category, { venue: 'gate' });
     if (!identity) continue;
     rows.push(listing('perp', 'gate', venueSymbol, identity.symbol, identity.category, {
+      venueCategory:category,
       identityEvidence: `Gate contract_type=${contract.contract_type}`,
     }));
   }
@@ -344,6 +360,7 @@ async function collectBinancePerp(baseUrl) {
     });
     if (!identity) continue;
     rows.push(listing('perp', 'binance', contract.symbol, identity.symbol, identity.category, {
+      venueCategory:category,
       identityEvidence: isMetal
         ? 'audited Binance tokenized-metal exception'
         : `Binance contractType=TRADIFI_PERPETUAL; underlyingType=${contract.underlyingType}`,
@@ -361,6 +378,7 @@ async function collectOkxPerp(baseUrl) {
     const identity = normalizeSignalIdentity(canonical, category, { venue: 'okx' });
     if (!identity) continue;
     rows.push(listing('perp', 'okx', instrument.instId, identity.symbol, identity.category, {
+      venueCategory:category,
       identityEvidence: `OKX instCategory=${instrument.instCategory}; ${instrument.instType}/${instrument.ruleType || 'standard'}`,
     }));
   }
@@ -379,6 +397,7 @@ async function collectBitgetSpot(deadlineAt = null) {
       const identity = normalizeSignalIdentity(legacy.underlying, legacy.category, { venue: 'bitget' });
       if (!identity) continue;
       const legacyRow = listing('spot', 'bitget', instrument.symbol, identity.symbol, identity.category, {
+        venueCategory:legacy.category,
         name: instrument?.symbolName,
         marketDataProfile: 'bitget-standard',
         identityEvidence: 'exact audited Bitget RWA asset in the live official instruments catalog',
@@ -392,6 +411,7 @@ async function collectBitgetSpot(deadlineAt = null) {
     const identity = normalizeSignalIdentity(rawUnderlying, category, { venue: 'bitget' });
     if (!identity) continue;
     const realityRow = listing('spot', 'bitget', instrument.symbol, identity.symbol, identity.category, {
+      venueCategory:category,
       name: identityException?.name || instrument?.symbolName,
       marketDataProfile: 'bitget-reality',
       identityEvidence: identityException
@@ -422,6 +442,7 @@ async function collectGateSpot(baseUrl, deadlineAt = null) {
     const identity = normalizeSignalIdentity(rawUnderlying, category, { venue: 'gate' });
     if (!identity) continue;
     rows.push(listing('spot', 'gate', pair.id, identity.symbol, identity.category, {
+      venueCategory:category,
       identityEvidence: 'exact audited Gate Spot wrapper and live official pair',
     }));
   }
@@ -466,6 +487,7 @@ async function collectKrakenSpot(baseUrl, deadlineAt = null) {
     const identity = normalizeSignalIdentity(entry.underlying, entry.category, { venue: 'kraken' });
     if (!identity) continue;
     rows.push(listing('spot', 'kraken', entry.venueSymbol, identity.symbol, identity.category, {
+      venueCategory:entry.category,
       marketDataProfile: entry.marketDataProfile,
       marketQuerySymbol: entry.marketQuerySymbol,
       marketAliases: entry.marketAliases,
@@ -489,6 +511,7 @@ async function collectBinanceSpot(baseUrl, deadlineAt = null) {
     const identity = normalizeSignalIdentity(rawCanonical, category, { venue: 'binance' });
     if (!identity) continue;
     rows.push(listing('spot', 'binance', instrument.symbol, identity.symbol, identity.category, {
+      venueCategory:category,
       identityEvidence: instrument.identityEvidence,
     }));
   }
@@ -506,6 +529,7 @@ async function collectOkxSpot(baseUrl, deadlineAt = null) {
     const identity = normalizeSignalIdentity(canonical, category, { venue: 'okx' });
     if (!identity) continue;
     rows.push(listing('spot', 'okx', instrument.instId, identity.symbol, identity.category, {
+      venueCategory:category,
       identityEvidence: String(instrument?.instCategory) === '3'
         ? 'OKX official Unified Tokenized Stocks category'
         : 'audited exact OKX tokenized-gold pair',
@@ -543,6 +567,7 @@ function addGateReviewCandidates(gateObservation, observations) {
     if (!candidate || crossCategories?.size !== 1) continue;
     const [crossCategory] = crossCategories;
     rows.push(listing('spot', 'gate', venueSymbol, candidate, crossCategory, {
+      venueCategory:crossCategory,
       identityStatus: 'review-required',
       identityEvidence: 'Gate live pair plus same canonical on another official RWA catalog; exact Gate wrapper identity pending',
     }));

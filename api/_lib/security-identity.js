@@ -152,6 +152,14 @@ export function categoryFromOfficialSignalType(value) {
   return OFFICIAL_TYPE_CATEGORIES[normalized] || null;
 }
 
+export function securityLifecycleStatus(symbol, category) {
+  const raw = String(symbol || '').trim().toUpperCase();
+  const resolvedCategory = normalizedCategory(category);
+  if (!['equity', 'pre-ipo'].includes(resolvedCategory)) return null;
+  const canonical = SECURITY_ALIAS_MAP[raw] || raw;
+  return SECURITY_LISTING_REGISTRY[canonical]?.status || null;
+}
+
 function normalizedCategory(value) {
   return String(value || '').trim().toLowerCase().replace(/^pre[-_]?ipo$/, 'pre-ipo');
 }
