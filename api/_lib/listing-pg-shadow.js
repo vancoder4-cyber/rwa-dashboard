@@ -1486,7 +1486,7 @@ export async function findListingAuditVerifiedIdentityConflicts(batch, { runTran
        LIMIT 20`,
       [json(memberships)],
     ),
-  ], { isolationLevel:'Repeatable Read', readOnly:true });
+  ], { isolationLevel:'Serializable', readOnly:true });
   const rows = Array.isArray(results?.[2]) ? results[2] : [];
   return rows.map(row => ({
     sourceKey:normalized(row.source_key),
