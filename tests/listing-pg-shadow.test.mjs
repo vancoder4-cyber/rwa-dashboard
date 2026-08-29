@@ -652,7 +652,7 @@ test('verified identity conflict diagnostics are read-only, bounded, and expose 
   const sequence = sameDayRetry();
   const results = await findListingAuditVerifiedIdentityConflicts(sequence.retryBatch, {
     runTransaction: async (builder, options) => {
-      assert.deepEqual(options, { isolationLevel:'Repeatable Read', readOnly:true });
+      assert.deepEqual(options, { isolationLevel:'Serializable', readOnly:true });
       const calls = [];
       const queries = builder({ query(text, params = []) { calls.push({ text, params }); return { text, params }; } });
       assert.match(calls[0].text, /^SET LOCAL ROLE rwa_catalog_shadow_writer$/);
