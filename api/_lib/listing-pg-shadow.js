@@ -266,6 +266,8 @@ function buildSourceRun(sourceKey, rawObservation, summary, mergedState, observe
       assetKey,
       category,
       canonicalUnderlying: listing.canonicalSymbol,
+      venueCategory: listing.venueCategory,
+      lifecycleStatus: listing.lifecycleStatus,
       displayName,
       marketOrigin: 'unknown',
       assetFingerprint,
@@ -629,6 +631,8 @@ function membershipRows(batch) {
     asset_key: row.assetKey,
     category: row.category,
     canonical_underlying: row.canonicalUnderlying,
+    venue_category: row.venueCategory,
+    lifecycle_status: row.lifecycleStatus,
     display_name: row.displayName,
     market_origin: row.marketOrigin,
     asset_fingerprint: row.assetFingerprint,
@@ -652,6 +656,8 @@ function membershipRows(batch) {
       name: row.name,
       identityEvidence: row.identityEvidence,
       identityStatus: row.identityStatus,
+      venueCategory: row.venueCategory,
+      lifecycleStatus: row.lifecycleStatus,
       artifactFormat: LISTING_NORMALIZED_ARTIFACT_FORMAT,
     },
   })));
@@ -801,7 +807,8 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
          SELECT 1
          FROM jsonb_to_recordset($1::jsonb) AS incoming(
            source_key text, official_product_key text, asset_key text,
-           category text, canonical_underlying text
+           category text, canonical_underlying text, venue_category text,
+           lifecycle_status text
          )
          JOIN identity.source AS source ON source.source_key = incoming.source_key
          JOIN identity.instrument AS instrument
@@ -815,9 +822,27 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
            ON current_asset_version.asset_version_id = current.asset_version_id
          JOIN identity.asset AS current_asset
            ON current_asset.asset_id = current_asset_version.asset_id
-         WHERE current_asset.asset_key <> incoming.asset_key
+         WHERE (
+           current_asset.asset_key <> incoming.asset_key
            OR current_asset_version.category <> incoming.category
            OR current_asset_version.canonical_underlying <> incoming.canonical_underlying
+         )
+         AND NOT (
+           current_asset_version.canonical_underlying = incoming.canonical_underlying
+           AND current_asset_version.category IN ('equity', 'pre-ipo')
+           AND incoming.category IN ('equity', 'pre-ipo')
+           AND current_asset_version.category <> incoming.category
+           AND current_asset.asset_key = current_asset_version.category || ':' || current_asset_version.canonical_underlying
+           AND incoming.asset_key = incoming.category || ':' || incoming.canonical_underlying
+           AND incoming.venue_category IN ('equity', 'pre-ipo')
+           AND (
+             (incoming.category = 'equity' AND incoming.lifecycle_status = 'public')
+             OR (
+               incoming.category = 'pre-ipo'
+               AND incoming.lifecycle_status IN ('pre-ipo', 'ipo-registered')
+             )
+           )
+         )
        ) THEN ingest.reject_verified_catalog_identity_conflict() ELSE 1 END AS verified_identity_guard`,
       [json(memberships)],
     ),
@@ -1465,7 +1490,8 @@ export async function findListingAuditVerifiedIdentityConflicts(batch, { runTran
          incoming.canonical_underlying AS incoming_canonical_underlying
        FROM jsonb_to_recordset($1::jsonb) AS incoming(
          source_key text, official_product_key text, asset_key text,
-         category text, canonical_underlying text
+         category text, canonical_underlying text, venue_category text,
+         lifecycle_status text
        )
        JOIN identity.source AS source ON source.source_key = incoming.source_key
        JOIN identity.instrument AS instrument
@@ -1479,9 +1505,27 @@ export async function findListingAuditVerifiedIdentityConflicts(batch, { runTran
          ON current_asset_version.asset_version_id = current.asset_version_id
        JOIN identity.asset AS current_asset
          ON current_asset.asset_id = current_asset_version.asset_id
-       WHERE current_asset.asset_key <> incoming.asset_key
-          OR current_asset_version.category <> incoming.category
-          OR current_asset_version.canonical_underlying <> incoming.canonical_underlying
+       WHERE (
+         current_asset.asset_key <> incoming.asset_key
+         OR current_asset_version.category <> incoming.category
+         OR current_asset_version.canonical_underlying <> incoming.canonical_underlying
+       )
+       AND NOT (
+         current_asset_version.canonical_underlying = incoming.canonical_underlying
+         AND current_asset_version.category IN ('equity', 'pre-ipo')
+         AND incoming.category IN ('equity', 'pre-ipo')
+         AND current_asset_version.category <> incoming.category
+         AND current_asset.asset_key = current_asset_version.category || ':' || current_asset_version.canonical_underlying
+         AND incoming.asset_key = incoming.category || ':' || incoming.canonical_underlying
+         AND incoming.venue_category IN ('equity', 'pre-ipo')
+         AND (
+           (incoming.category = 'equity' AND incoming.lifecycle_status = 'public')
+           OR (
+             incoming.category = 'pre-ipo'
+             AND incoming.lifecycle_status IN ('pre-ipo', 'ipo-registered')
+           )
+         )
+       )
        ORDER BY source.source_key COLLATE "C", instrument.official_product_key COLLATE "C"
        LIMIT 20`,
       [json(memberships)],

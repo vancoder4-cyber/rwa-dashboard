@@ -569,6 +569,8 @@ test('verified identity guard rejects category/canonical drift but permits non-i
   assert.match(metadataGuard.text, /current_asset\.asset_key <> incoming\.asset_key/);
   assert.match(metadataGuard.text, /current_asset_version\.category <> incoming\.category/);
   assert.match(metadataGuard.text, /current_asset_version\.canonical_underlying <> incoming\.canonical_underlying/);
+  assert.match(metadataGuard.text, /incoming\.lifecycle_status = 'public'/);
+  assert.match(metadataGuard.text, /incoming\.lifecycle_status IN \('pre-ipo', 'ipo-registered'\)/);
   assert.doesNotMatch(metadataGuard.text, /incoming\.(?:display_name|name|quote_currency|official_status|asset_fingerprint|instrument_fingerprint)/);
   const metadataPayload = JSON.parse(metadataGuard.params[0]);
   const metadataGuardRow = metadataPayload.find(row => row.official_product_key === 'AAPL-GATE-PERP');
@@ -579,6 +581,8 @@ test('verified identity guard rejects category/canonical drift but permits non-i
       'asset_key',
       'category',
       'canonical_underlying',
+      'venue_category',
+      'lifecycle_status',
     ].map(key => [key, metadataGuardRow[key]])),
     {
       source_key:'perp:gate',
@@ -586,6 +590,8 @@ test('verified identity guard rejects category/canonical drift but permits non-i
       asset_key:'equity:AAPL',
       category:'equity',
       canonical_underlying:'AAPL',
+      venue_category:'equity',
+      lifecycle_status:null,
     },
   );
   assert.ok(metadataCalls.some(call =>
@@ -594,6 +600,31 @@ test('verified identity guard rejects category/canonical drift but permits non-i
   assert.ok(metadataCalls.some(call =>
     call.text.includes('UPDATE identity.instrument_version AS current') &&
     call.text.includes('current.identity_fingerprint <> incoming.instrument_fingerprint')));
+
+  const reviewedLifecycleBatch = structuredClone(sequence.retryBatch);
+  const reviewedLifecycleMembership = sourceRun(reviewedLifecycleBatch).memberships[0];
+  reviewedLifecycleMembership.assetKey = 'pre-ipo:SHEIN';
+  reviewedLifecycleMembership.category = 'pre-ipo';
+  reviewedLifecycleMembership.canonicalUnderlying = 'SHEIN';
+  reviewedLifecycleMembership.venueCategory = 'equity';
+  reviewedLifecycleMembership.lifecycleStatus = 'pre-ipo';
+  const reviewedLifecycleGuard = pgCalls(reviewedLifecycleBatch)
+    .find(call => call.text.includes('verified_identity_guard'));
+  const reviewedLifecycleRow = JSON.parse(reviewedLifecycleGuard.params[0])
+    .find(row => row.official_product_key === 'AAPL-GATE-PERP');
+  assert.deepEqual({
+    assetKey:reviewedLifecycleRow.asset_key,
+    category:reviewedLifecycleRow.category,
+    canonicalUnderlying:reviewedLifecycleRow.canonical_underlying,
+    venueCategory:reviewedLifecycleRow.venue_category,
+    lifecycleStatus:reviewedLifecycleRow.lifecycle_status,
+  }, {
+    assetKey:'pre-ipo:SHEIN',
+    category:'pre-ipo',
+    canonicalUnderlying:'SHEIN',
+    venueCategory:'equity',
+    lifecycleStatus:'pre-ipo',
+  });
 
   const conflictingBatch = structuredClone(sequence.retryBatch);
   const conflictingMembership = sourceRun(conflictingBatch).memberships[0];
@@ -658,6 +689,8 @@ test('verified identity conflict diagnostics are read-only, bounded, and expose 
       assert.match(calls[0].text, /^SET LOCAL ROLE rwa_catalog_shadow_writer$/);
       assert.match(calls[2].text, /LIMIT 20/);
       assert.match(calls[2].text, /current_asset\.asset_key <> incoming\.asset_key/);
+      assert.match(calls[2].text, /incoming\.lifecycle_status = 'public'/);
+      assert.match(calls[2].text, /incoming\.lifecycle_status IN \('pre-ipo', 'ipo-registered'\)/);
       const incoming = JSON.parse(calls[2].params[0]);
       assert.ok(incoming.length > 0);
       return queries.map((_query, index) => index === 2 ? [{
