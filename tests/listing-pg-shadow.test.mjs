@@ -19,6 +19,7 @@ import {
   buildListingAuditPgBatch,
   buildListingAuditPgQueries,
   classifyListingAuditSourceRunWritePolicy,
+  findListingAuditVerifiedIdentityConflicts,
   listingAuditPersistenceChecksum,
   putContentAddressedCatalogBlob,
   recordListingAuditRuntimeCacheCommit,
@@ -628,11 +629,55 @@ test('verified identity guard rejects category/canonical drift but permits non-i
     env: { PG_WRITE_MODE:'shadow', RAW_ARCHIVE_MODE:'off' },
     logger: { warn() {}, error() {} },
     writeBatch: async () => { throw new Error(LISTING_PG_VERIFIED_IDENTITY_CONFLICT_ERROR_CODE); },
+    findIdentityConflicts: async () => [{
+      sourceKey:'perp:gate',
+      officialProductKey:'AAPL-GATE-PERP',
+      existing:{ assetKey:'equity:AAPL', category:'equity', canonicalUnderlying:'AAPL' },
+      incoming:{ assetKey:'etf:MSFT', category:'etf', canonicalUnderlying:'MSFT' },
+    }],
   });
   assert.equal(rejected.status, 'rejected');
   assert.equal(rejected.consistencyRejected, true);
   assert.equal(rejected.publishAllowed, false);
   assert.equal(rejected.error, LISTING_PG_VERIFIED_IDENTITY_CONFLICT_ERROR_CODE);
+  assert.deepEqual(rejected.identityConflicts, [{
+    sourceKey:'perp:gate',
+    officialProductKey:'AAPL-GATE-PERP',
+    existing:{ assetKey:'equity:AAPL', category:'equity', canonicalUnderlying:'AAPL' },
+    incoming:{ assetKey:'etf:MSFT', category:'etf', canonicalUnderlying:'MSFT' },
+  }]);
+});
+
+test('verified identity conflict diagnostics are read-only, bounded, and expose only catalog identity fields', async () => {
+  const sequence = sameDayRetry();
+  const results = await findListingAuditVerifiedIdentityConflicts(sequence.retryBatch, {
+    runTransaction: async (builder, options) => {
+      assert.deepEqual(options, { isolationLevel:'Repeatable Read', readOnly:true });
+      const calls = [];
+      const queries = builder({ query(text, params = []) { calls.push({ text, params }); return { text, params }; } });
+      assert.match(calls[0].text, /^SET LOCAL ROLE rwa_catalog_shadow_writer$/);
+      assert.match(calls[2].text, /LIMIT 20/);
+      assert.match(calls[2].text, /current_asset\.asset_key <> incoming\.asset_key/);
+      const incoming = JSON.parse(calls[2].params[0]);
+      assert.ok(incoming.length > 0);
+      return queries.map((_query, index) => index === 2 ? [{
+        source_key:'perp:gate',
+        official_product_key:'AAPL-GATE-PERP',
+        existing_asset_key:'equity:AAPL',
+        existing_category:'equity',
+        existing_canonical_underlying:'AAPL',
+        incoming_asset_key:'etf:AAPL',
+        incoming_category:'etf',
+        incoming_canonical_underlying:'AAPL',
+      }] : []);
+    },
+  });
+  assert.deepEqual(results, [{
+    sourceKey:'perp:gate',
+    officialProductKey:'AAPL-GATE-PERP',
+    existing:{ assetKey:'equity:AAPL', category:'equity', canonicalUnderlying:'AAPL' },
+    incoming:{ assetKey:'etf:AAPL', category:'etf', canonicalUnderlying:'AAPL' },
+  }]);
 });
 
 test('trusted same-day retries replace exact evidence and membership before reinsertion', () => {

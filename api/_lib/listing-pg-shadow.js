@@ -1444,6 +1444,66 @@ export async function writeListingAuditPgBatch(batch, archivedArtifacts, { runTr
   };
 }
 
+export async function findListingAuditVerifiedIdentityConflicts(batch, { runTransaction } = {}) {
+  let transaction = runTransaction;
+  if (!transaction) {
+    const database = await import('./database.js');
+    transaction = database.runDatabaseTransaction;
+  }
+  const memberships = membershipRows(batch);
+  if (memberships.length === 0) return [];
+  const results = await transaction(sql => [
+    sql.query(`SET LOCAL ROLE rwa_catalog_shadow_writer`),
+    sql.query(`SET LOCAL statement_timeout = '15s'`),
+    sql.query(
+      `SELECT source.source_key, instrument.official_product_key,
+         current_asset.asset_key AS existing_asset_key,
+         current_asset_version.category AS existing_category,
+         current_asset_version.canonical_underlying AS existing_canonical_underlying,
+         incoming.asset_key AS incoming_asset_key,
+         incoming.category AS incoming_category,
+         incoming.canonical_underlying AS incoming_canonical_underlying
+       FROM jsonb_to_recordset($1::jsonb) AS incoming(
+         source_key text, official_product_key text, asset_key text,
+         category text, canonical_underlying text
+       )
+       JOIN identity.source AS source ON source.source_key = incoming.source_key
+       JOIN identity.instrument AS instrument
+         ON instrument.source_id = source.source_id
+        AND instrument.official_product_key = incoming.official_product_key
+       JOIN identity.instrument_version AS current
+         ON current.instrument_id = instrument.instrument_id
+        AND current.valid_to IS NULL
+        AND current.identity_status = 'verified'
+       JOIN identity.asset_version AS current_asset_version
+         ON current_asset_version.asset_version_id = current.asset_version_id
+       JOIN identity.asset AS current_asset
+         ON current_asset.asset_id = current_asset_version.asset_id
+       WHERE current_asset.asset_key <> incoming.asset_key
+          OR current_asset_version.category <> incoming.category
+          OR current_asset_version.canonical_underlying <> incoming.canonical_underlying
+       ORDER BY source.source_key COLLATE "C", instrument.official_product_key COLLATE "C"
+       LIMIT 20`,
+      [json(memberships)],
+    ),
+  ], { isolationLevel:'Repeatable Read', readOnly:true });
+  const rows = Array.isArray(results?.[2]) ? results[2] : [];
+  return rows.map(row => ({
+    sourceKey:normalized(row.source_key),
+    officialProductKey:normalized(row.official_product_key),
+    existing:{
+      assetKey:normalized(row.existing_asset_key),
+      category:normalized(row.existing_category),
+      canonicalUnderlying:normalized(row.existing_canonical_underlying),
+    },
+    incoming:{
+      assetKey:normalized(row.incoming_asset_key),
+      category:normalized(row.incoming_category),
+      canonicalUnderlying:normalized(row.incoming_canonical_underlying),
+    },
+  }));
+}
+
 function leaseResultRow(results) {
   return (Array.isArray(results) ? results.flat() : [])
     .find(row => row && (row.lease_key || row.leaseKey));
@@ -1731,6 +1791,7 @@ export async function runOptionalListingAuditPgWrite(input, {
   logger = console,
   archiveArtifacts = archiveListingAuditArtifacts,
   writeBatch = writeListingAuditPgBatch,
+  findIdentityConflicts = findListingAuditVerifiedIdentityConflicts,
 } = {}) {
   const pgMode = resolvePgWriteMode(env);
   const archiveMode = resolveRawArchiveMode(env);
@@ -1767,7 +1828,18 @@ export async function runOptionalListingAuditPgWrite(input, {
     } catch (error) {
       const consistencyError = persistenceConsistencyError(error);
       if (consistencyError) {
-        logger?.warn?.('[listing-audit] consistency-conflicting retry rejected before Runtime Cache publication', consistencyError);
+        let identityConflicts = [];
+        if (consistencyError === LISTING_PG_VERIFIED_IDENTITY_CONFLICT_ERROR_CODE) {
+          try {
+            identityConflicts = await findIdentityConflicts(batch);
+          } catch (diagnosticError) {
+            logger?.error?.('[listing-audit] identity conflict diagnostic failed', safeError(diagnosticError));
+          }
+        }
+        logger?.warn?.(
+          '[listing-audit] consistency-conflicting retry rejected before Runtime Cache publication',
+          JSON.stringify({ code:consistencyError, identityConflicts }),
+        );
         return {
           pgMode,
           archiveMode,
@@ -1777,6 +1849,7 @@ export async function runOptionalListingAuditPgWrite(input, {
           publishAllowed: false,
           archiveFailures,
           error: consistencyError,
+          identityConflicts,
         };
       }
       if (pgMode === 'required') {
