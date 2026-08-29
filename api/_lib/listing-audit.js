@@ -23,6 +23,7 @@ export const LISTING_SOURCE_KEYS = Object.freeze([
 const MARKETS = new Set(['perp', 'spot']);
 const VENUES = new Set(['tradexyz', 'bitget', 'gate', 'kraken', 'binance', 'okx']);
 const CATEGORIES = new Set(['equity', 'etf', 'commodity', 'index', 'fx', 'bond', 'pre-ipo']);
+const LIFECYCLE_STATUSES = new Set(['public', 'pre-ipo', 'ipo-registered']);
 const IDENTITY_STATUSES = new Set(['verified', 'review-required']);
 const LISTING_KEY_PATTERN = /^[A-Z0-9._:-]{1,90}$/;
 const CANONICAL_PATTERN = /^[A-Z0-9.-]{1,40}$/;
@@ -52,10 +53,19 @@ export function normalizeListingObservation(input) {
   const venueSymbol = normalizedUpper(input?.venueSymbol);
   const canonicalSymbol = normalizedUpper(input?.canonicalSymbol);
   const category = normalized(input?.category).toLowerCase();
+  const rawVenueCategory = normalized(input?.venueCategory).toLowerCase();
+  const venueCategory = rawVenueCategory || category;
+  const rawLifecycleStatus = normalized(input?.lifecycleStatus).toLowerCase();
+  const lifecycleStatus = rawLifecycleStatus || null;
   const identityStatus = normalized(input?.identityStatus || 'verified').toLowerCase();
   if (!MARKETS.has(market) || !VENUES.has(venue)) return null;
   if (!LISTING_KEY_PATTERN.test(venueSymbol) || !CANONICAL_PATTERN.test(canonicalSymbol)) return null;
-  if (!CATEGORIES.has(category) || !IDENTITY_STATUSES.has(identityStatus)) return null;
+  if (
+    !CATEGORIES.has(category) ||
+    !CATEGORIES.has(venueCategory) ||
+    (lifecycleStatus !== null && !LIFECYCLE_STATUSES.has(lifecycleStatus)) ||
+    !IDENTITY_STATUSES.has(identityStatus)
+  ) return null;
   const sourceKey = listingSourceKey(market, venue);
   return Object.freeze({
     key: `${sourceKey}:${venueSymbol}`,
@@ -65,6 +75,8 @@ export function normalizeListingObservation(input) {
     venueSymbol,
     canonicalSymbol,
     category,
+    venueCategory,
+    lifecycleStatus,
     name: normalized(input?.name) || null,
     identityStatus,
     identityEvidence: normalized(input?.identityEvidence) || null,
@@ -129,6 +141,8 @@ function eventFromListing(changeType, listing, detectedAt, previous = null) {
     venueSymbol: row.venueSymbol,
     canonicalSymbol: row.canonicalSymbol,
     category: row.category,
+    venueCategory: row.venueCategory,
+    lifecycleStatus: row.lifecycleStatus,
     name: row.name || null,
     identityStatus: row.identityStatus,
     identityEvidence: row.identityEvidence || null,
@@ -407,6 +421,8 @@ export function mergeListingAudit(previousState, rawObservations, now = new Date
       ...event,
       canonicalSymbol: known.canonicalSymbol,
       category: known.category,
+      venueCategory: known.venueCategory,
+      lifecycleStatus: known.lifecycleStatus,
       name: known.name || null,
       identityStatus: known.identityStatus,
       identityEvidence: known.identityEvidence || null,
@@ -433,6 +449,8 @@ export function mergeListingAudit(previousState, rawObservations, now = new Date
       venueSymbol:row.venueSymbol,
       canonicalSymbol:row.canonicalSymbol,
       category:row.category,
+      venueCategory:row.venueCategory,
+      lifecycleStatus:row.lifecycleStatus,
       name:row.name || null,
       identityStatus:row.identityStatus,
       identityEvidence:row.identityEvidence || null,

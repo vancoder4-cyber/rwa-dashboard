@@ -85,6 +85,8 @@ export function compactListingAuditState(state) {
     row?.firstSeenAt || null,
     row?.lastSeenAt || null,
     row?.removedAt || null,
+    row?.venueCategory || row?.category || null,
+    row?.lifecycleStatus || null,
   ]]));
   const events = (Array.isArray(state?.events) ? state.events : []).map(event => [
     event?.eventId || null,
@@ -97,6 +99,8 @@ export function compactListingAuditState(state) {
     event?.identityStatus === 'review-required' ? 'r' : 'v',
     event?.identityEvidence || null,
     event?.inclusionStatus === 'review-required' ? 'r' : event?.inclusionStatus === 'removed' ? 'm' : 'e',
+    event?.venueCategory || event?.category || null,
+    event?.lifecycleStatus || null,
   ]);
   return {
     ...state,
@@ -122,6 +126,8 @@ export function hydrateListingAuditState(state) {
         venueSymbol,
         canonicalSymbol:compact[0],
         category:compact[1],
+        venueCategory:compact[9] || compact[1],
+        lifecycleStatus:compact[10] || null,
         name:compact[2],
         identityStatus,
         identityEvidence:compact[4],
@@ -137,7 +143,10 @@ export function hydrateListingAuditState(state) {
   const events = state.eventsEncoding === COMPACT_EVENTS_ENCODING
     ? (Array.isArray(state.events) ? state.events : []).flatMap(compact => {
       if (!Array.isArray(compact) || compact.length < 10) return [];
-      const [eventId, listingKey, changeCode, detectedAt, canonicalSymbol, category, name, identityCode, identityEvidence, inclusionCode] = compact;
+      const [
+        eventId, listingKey, changeCode, detectedAt, canonicalSymbol, category, name,
+        identityCode, identityEvidence, inclusionCode, venueCategory, lifecycleStatus,
+      ] = compact;
       const { market, venue, venueSymbol } = listingKeyParts(listingKey);
       return [{
         eventId,
@@ -149,6 +158,8 @@ export function hydrateListingAuditState(state) {
         venueSymbol,
         canonicalSymbol,
         category,
+        venueCategory:venueCategory || category,
+        lifecycleStatus:lifecycleStatus || null,
         name,
         identityStatus:identityCode === 'r' ? 'review-required' : 'verified',
         identityEvidence,

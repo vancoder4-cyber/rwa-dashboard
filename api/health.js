@@ -257,9 +257,15 @@ export function validateListingAuditSnapshot(payload, now = Date.now()) {
       ? historyDroppedAtLeast === 0 && historyDroppedThrough === null
       : historyDroppedAtLeast > 0 && historyDroppedThrough !== null) &&
     (!Array.isArray(payload?.events) || payload.events.length <= historyMaxEvents);
+  const lifecycleStatuses = new Set(['public', 'pre-ipo', 'ipo-registered']);
+  const eventClassificationValid = Array.isArray(payload?.events) && payload.events.every(event =>
+    RWA_SIGNAL_CATEGORIES.has(String(event?.venueCategory || '').trim().toLowerCase()) &&
+    Object.prototype.hasOwnProperty.call(event || {}, 'lifecycleStatus') &&
+    (event.lifecycleStatus === null || lifecycleStatuses.has(String(event.lifecycleStatus).trim().toLowerCase()))
+  );
   const contractValid = payload?.schemaVersion === LISTING_AUDIT_SCHEMA_VERSION &&
     Array.isArray(payload?.sources) && Array.isArray(payload?.events) && Array.isArray(payload?.pendingReviews) &&
-    expectedSources === LISTING_SOURCE_KEYS.length && exactSourceKeys && historyContractValid;
+    expectedSources === LISTING_SOURCE_KEYS.length && exactSourceKeys && historyContractValid && eventClassificationValid;
   const fresh = ageHours !== null && ageHours >= -0.1 && ageHours <= 36;
   const complete = contractValid && fresh && availableSourceTimestampsFresh && !historyTruncated &&
     availableSources === LISTING_SOURCE_KEYS.length && unavailableSources === 0;
@@ -280,6 +286,7 @@ export function validateListingAuditSnapshot(payload, now = Date.now()) {
     exactSourceKeys,
     availableSourceTimestampsFresh,
     historyContractValid,
+    eventClassificationValid,
     historyTruncated,
     historyStatusCoherent,
     historyRetentionDays,
@@ -316,6 +323,7 @@ async function probeListingAudit(baseUrl) {
       exactSourceKeys: validation.exactSourceKeys,
       availableSourceTimestampsFresh: validation.availableSourceTimestampsFresh,
       historyContractValid: validation.historyContractValid,
+      eventClassificationValid: validation.eventClassificationValid,
       historyTruncated: validation.historyTruncated,
       historyStatusCoherent: validation.historyStatusCoherent,
       historyRetentionDays: validation.historyRetentionDays,

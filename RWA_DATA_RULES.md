@@ -116,6 +116,8 @@ trade.xyz 当前专用 `xyz` DEX universe 有 5 个 `perpCategories` 空缺：`U
 
 场所页同时保留一层独立的场所产品分类。trade.xyz 页以当前 `xyz` DEX 的 exact `perpCategories` 为准展示筛选与行标签；例如官方 `xyz:UNITREE = stocks` 在该场所页显示为 Equity，而公司级 `ipo-registered` 生命周期仍由 registry 单独保留。当前 `xyz` DEX 没有 exact Pre-IPO 合约时，场所页隐藏空的 Pre-IPO 筛选，不能把其他 HIP-3 DEX（例如 `vntl:*`）的分类借给 `xyz:*`。
 
+上架事件也必须发布这两层口径：`venueCategory` 是该交易场所精确产品的官方类别，`category` 是经过 lifecycle registry 细化后的 canonical 资产类别，`lifecycleStatus` 单独说明 `public / pre-ipo / ipo-registered`。例如 `xyz:UNITREE` 的上架消息必须写“合约分类：Equity”，并另写“公司阶段：已获 IPO 注册、尚未开始公开交易”；不能把公司阶段冒充成 trade.xyz 的合约分类。下游 Push Bot 只能使用这些 Dashboard 字段，不得自行按名称或 ticker 推断。
+
 官方类型只允许精确归一化映射，例如 `PRE-IPO/PRE_IPO/PREIPO -> PREIPO`、`PRE-MARKET -> PREMARKET`。禁止用 `includes('PRE')` 判断，否则 `PREFERRED_STOCK` 等无关类型也可能被误判为 Pre-IPO。布尔字段也必须显式解析，字符串 `"false"` 不能按 JavaScript truthy 值处理。
 
 Registry 只纠正“已经由场所确认是 security”的产品；显式 `crypto/coin/token/meme` 类型永远先返回 Other/拒绝，不能因为 ticker 命中 `QNT` 等已上市公司 alias 而被 registry 反向放行。
