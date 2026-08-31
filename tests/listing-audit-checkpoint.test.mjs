@@ -171,6 +171,16 @@ test('durable checkpoint read validates checksum, bytes, schema, source set, and
   assert.match(calls[1].text, /is_not_catalog_writer/);
   assert.match(calls[2].text, /FROM publication\.listing_audit_checkpoint/);
 
+  const dateResult = await readListingAuditCheckpoint({
+    env:{ LISTING_DATABASE_URL:'postgresql://reader.test.invalid/database' },
+    runTransaction:transaction([[], [DEDICATED_READER_IDENTITY], [{
+      ...row,
+      observed_at:new Date(prepared.observedAt),
+    }]]),
+  });
+  assert.equal(dateResult.status, 'stored');
+  assert.equal(dateResult.observedAt, prepared.observedAt);
+
   const corrupt = await readListingAuditCheckpoint({
     env:{ LISTING_DATABASE_URL:'postgresql://reader.test.invalid/database' },
     runTransaction:transaction([[], [DEDICATED_READER_IDENTITY], [{ ...row, payload_sha256:'0'.repeat(64) }]]),

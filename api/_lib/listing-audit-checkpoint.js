@@ -44,6 +44,11 @@ function nonNegativeInteger(value) {
   return Number.isInteger(value) && value >= 0 ? value : null;
 }
 
+function timestampMilliseconds(value) {
+  if (value instanceof Date) return value.getTime();
+  return Date.parse(String(value || ''));
+}
+
 function validateCompactListingState(bundle, observedAtMs) {
   const state = bundle.state;
   const snapshot = bundle.snapshot;
@@ -120,8 +125,8 @@ export function resolveListingReadMode(env = process.env) {
 }
 
 export function prepareListingAuditCheckpoint(bundle, observedAt = bundle?.snapshot?.generatedAt) {
-  const observedAtMs = Date.parse(String(observedAt || ''));
-  const snapshotAtMs = Date.parse(String(bundle?.snapshot?.generatedAt || ''));
+  const observedAtMs = timestampMilliseconds(observedAt);
+  const snapshotAtMs = timestampMilliseconds(bundle?.snapshot?.generatedAt);
   if (bundle?.version !== LISTING_AUDIT_BUNDLE_VERSION || !bundle?.state || !bundle?.snapshot) {
     throw new TypeError('Listing Audit checkpoint requires a compact v2 bundle');
   }
