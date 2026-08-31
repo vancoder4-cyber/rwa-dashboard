@@ -5,6 +5,7 @@ import {
   catalogShadowRemediation,
   runCatalogShadowReadinessQueries,
 } from './_lib/catalog-shadow-readiness.js';
+import { readListingAuditCheckpoint } from './_lib/listing-audit-checkpoint.js';
 import { fetchJsonWithPolicy, setNoStore } from './_lib/upstream.js';
 
 export const config = { regions: ['iad1'], maxDuration: 60 };
@@ -57,6 +58,19 @@ function unavailableReport(error) {
   };
 }
 
+function checkpointReaderDiagnostic(result) {
+  const status = ['stored', 'empty', 'unavailable'].includes(result?.status)
+    ? result.status
+    : 'unavailable';
+  return {
+    status,
+    observedAt:status === 'stored' ? result?.observedAt || null : null,
+    checksum:status === 'stored' ? result?.checksum || null : null,
+    bytes:status === 'stored' && Number.isInteger(result?.bytes) ? result.bytes : null,
+    error:result?.error ? safeError(result.error) : null,
+  };
+}
+
 async function loadRuntimeSnapshot(baseUrl) {
   return fetchJsonWithPolicy(
     `${baseUrl}/api/listing-changes`,
@@ -69,6 +83,7 @@ export async function serveCatalogShadowReadiness(req, res, {
   env = process.env,
   runReadiness = runCatalogShadowReadinessQueries,
   loadSnapshot = loadRuntimeSnapshot,
+  readCheckpoint = readListingAuditCheckpoint,
 } = {}) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   setNoStore(res);
@@ -92,13 +107,23 @@ export async function serveCatalogShadowReadiness(req, res, {
     runtimeError = new Error(safeError(error));
   }
 
+  let durableCheckpointReader;
+  try {
+    durableCheckpointReader = checkpointReaderDiagnostic(await readCheckpoint({ env }));
+  } catch (error) {
+    durableCheckpointReader = checkpointReaderDiagnostic({ status:'unavailable', error });
+  }
+
   try {
     const report = await runReadiness({
       now:new Date().toISOString(),
       runtimeSnapshot,
       runtimeError,
     });
-    return res.status(report.status === 'pass' ? 200 : 503).json(report);
+    return res.status(report.status === 'pass' ? 200 : 503).json({
+      ...report,
+      durableCheckpointReader,
+    });
   } catch (error) {
     return res.status(503).json(unavailableReport(error));
   }
