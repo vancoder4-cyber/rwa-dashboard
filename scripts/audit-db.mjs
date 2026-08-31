@@ -12,6 +12,7 @@ const EXPECTED_ROLES = [
   'rwa_analytics_reader',
   'rwa_alert_dispatcher',
   'rwa_signal_history_writer',
+  'rwa_listing_audit_reader',
 ];
 
 function fingerprintConnection() {
@@ -48,6 +49,17 @@ const [ledger, extensions, roles, privileges, counts, latestCycle] = await Promi
       ,has_table_privilege('rwa_signal_history_writer', 'publication.signal_history_checkpoint', 'INSERT') AS history_insert
       ,has_table_privilege('rwa_signal_history_writer', 'publication.signal_history_checkpoint', 'UPDATE') AS history_update
       ,has_table_privilege('rwa_signal_history_writer', 'publication.signal_history_checkpoint', 'DELETE') AS history_delete
+      ,has_schema_privilege('rwa_listing_audit_reader', 'publication', 'USAGE') AS listing_reader_schema_usage
+      ,has_table_privilege('rwa_listing_audit_reader', 'publication.listing_audit_checkpoint', 'SELECT') AS listing_reader_select
+      ,has_table_privilege('rwa_listing_audit_reader', 'publication.listing_audit_checkpoint', 'INSERT') AS listing_reader_insert
+      ,has_table_privilege('rwa_listing_audit_reader', 'publication.listing_audit_checkpoint', 'UPDATE') AS listing_reader_update
+      ,has_table_privilege('rwa_listing_audit_reader', 'publication.listing_audit_checkpoint', 'DELETE') AS listing_reader_delete
+      ,has_table_privilege('rwa_listing_audit_reader', 'ingest.catalog_membership', 'SELECT') AS listing_reader_membership_select
+      ,has_schema_privilege('rwa_catalog_shadow_writer', 'publication', 'USAGE') AS listing_writer_schema_usage
+      ,has_table_privilege('rwa_catalog_shadow_writer', 'publication.listing_audit_checkpoint', 'SELECT') AS listing_writer_select
+      ,has_table_privilege('rwa_catalog_shadow_writer', 'publication.listing_audit_checkpoint', 'INSERT') AS listing_writer_insert
+      ,has_table_privilege('rwa_catalog_shadow_writer', 'publication.listing_audit_checkpoint', 'UPDATE') AS listing_writer_update
+      ,has_table_privilege('rwa_catalog_shadow_writer', 'publication.listing_audit_checkpoint', 'DELETE') AS listing_writer_delete
   `),
   sql.query(`
     SELECT
@@ -59,6 +71,7 @@ const [ledger, extensions, roles, privileges, counts, latestCycle] = await Promi
       (SELECT count(*)::int FROM ingest.catalog_membership) AS memberships,
       (SELECT count(*)::int FROM ingest.raw_artifact) AS artifacts,
       (SELECT count(*)::int FROM analytics.catalog_change_event) AS listing_events,
+      (SELECT count(*)::int FROM publication.listing_audit_checkpoint) AS listing_checkpoints,
       (SELECT count(*)::int FROM identity.review_case WHERE status = 'open') AS open_reviews
   `),
   sql.query(`
@@ -98,6 +111,15 @@ if (!privilege.reader_analytics_select || privilege.reader_identity_insert) fail
 if (!privilege.dispatcher_delivery_update || privilege.dispatcher_identity_insert) fail('alert dispatcher grants are invalid');
 if (!privilege.history_select || !privilege.history_insert || !privilege.history_update || privilege.history_delete) {
   fail('signal history writer grants are invalid');
+}
+if (!privilege.listing_reader_schema_usage || !privilege.listing_reader_select ||
+    privilege.listing_reader_insert || privilege.listing_reader_update || privilege.listing_reader_delete ||
+    privilege.listing_reader_membership_select) {
+  fail('listing checkpoint reader grants are invalid');
+}
+if (!privilege.listing_writer_schema_usage || !privilege.listing_writer_select ||
+    !privilege.listing_writer_insert || !privilege.listing_writer_update || privilege.listing_writer_delete) {
+  fail('listing checkpoint writer grants are invalid');
 }
 
 const result = {

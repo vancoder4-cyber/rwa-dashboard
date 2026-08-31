@@ -157,6 +157,7 @@ function normalizedRuntime(runtimeSnapshot, runtimeError) {
       sources: [],
       historyTruncated: null,
       publicationLease: null,
+      readPath: null,
       error: runtimeError ? String(runtimeError?.message || runtimeError) : 'Runtime Cache snapshot was not supplied',
     };
   }
@@ -178,6 +179,18 @@ function normalizedRuntime(runtimeSnapshot, runtimeError) {
           status:String(runtimeSnapshot.persistence.publicationLease.status || ''),
           enforced:optionalBoolean(runtimeSnapshot.persistence.publicationLease.enforced),
           ttlSeconds:nonNegativeInteger(runtimeSnapshot.persistence.publicationLease.ttlSeconds),
+        }
+      : null,
+    readPath: runtimeSnapshot?.persistence?.readPath &&
+      typeof runtimeSnapshot.persistence.readPath === 'object'
+      ? {
+          mode:String(runtimeSnapshot.persistence.readPath.mode || ''),
+          source:String(runtimeSnapshot.persistence.readPath.source || ''),
+          reconciliation:String(runtimeSnapshot.persistence.readPath.reconciliation || ''),
+          runtimeStatus:String(runtimeSnapshot.persistence.readPath.runtimeCache?.status || ''),
+          runtimeObservedAt:isoTimestamp(runtimeSnapshot.persistence.readPath.runtimeCache?.observedAt),
+          durableStatus:String(runtimeSnapshot.persistence.readPath.durableCheckpoint?.status || ''),
+          durableObservedAt:isoTimestamp(runtimeSnapshot.persistence.readPath.durableCheckpoint?.observedAt),
         }
       : null,
     error: null,
@@ -587,6 +600,25 @@ function runtimeComparison(runtime, latestCycle, sourceRows, membershipRows, sin
   }
   const reasons = [];
   if (!runtime.available) reasons.push(runtime.error || 'Runtime Cache snapshot unavailable');
+  if (!runtime.readPath) {
+    reasons.push('Public Listing Audit response does not expose its read source');
+  } else {
+    if (runtime.readPath.source !== 'runtime-cache' || runtime.readPath.runtimeStatus !== 'stored') {
+      reasons.push('Public Listing Audit response was not served from the stored Runtime Cache replica');
+    }
+    const runtimeOnly = runtime.readPath.mode === 'runtime-cache' &&
+      runtime.readPath.reconciliation === 'durable-not-requested' &&
+      runtime.readPath.durableStatus === 'not-requested';
+    const replicaMatch = ['dual-read', 'durable-fallback'].includes(runtime.readPath.mode) &&
+      runtime.readPath.reconciliation === 'match' && runtime.readPath.durableStatus === 'stored' &&
+      runtime.readPath.runtimeObservedAt === runtime.readPath.durableObservedAt;
+    if (!runtimeOnly && !replicaMatch) {
+      reasons.push('Public Listing Audit read path does not prove an allowed Runtime Cache replica state');
+    }
+    if (runtime.readPath.runtimeObservedAt !== runtime.generatedAt) {
+      reasons.push('Public Listing Audit Runtime Cache read timestamp differs from generatedAt');
+    }
+  }
   if (runtime.schemaVersion !== LISTING_AUDIT_SCHEMA_VERSION) reasons.push('Runtime Cache schema version is not the expected listing audit contract');
   if (runtime.historyTruncated) reasons.push('Runtime Cache listing history is truncated');
   if (runtime.utcDay !== latestCycle.utcDay) reasons.push('Runtime Cache and PostgreSQL latest UTC days differ');
