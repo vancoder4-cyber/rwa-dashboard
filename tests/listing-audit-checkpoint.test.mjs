@@ -21,6 +21,7 @@ import {
   selectListingAuditBundle,
 } from '../api/listing-changes.js';
 import {
+  probeListingAudit,
   validateListingAuditReadPath,
   validateListingAuditSnapshot,
 } from '../api/health.js';
@@ -319,6 +320,30 @@ test('Health requires a coherent configured read path and warns while the dispos
     requireReadPath:true,
     expectedReadMode:'durable-fallback',
   }).status, 'fail');
+});
+
+test('Health Listing probe bypasses stale CDN responses before validating the read path', async () => {
+  const previousFetch = globalThis.fetch;
+  let requestedUrl = null;
+  let requestedHeaders = null;
+  globalThis.fetch = async (url, options = {}) => {
+    requestedUrl = url;
+    requestedHeaders = options.headers;
+    return new Response(JSON.stringify({ error:'synthetic response' }), {
+      status:503,
+      headers:{ 'content-type':'application/json' },
+    });
+  };
+  try {
+    const result = await probeListingAudit('https://preview.example.invalid');
+    assert.equal(result.status, 'fail');
+    assert.equal(requestedUrl, 'https://preview.example.invalid/api/listing-changes');
+    assert.equal(requestedHeaders.Accept, 'application/json');
+    assert.equal(requestedHeaders['Cache-Control'], 'no-cache');
+    assert.equal(requestedHeaders.Pragma, 'no-cache');
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
 });
 
 test('required checkpoint failure blocks Runtime Cache publication while shadow failure remains diagnostic', async () => {

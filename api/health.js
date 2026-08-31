@@ -370,12 +370,23 @@ export function validateListingAuditSnapshot(payload, now = Date.now(), options 
   };
 }
 
-async function probeListingAudit(baseUrl) {
+export async function probeListingAudit(baseUrl) {
   const startedAt = Date.now();
   try {
     const payload = await fetchJsonWithPolicy(
       `${baseUrl}/api/listing-changes`,
-      {},
+      {
+        headers:{
+          Accept:'application/json',
+          // Health must inspect the latest Runtime Cache publication, not a
+          // previous CDN response still inside stale-while-revalidate. This is
+          // especially important immediately after a controlled Cron recovery
+          // or read-mode cutover, when the cached payload can describe the old
+          // persistence path for up to fifteen minutes.
+          'Cache-Control':'no-cache',
+          Pragma:'no-cache',
+        },
+      },
       { timeoutMs: 8_000, retries: 0 },
     );
     const validation = validateListingAuditSnapshot(payload, Date.now(), {
