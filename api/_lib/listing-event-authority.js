@@ -202,9 +202,24 @@ export function buildListingEventAuthorityQueries(sql) {
          has_table_privilege(current_user, 'publication.listing_change_event_v1', 'SELECT') AS is_event_reader,
          has_table_privilege(current_user, 'publication.listing_audit_run_v1', 'SELECT') AS is_run_reader,
          has_table_privilege(current_user, 'publication.listing_audit_pending_review_v1', 'SELECT') AS is_review_reader,
-         NOT has_table_privilege(session_user, 'analytics.catalog_change_event', 'SELECT') AS cannot_read_raw_events,
-         NOT has_table_privilege(session_user, 'ingest.catalog_membership', 'SELECT') AS cannot_read_membership,
-         NOT has_table_privilege(session_user, 'identity.evidence', 'SELECT') AS cannot_read_identity_evidence`,
+         NOT has_table_privilege(session_user, (
+           SELECT relation.oid
+           FROM pg_catalog.pg_class AS relation
+           JOIN pg_catalog.pg_namespace AS schema ON schema.oid = relation.relnamespace
+           WHERE schema.nspname = 'analytics' AND relation.relname = 'catalog_change_event'
+         ), 'SELECT') AS cannot_read_raw_events,
+         NOT has_table_privilege(session_user, (
+           SELECT relation.oid
+           FROM pg_catalog.pg_class AS relation
+           JOIN pg_catalog.pg_namespace AS schema ON schema.oid = relation.relnamespace
+           WHERE schema.nspname = 'ingest' AND relation.relname = 'catalog_membership'
+         ), 'SELECT') AS cannot_read_membership,
+         NOT has_table_privilege(session_user, (
+           SELECT relation.oid
+           FROM pg_catalog.pg_class AS relation
+           JOIN pg_catalog.pg_namespace AS schema ON schema.oid = relation.relnamespace
+           WHERE schema.nspname = 'identity' AND relation.relname = 'evidence'
+         ), 'SELECT') AS cannot_read_identity_evidence`,
     ),
     sql.query(
       `WITH selected_cycle AS (

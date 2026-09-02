@@ -181,6 +181,12 @@ test('authoritative reader uses only safe publication views under the dedicated 
   assert.equal(result.snapshot.events.length, 1);
   assert.equal(result.readPath.source, 'postgres-events');
   assert.match(calls[0].text, /^SET LOCAL ROLE rwa_listing_audit_reader$/);
+  assert.match(calls[1].text, /FROM pg_catalog\.pg_class AS relation/);
+  assert.match(calls[1].text, /JOIN pg_catalog\.pg_namespace AS schema/);
+  assert.doesNotMatch(
+    calls[1].text,
+    /has_table_privilege\(session_user,\s*'(?:analytics|ingest|identity)\./,
+  );
   assert.match(calls[2].text, /publication\.listing_audit_run_v1/);
   assert.match(calls[3].text, /publication\.listing_change_event_v1/);
   assert.match(calls[4].text, /publication\.listing_audit_pending_review_v1/);
