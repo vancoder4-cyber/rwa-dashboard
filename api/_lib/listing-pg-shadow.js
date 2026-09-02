@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   LISTING_SOURCE_KEYS,
   normalizeListingObservation,
+  REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS,
 } from './listing-audit.js';
 
 export const LISTING_PG_JOB_NAME = 'rwa-listing-audit';
@@ -238,6 +239,9 @@ function buildSourceRun(sourceKey, rawObservation, summary, mergedState, observe
     }
     const reviewRequired = listing.identityStatus !== 'verified';
     const assetKey = `${category}:${listing.canonicalSymbol}`;
+    // Keep the cross-venue asset-version identity stable even when venues use
+    // different display-name spellings. The exact event snapshots its own
+    // admitted venue name in evidence below.
     const displayName = listing.canonicalSymbol;
     const assetFingerprint = sha256(JSON.stringify([
       assetKey,
@@ -503,10 +507,19 @@ export function buildListingAuditPgBatch({ observations, merged, observedAt, env
           listingKey: normalized(event?.listingKey) || null,
           changeType: event.changeType,
           canonicalUnderlying: normalized(event?.canonicalSymbol).toUpperCase() || null,
+          name: normalized(event?.name) || null,
           category: normalized(event?.category).toLowerCase() || null,
+          venueCategory: normalized(event?.venueCategory).toLowerCase() || null,
+          lifecycleStatus: normalized(event?.lifecycleStatus).toLowerCase() || null,
           identityStatus: event.identityStatus,
+          inclusionStatus: event?.inclusionStatus || (eventType === 'delisted' ? 'removed' : 'eligible'),
           identityEvidence: normalized(event?.identityEvidence) || null,
+          observedAt: generatedAt,
+          officialListedAt: event?.officialListedAt || null,
+          timeBasis: event?.officialListedAt ? 'official' : 'first_observed',
         },
+        officialListedAt:event?.officialListedAt || null,
+        timeBasis:event?.officialListedAt ? 'official' : 'first_observed',
       }];
     })
     .sort((left, right) =>
@@ -683,6 +696,8 @@ function eventRows(batch) {
     event_type: row.eventType,
     effective_day: row.effectiveDay,
     observed_at: row.observedAt,
+    official_listed_at: row.officialListedAt,
+    time_basis: row.timeBasis,
     evidence: row.evidence,
   }));
 }
@@ -838,23 +853,17 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
            OR current_asset_version.canonical_underlying <> incoming.canonical_underlying
          )
          AND NOT (
-           current_asset_version.canonical_underlying = incoming.canonical_underlying
-           AND current_asset_version.category IN ('equity', 'pre-ipo')
-           AND incoming.category IN ('equity', 'pre-ipo')
-           AND current_asset_version.category <> incoming.category
+           incoming.canonical_underlying = ANY($2::text[])
+           AND current_asset_version.canonical_underlying = incoming.canonical_underlying
+           AND current_asset_version.category = 'pre-ipo'
+           AND incoming.category = 'equity'
            AND current_asset.asset_key = current_asset_version.category || ':' || current_asset_version.canonical_underlying
            AND incoming.asset_key = incoming.category || ':' || incoming.canonical_underlying
            AND incoming.venue_category IN ('equity', 'pre-ipo')
-           AND (
-             (incoming.category = 'equity' AND incoming.lifecycle_status = 'public')
-             OR (
-               incoming.category = 'pre-ipo'
-               AND incoming.lifecycle_status IN ('pre-ipo', 'ipo-registered')
-             )
-           )
+           AND incoming.lifecycle_status = 'public'
          )
        ) THEN ingest.reject_verified_catalog_identity_conflict() ELSE 1 END AS verified_identity_guard`,
-      [json(memberships)],
+      [json(memberships), REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS],
     ),
     sql.query(
       `INSERT INTO ingest.collection_cycle
@@ -1296,18 +1305,19 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
       [...common, batch.observedAt, json(memberships)],
     ),
     sql.query(
-      `INSERT INTO analytics.catalog_change_event
+       `INSERT INTO analytics.catalog_change_event AS stored_event
          (source_id, instrument_version_id, detection_cycle_id,
           previous_source_run_id, current_source_run_id, event_type, effective_day, baseline,
-          status, observed_at, evidence)
+          status, observed_at, official_listed_at, time_basis, evidence)
        SELECT source.source_id, instrument_version.instrument_version_id,
          cycle.cycle_id, previous_source_run.source_run_id,
          source_run.source_run_id, incoming.event_type,
          incoming.effective_day, false, 'confirmed', incoming.observed_at,
-         incoming.evidence
+         incoming.official_listed_at, incoming.time_basis, incoming.evidence
        FROM jsonb_to_recordset($5::jsonb) AS incoming(
          source_key text, normalized_venue_symbol text, event_type text,
-         effective_day date, observed_at timestamptz, evidence jsonb
+         effective_day date, observed_at timestamptz, official_listed_at timestamptz,
+         time_basis text, evidence jsonb
        )
        JOIN identity.source AS source ON source.source_key = incoming.source_key
        JOIN identity.instrument_version AS instrument_version
@@ -1336,7 +1346,26 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
          LIMIT 1
        ) AS previous_source_run ON true
        ON CONFLICT (source_id, instrument_version_id, event_type, effective_day)
-       DO NOTHING`,
+       DO UPDATE SET
+         official_listed_at = COALESCE(
+           stored_event.official_listed_at,
+           EXCLUDED.official_listed_at
+         ),
+         time_basis = CASE
+           WHEN stored_event.official_listed_at IS NOT NULL
+             OR EXCLUDED.official_listed_at IS NOT NULL
+           THEN 'official'
+           ELSE 'first_observed'
+         END,
+         evidence = CASE
+           WHEN stored_event.official_listed_at IS NULL
+             AND EXCLUDED.official_listed_at IS NOT NULL
+           THEN stored_event.evidence || jsonb_build_object(
+             'officialListedAt', EXCLUDED.official_listed_at,
+             'timeBasis', 'official'
+           )
+           ELSE stored_event.evidence
+         END`,
       [...common, json(events)],
     ),
     sql.query(
@@ -1521,24 +1550,18 @@ export async function findListingAuditVerifiedIdentityConflicts(batch, { runTran
          OR current_asset_version.canonical_underlying <> incoming.canonical_underlying
        )
        AND NOT (
-         current_asset_version.canonical_underlying = incoming.canonical_underlying
-         AND current_asset_version.category IN ('equity', 'pre-ipo')
-         AND incoming.category IN ('equity', 'pre-ipo')
-         AND current_asset_version.category <> incoming.category
+         incoming.canonical_underlying = ANY($2::text[])
+         AND current_asset_version.canonical_underlying = incoming.canonical_underlying
+         AND current_asset_version.category = 'pre-ipo'
+         AND incoming.category = 'equity'
          AND current_asset.asset_key = current_asset_version.category || ':' || current_asset_version.canonical_underlying
          AND incoming.asset_key = incoming.category || ':' || incoming.canonical_underlying
          AND incoming.venue_category IN ('equity', 'pre-ipo')
-         AND (
-           (incoming.category = 'equity' AND incoming.lifecycle_status = 'public')
-           OR (
-             incoming.category = 'pre-ipo'
-             AND incoming.lifecycle_status IN ('pre-ipo', 'ipo-registered')
-           )
-         )
+         AND incoming.lifecycle_status = 'public'
        )
        ORDER BY source.source_key COLLATE "C", instrument.official_product_key COLLATE "C"
        LIMIT 20`,
-      [json(memberships)],
+      [json(memberships), REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS],
     ),
   ], { isolationLevel:'Serializable', readOnly:true });
   const rows = Array.isArray(results?.[2]) ? results[2] : [];

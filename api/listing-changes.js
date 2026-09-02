@@ -29,6 +29,7 @@ import {
   setNoStore,
   setPublicCache,
 } from './_lib/upstream.js';
+import { readListingEventAuthority } from './_lib/listing-event-authority.js';
 
 export const config = { regions: ['iad1'], maxDuration: 120 };
 
@@ -93,6 +94,7 @@ export function compactListingAuditState(state) {
     row?.removedAt || null,
     row?.venueCategory || row?.category || null,
     row?.lifecycleStatus || null,
+    row?.officialListedAt || null,
   ]]));
   const events = (Array.isArray(state?.events) ? state.events : []).map(event => [
     event?.eventId || null,
@@ -107,6 +109,8 @@ export function compactListingAuditState(state) {
     event?.inclusionStatus === 'review-required' ? 'r' : event?.inclusionStatus === 'removed' ? 'm' : 'e',
     event?.venueCategory || event?.category || null,
     event?.lifecycleStatus || null,
+    event?.officialListedAt || null,
+    event?.timeBasis || (event?.officialListedAt ? 'official' : 'first_observed'),
   ]);
   return {
     ...state,
@@ -134,6 +138,7 @@ export function hydrateListingAuditState(state) {
         category:compact[1],
         venueCategory:compact[9] || compact[1],
         lifecycleStatus:compact[10] || null,
+        officialListedAt:compact[11] || null,
         name:compact[2],
         identityStatus,
         identityEvidence:compact[4],
@@ -152,6 +157,7 @@ export function hydrateListingAuditState(state) {
       const [
         eventId, listingKey, changeCode, detectedAt, canonicalSymbol, category, name,
         identityCode, identityEvidence, inclusionCode, venueCategory, lifecycleStatus,
+        officialListedAt, timeBasis,
       ] = compact;
       const { market, venue, venueSymbol } = listingKeyParts(listingKey);
       return [{
@@ -159,6 +165,7 @@ export function hydrateListingAuditState(state) {
         listingKey,
         changeType:changeCode === 'r' ? 'relisted' : changeCode === 'd' ? 'delisted' : 'new',
         detectedAt,
+        observedAt:detectedAt,
         market,
         venue,
         venueSymbol,
@@ -166,7 +173,9 @@ export function hydrateListingAuditState(state) {
         category,
         venueCategory:venueCategory || category,
         lifecycleStatus:lifecycleStatus || null,
-        name,
+        officialListedAt:officialListedAt || null,
+        timeBasis:timeBasis || (officialListedAt ? 'official' : 'first_observed'),
+        name:name || canonicalSymbol,
         identityStatus:identityCode === 'r' ? 'review-required' : 'verified',
         identityEvidence,
         inclusionStatus:inclusionCode === 'r' ? 'review-required' : inclusionCode === 'm' ? 'removed' : 'eligible',
@@ -305,7 +314,11 @@ async function loadListingAuditBundle({
   env,
   readCheckpoint = readListingAuditCheckpoint,
 }) {
-  const mode = resolveListingReadMode(env);
+  const configuredMode = resolveListingReadMode(env);
+  // The public PostgreSQL event reader is not a writer baseline. While that
+  // mode is active, the writer continues from the exact durable comparison
+  // checkpoint so cache eviction cannot recreate an empty baseline.
+  const mode = configuredMode === 'postgres-authoritative' ? 'durable-fallback' : configuredMode;
   if (mode === 'runtime-cache') {
     const bundle = await cache.get(BUNDLE_KEY);
     const runtime = runtimeBundleResult(bundle);
@@ -325,8 +338,13 @@ async function loadListingAuditBundle({
 }
 
 export async function readListingChangesSnapshot(dependencies = {}) {
-  const cache = dependencies.cache || getCache({ namespace: CACHE_NAMESPACE });
   const env = dependencies.env || process.env;
+  const mode = resolveListingReadMode(env);
+  if (mode === 'postgres-authoritative') {
+    const authority = await (dependencies.readEventAuthority || readListingEventAuthority)({ env });
+    return responseSnapshot(authority.snapshot, authority.readPath);
+  }
+  const cache = dependencies.cache || getCache({ namespace: CACHE_NAMESPACE });
   const selected = await loadListingAuditBundle({
     cache,
     env,

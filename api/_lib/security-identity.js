@@ -39,21 +39,21 @@ const OFFICIAL_TYPE_CATEGORIES = Object.freeze({
 const OFFICIAL_NON_RWA_TYPES = new Set(['CRYPTO', 'COIN', 'TOKEN', 'MEME', 'MEMECOIN']);
 
 export const SECURITY_LISTING_REGISTRY = Object.freeze({
-  SPCX: Object.freeze({ category:'equity', status:'public', aliases:Object.freeze(['SPACEX', 'SPCXB', 'SPCXON', 'SPCXX']) }),
-  CBRS: Object.freeze({ category:'equity', status:'public', aliases:Object.freeze(['CBRSB', 'CBRSON', 'CBRSX', 'SCBRS']) }),
-  MINIMAX: Object.freeze({ category:'equity', status:'public', aliases:Object.freeze([]) }),
-  ZHIPU: Object.freeze({ category:'equity', status:'public', aliases:Object.freeze([]) }),
-  CXMT: Object.freeze({ category:'equity', status:'public', aliases:Object.freeze([]) }),
-  QNT: Object.freeze({ category:'equity', status:'public', aliases:Object.freeze(['QNTX', 'QNTSTOCK', 'QNTB']) }),
-  OPENAI: Object.freeze({ category:'pre-ipo', status:'pre-ipo', aliases:Object.freeze([]) }),
-  ANTHROPIC: Object.freeze({ category:'pre-ipo', status:'pre-ipo', aliases:Object.freeze([]) }),
-  SHEIN: Object.freeze({ category:'pre-ipo', status:'pre-ipo', aliases:Object.freeze([]) }),
-  ANDURIL: Object.freeze({ category:'pre-ipo', status:'pre-ipo', aliases:Object.freeze([]) }),
-  KALSHI: Object.freeze({ category:'pre-ipo', status:'pre-ipo', aliases:Object.freeze([]) }),
-  KIMI: Object.freeze({ category:'pre-ipo', status:'pre-ipo', aliases:Object.freeze([]) }),
-  NEURALINK: Object.freeze({ category:'pre-ipo', status:'pre-ipo', aliases:Object.freeze([]) }),
-  POLYMARKET: Object.freeze({ category:'pre-ipo', status:'pre-ipo', aliases:Object.freeze([]) }),
-  UNITREE: Object.freeze({ category:'pre-ipo', status:'ipo-registered', aliases:Object.freeze([]) }),
+  SPCX: Object.freeze({ category:'equity', status:'public', name:'SpaceX', listedOn:'2026-06-12', aliases:Object.freeze(['SPACEX', 'SPCXB', 'SPCXON', 'SPCXX']) }),
+  CBRS: Object.freeze({ category:'equity', status:'public', name:'Cerebras Systems', listedOn:'2026-05-14', aliases:Object.freeze(['CBRSB', 'CBRSON', 'CBRSX', 'SCBRS']) }),
+  MINIMAX: Object.freeze({ category:'equity', status:'public', name:'MiniMax Group', listedOn:'2026-01-09', aliases:Object.freeze([]) }),
+  ZHIPU: Object.freeze({ category:'equity', status:'public', name:'Z.AI (Zhipu AI)', listedOn:'2026-01-08', aliases:Object.freeze([]) }),
+  CXMT: Object.freeze({ category:'equity', status:'public', name:'ChangXin Memory Technologies', listedOn:'2026-07-27', aliases:Object.freeze([]) }),
+  QNT: Object.freeze({ category:'equity', status:'public', name:'Quantinuum Inc.', listedOn:'2026-06-04', aliases:Object.freeze(['QNTX', 'QNTSTOCK', 'QNTB']) }),
+  OPENAI: Object.freeze({ category:'pre-ipo', status:'pre-ipo', name:'OpenAI (Pre-IPO)', listedOn:null, aliases:Object.freeze([]) }),
+  ANTHROPIC: Object.freeze({ category:'pre-ipo', status:'pre-ipo', name:'Anthropic (Pre-IPO)', listedOn:null, aliases:Object.freeze([]) }),
+  SHEIN: Object.freeze({ category:'pre-ipo', status:'pre-ipo', name:'SHEIN (Pre-IPO)', listedOn:null, aliases:Object.freeze([]) }),
+  ANDURIL: Object.freeze({ category:'pre-ipo', status:'pre-ipo', name:'Anduril Industries (Pre-IPO)', listedOn:null, aliases:Object.freeze([]) }),
+  KALSHI: Object.freeze({ category:'pre-ipo', status:'pre-ipo', name:'Kalshi (Pre-IPO)', listedOn:null, aliases:Object.freeze([]) }),
+  KIMI: Object.freeze({ category:'pre-ipo', status:'pre-ipo', name:'Moonshot AI / Kimi (Pre-IPO)', listedOn:null, aliases:Object.freeze([]) }),
+  NEURALINK: Object.freeze({ category:'pre-ipo', status:'pre-ipo', name:'Neuralink (Pre-IPO)', listedOn:null, aliases:Object.freeze([]) }),
+  POLYMARKET: Object.freeze({ category:'pre-ipo', status:'pre-ipo', name:'Polymarket (Pre-IPO)', listedOn:null, aliases:Object.freeze([]) }),
+  UNITREE: Object.freeze({ category:'equity', status:'public', name:'Unitree Robotics', listedOn:'2026-08-19', aliases:Object.freeze([]) }),
 });
 
 const SECURITY_ALIAS_MAP = Object.freeze(Object.fromEntries(
@@ -158,6 +158,12 @@ export function securityLifecycleStatus(symbol, category) {
   if (!['equity', 'pre-ipo'].includes(resolvedCategory)) return null;
   const canonical = SECURITY_ALIAS_MAP[raw] || raw;
   return SECURITY_LISTING_REGISTRY[canonical]?.status || null;
+}
+
+export function securityDisplayName(symbol) {
+  const raw = String(symbol || '').trim().toUpperCase();
+  const canonical = SECURITY_ALIAS_MAP[raw] || raw;
+  return SECURITY_LISTING_REGISTRY[canonical]?.name || null;
 }
 
 function normalizedCategory(value) {

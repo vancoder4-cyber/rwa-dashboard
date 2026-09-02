@@ -22,7 +22,7 @@ export const LISTING_AUDIT_KNOWN_ENCODING = 'listing-row-array/v1';
 export const LISTING_AUDIT_EVENTS_ENCODING = 'listing-event-array/v1';
 
 const CHECKPOINT_WRITE_MODES = new Set(['off', 'shadow', 'required']);
-const READ_MODES = new Set(['runtime-cache', 'dual-read', 'durable-fallback']);
+const READ_MODES = new Set(['runtime-cache', 'dual-read', 'durable-fallback', 'postgres-authoritative']);
 
 function checksum(value) {
   return createHash('sha256').update(value).digest('hex');
@@ -119,7 +119,7 @@ export function resolveListingCheckpointWriteMode(env = process.env) {
 export function resolveListingReadMode(env = process.env) {
   const value = String(env?.LISTING_READ_MODE || 'runtime-cache').trim().toLowerCase();
   if (!READ_MODES.has(value)) {
-    throw new TypeError('LISTING_READ_MODE must be runtime-cache, dual-read, or durable-fallback');
+    throw new TypeError('LISTING_READ_MODE must be runtime-cache, dual-read, durable-fallback, or postgres-authoritative');
   }
   return value;
 }

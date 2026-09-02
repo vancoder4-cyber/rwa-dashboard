@@ -48,13 +48,14 @@ test('migration files are ordered, immutable-checksummed, and parse into stateme
     '0003_phase1_catalog_retry_replace.sql',
     '0004_signal_history_checkpoint.sql',
     '0005_listing_audit_checkpoint.sql',
+    '0006_listing_event_authority.sql',
   ]);
-  assert.deepEqual(migrations.map(row => row.version), ['0001', '0002', '0003', '0004', '0005']);
+  assert.deepEqual(migrations.map(row => row.version), ['0001', '0002', '0003', '0004', '0005', '0006']);
   for (const migration of migrations) {
     assert.match(migration.filename, MIGRATION_FILE_PATTERN);
     assert.match(migration.checksum, /^[0-9a-f]{64}$/);
     assert.equal(migration.checksum, migrationChecksum(migration.sql));
-    const minimumStatements = ['0003', '0004', '0005'].includes(migration.version) ? 3 : 11;
+    const minimumStatements = ['0003', '0004', '0005', '0006'].includes(migration.version) ? 3 : 11;
     assert.ok(migration.statements.length >= minimumStatements);
     assert.ok(migration.statements.every(statement => statement.trim().length > 0));
   }
@@ -76,6 +77,21 @@ test('SQL splitter preserves comments, quoted semicolons, and dollar-quoted role
   assert.match(statements[1], /PERFORM 'inside;block';/);
   assert.match(statements[2], /SELECT 1/);
   assert.throws(() => splitSqlStatements("SELECT 'unterminated"), /unterminated/);
+});
+
+test('listing event authority reuses the fact table and exposes only safe read-only views', async () => {
+  const sql = await readFile(path.join(MIGRATION_DIRECTORY, '0006_listing_event_authority.sql'), 'utf8');
+  assert.match(sql, /ALTER TABLE analytics\.catalog_change_event/);
+  assert.doesNotMatch(sql, /CREATE TABLE IF NOT EXISTS analytics\..*listing/i,
+    'the migration must not create a second listing event table');
+  assert.match(sql, /CREATE OR REPLACE VIEW publication\.listing_change_event_v1/);
+  assert.match(sql, /CREATE OR REPLACE VIEW publication\.listing_audit_run_v1/);
+  assert.match(sql, /CREATE OR REPLACE VIEW publication\.listing_audit_pending_review_v1/);
+  assert.match(sql, /GRANT SELECT ON[\s\S]*publication\.listing_change_event_v1[\s\S]*TO rwa_listing_audit_reader/);
+  assert.match(sql, /REVOKE ALL ON analytics\.catalog_change_event FROM rwa_listing_audit_reader/);
+  assert.match(sql, /REVOKE ALL ON identity\.evidence FROM rwa_listing_audit_reader/);
+  assert.match(sql, /Raw event evidence is intentionally excluded/);
+  assert.doesNotMatch(sql, /GRANT SELECT ON analytics\.catalog_change_event TO rwa_listing_audit_reader/);
 });
 
 test('Phase 0 schema enforces exact SCD2 identity and idempotent ingestion lineage', async () => {
@@ -364,6 +380,12 @@ test('database audit verifies Listing checkpoint roles without granting identity
   assert.match(audit, /listing_reader_schema_usage/);
   assert.match(audit, /listing_reader_select/);
   assert.match(audit, /listing_reader_membership_select/);
+  assert.match(audit, /listing_reader_raw_run_select/);
+  assert.match(audit, /listing_reader_identity_evidence_select/);
+  assert.match(audit, /listing_reader_raw_event_select/);
+  assert.match(audit, /listing_reader_event_view_select/);
+  assert.match(audit, /listing_reader_run_view_select/);
+  assert.match(audit, /listing_reader_review_view_select/);
   assert.match(audit, /listing_writer_schema_usage/);
   assert.match(audit, /listing_writer_update/);
   assert.match(audit, /listing_reader_delete/);

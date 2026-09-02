@@ -55,6 +55,12 @@ const [ledger, extensions, roles, privileges, counts, latestCycle] = await Promi
       ,has_table_privilege('rwa_listing_audit_reader', 'publication.listing_audit_checkpoint', 'UPDATE') AS listing_reader_update
       ,has_table_privilege('rwa_listing_audit_reader', 'publication.listing_audit_checkpoint', 'DELETE') AS listing_reader_delete
       ,has_table_privilege('rwa_listing_audit_reader', 'ingest.catalog_membership', 'SELECT') AS listing_reader_membership_select
+      ,has_table_privilege('rwa_listing_audit_reader', 'ingest.source_run', 'SELECT') AS listing_reader_raw_run_select
+      ,has_table_privilege('rwa_listing_audit_reader', 'identity.evidence', 'SELECT') AS listing_reader_identity_evidence_select
+      ,has_table_privilege('rwa_listing_audit_reader', 'analytics.catalog_change_event', 'SELECT') AS listing_reader_raw_event_select
+      ,has_table_privilege('rwa_listing_audit_reader', 'publication.listing_change_event_v1', 'SELECT') AS listing_reader_event_view_select
+      ,has_table_privilege('rwa_listing_audit_reader', 'publication.listing_audit_run_v1', 'SELECT') AS listing_reader_run_view_select
+      ,has_table_privilege('rwa_listing_audit_reader', 'publication.listing_audit_pending_review_v1', 'SELECT') AS listing_reader_review_view_select
       ,has_schema_privilege('rwa_catalog_shadow_writer', 'publication', 'USAGE') AS listing_writer_schema_usage
       ,has_table_privilege('rwa_catalog_shadow_writer', 'publication.listing_audit_checkpoint', 'SELECT') AS listing_writer_select
       ,has_table_privilege('rwa_catalog_shadow_writer', 'publication.listing_audit_checkpoint', 'INSERT') AS listing_writer_insert
@@ -114,8 +120,11 @@ if (!privilege.history_select || !privilege.history_insert || !privilege.history
 }
 if (!privilege.listing_reader_schema_usage || !privilege.listing_reader_select ||
     privilege.listing_reader_insert || privilege.listing_reader_update || privilege.listing_reader_delete ||
-    privilege.listing_reader_membership_select) {
-  fail('listing checkpoint reader grants are invalid');
+    privilege.listing_reader_membership_select || privilege.listing_reader_raw_run_select ||
+    privilege.listing_reader_identity_evidence_select || privilege.listing_reader_raw_event_select ||
+    !privilege.listing_reader_event_view_select || !privilege.listing_reader_run_view_select ||
+    !privilege.listing_reader_review_view_select) {
+  fail('listing event/checkpoint reader grants are invalid');
 }
 if (!privilege.listing_writer_schema_usage || !privilege.listing_writer_select ||
     !privilege.listing_writer_insert || !privilege.listing_writer_update || privilege.listing_writer_delete) {

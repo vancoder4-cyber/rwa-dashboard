@@ -19,6 +19,19 @@ export const LISTING_SOURCE_KEYS = Object.freeze([
   'spot:binance',
   'spot:okx',
 ]);
+// Dated, officially reviewed company-lifecycle corrections. Only these
+// symbols may move one way from an earlier Pre-IPO identity to a confirmed
+// public Equity without entering the generic identity-drift quarantine. An
+// unchanged exact venue product still cannot create a listing event.
+export const REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS = Object.freeze([
+  'SPCX',
+  'CBRS',
+  'MINIMAX',
+  'ZHIPU',
+  'CXMT',
+  'QNT',
+  'UNITREE',
+]);
 
 const MARKETS = new Set(['perp', 'spot']);
 const VENUES = new Set(['tradexyz', 'bitget', 'gate', 'kraken', 'binance', 'okx']);
@@ -57,6 +70,7 @@ export function normalizeListingObservation(input) {
   const venueCategory = rawVenueCategory || category;
   const rawLifecycleStatus = normalized(input?.lifecycleStatus).toLowerCase();
   const lifecycleStatus = rawLifecycleStatus || null;
+  const officialListedAt = isoTimestamp(input?.officialListedAt);
   const identityStatus = normalized(input?.identityStatus || 'verified').toLowerCase();
   if (!MARKETS.has(market) || !VENUES.has(venue)) return null;
   if (!LISTING_KEY_PATTERN.test(venueSymbol) || !CANONICAL_PATTERN.test(canonicalSymbol)) return null;
@@ -77,6 +91,7 @@ export function normalizeListingObservation(input) {
     category,
     venueCategory,
     lifecycleStatus,
+    officialListedAt,
     name: normalized(input?.name) || null,
     identityStatus,
     identityEvidence: normalized(input?.identityEvidence) || null,
@@ -136,6 +151,7 @@ function eventFromListing(changeType, listing, detectedAt, previous = null) {
     listingKey: row.key,
     changeType,
     detectedAt,
+    observedAt:detectedAt,
     market: row.market,
     venue: row.venue,
     venueSymbol: row.venueSymbol,
@@ -143,7 +159,9 @@ function eventFromListing(changeType, listing, detectedAt, previous = null) {
     category: row.category,
     venueCategory: row.venueCategory,
     lifecycleStatus: row.lifecycleStatus,
-    name: row.name || null,
+    officialListedAt: row.officialListedAt || null,
+    timeBasis: row.officialListedAt ? 'official' : 'first_observed',
+    name: row.name || row.canonicalSymbol,
     identityStatus: row.identityStatus,
     identityEvidence: row.identityEvidence || null,
     inclusionStatus: active ? row.inclusionStatus : 'removed',
@@ -199,6 +217,18 @@ function retainedKnown(known, nowMs) {
 
 function identityFingerprint(row) {
   return `${normalized(row?.canonicalSymbol)}|${normalized(row?.category)}`;
+}
+
+export function isReviewedLifecycleCategoryCorrection(previousRow, currentRow) {
+  const canonicalSymbol = normalized(currentRow?.canonicalSymbol).toUpperCase();
+  const previousCategory = normalized(previousRow?.category).toLowerCase();
+  const currentCategory = normalized(currentRow?.category).toLowerCase();
+  const currentLifecycle = normalized(currentRow?.lifecycleStatus).toLowerCase();
+  return REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS.includes(canonicalSymbol) &&
+    normalized(previousRow?.canonicalSymbol).toUpperCase() === canonicalSymbol &&
+    previousCategory === 'pre-ipo' && currentCategory === 'equity' &&
+    ['equity', 'pre-ipo'].includes(normalized(currentRow?.venueCategory).toLowerCase()) &&
+    currentLifecycle === 'public';
 }
 
 function dailyEventTimestamp(value) {
@@ -272,7 +302,8 @@ export function mergeListingAudit(previousState, rawObservations, now = new Date
     const activeIdentityDrift = warming ? [] : currentRows.filter(row => {
       const previousRow = previousByKey.get(row.key);
       return previousRow && (
-        identityFingerprint(previousRow) !== identityFingerprint(row) ||
+        (identityFingerprint(previousRow) !== identityFingerprint(row) &&
+          !isReviewedLifecycleCategoryCorrection(previousRow, row)) ||
         (previousRow.identityStatus === 'verified' && row.identityStatus !== 'verified')
       );
     });
@@ -281,7 +312,8 @@ export function mergeListingAudit(previousState, rawObservations, now = new Date
     const reusedIdentityDrift = warming ? [] : observedAddedRows.filter(row => {
       const known = previous.known?.[row.key];
       return known?.everSeen && known.active === false && (
-        identityFingerprint(known) !== identityFingerprint(row) ||
+        (identityFingerprint(known) !== identityFingerprint(row) &&
+          !isReviewedLifecycleCategoryCorrection(known, row)) ||
         (known.identityStatus === 'verified' && row.identityStatus !== 'verified')
       );
     });
@@ -344,6 +376,7 @@ export function mergeListingAudit(previousState, rawObservations, now = new Date
       const changeType = known?.everSeen ? 'relisted' : 'new';
       const event = eventFromListing(changeType, listing, eventBucket);
       event.detectedAt = nowIso;
+      event.observedAt = nowIso;
       newEvents.push(event);
       next.known[listing.key] = {
         ...listing,
@@ -357,6 +390,7 @@ export function mergeListingAudit(previousState, rawObservations, now = new Date
       const known = next.known[listing.key] || listing;
       const event = eventFromListing('delisted', null, eventBucket, known);
       event.detectedAt = nowIso;
+      event.observedAt = nowIso;
       newEvents.push(event);
       next.known[listing.key] = {
         ...known,

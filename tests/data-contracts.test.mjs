@@ -237,7 +237,10 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
     .sort();
   assert.deepEqual(clientCanonicals, Object.keys(SECURITY_LISTING_REGISTRY).sort());
   assert.deepEqual(SECURITY_LISTING_REGISTRY.SHEIN, {
-    category:'pre-ipo', status:'pre-ipo', aliases:[],
+    category:'pre-ipo', status:'pre-ipo', name:'SHEIN (Pre-IPO)', listedOn:null, aliases:[],
+  });
+  assert.deepEqual(SECURITY_LISTING_REGISTRY.UNITREE, {
+    category:'equity', status:'public', name:'Unitree Robotics', listedOn:'2026-08-19', aliases:[],
   });
   for (const [canonical, record] of Object.entries(SECURITY_LISTING_REGISTRY)) {
     const entry = registrySource.match(new RegExp(
@@ -314,6 +317,38 @@ test('listing audit cache epoch is internally consistent and leaves no pre-relea
   assert.doesNotMatch(source, /rwa-listing-audit-v1|audit-bundle-v1/);
   assert.match(source, /if \(listingSnapshotIsCacheable\(snapshot\)\) \{[\s\S]*?setPublicCache\(res, 300, 600\)[\s\S]*?Vercel-Cache-Tag[\s\S]*?\} else \{[\s\S]*?setNoStore\(res\)/,
     'an uninitialized cache epoch must never CDN-cache its empty Warming snapshot');
+});
+
+test('recent-listing panels are market-isolated, bounded, read-only, and preserve unknown states', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const perpOverview = sourceBetween(html, 'id="sub-aggregator"', '<!-- trade.xyz table -->');
+  const spotOverview = sourceBetween(html, 'id="spot-overview"', '<!-- ARB RANKING (inside Overview) -->');
+  assert.equal((html.match(/id="recentPerpListingsSection"/g) || []).length, 1);
+  assert.equal((html.match(/id="recentSpotListingsSection"/g) || []).length, 1);
+  assert.match(perpOverview, /recentPerpListingsSection[\s\S]*toggleRecentListings\('perp'\)/);
+  assert.doesNotMatch(perpOverview, /recentSpotListingsSection/);
+  assert.match(spotOverview, /recentSpotListingsSection[\s\S]*toggleRecentListings\('spot'\)/);
+  assert.doesNotMatch(spotOverview, /recentPerpListingsSection/);
+
+  const recentRows = sourceBetween(html, 'function recentListingRows(', 'function recentListingCategoryLabel(');
+  assert.match(recentRows, /recentListingExpanded\[market\] \? 45 : 7/);
+  assert.match(recentRows, /event\.market === market/);
+  assert.match(recentRows, /event\.identityStatus === 'verified'/);
+  assert.match(recentRows, /event\.inclusionStatus === 'eligible'/);
+  const recentRenderer = sourceBetween(html, 'function renderRecentListings(', 'function renderRecentListingPanels(');
+  assert.match(recentRenderer, /allRows\.slice\(0, 5\)/);
+  assert.match(recentRenderer, /event\.timeBasis === 'official' \? event\.officialListedAt : event\.detectedAt/);
+  assert.match(recentRenderer, /event\.lifecycleStatus/);
+  const categoryLabel = sourceBetween(html, 'function recentListingCategoryLabel(', 'function recentListingStatus(');
+  assert.match(categoryLabel, /event\?\.venueCategory/);
+
+  const statusMachine = sourceBetween(html, 'function recentListingStatus(', 'function renderRecentListings(');
+  assert.match(statusMachine, /Listing monitoring is temporarily unavailable; recent additions cannot be determined/);
+  assert.match(statusMachine, /Coverage is incomplete/);
+  assert.match(statusMachine, /No new trading pairs in the past 7 days/);
+  const loader = sourceBetween(html, 'async function loadListingChanges(', 'function ensureListingChanges(');
+  assert.match(loader, /fetch\('\/api\/listing-changes', \{ method:'GET' \}\)/);
+  assert.doesNotMatch(loader, /listing-audit-cron|POST|PUT|PATCH|DELETE/);
 });
 
 test('signal history uses idempotent hourly buckets and a bounded seven-day ring', () => {

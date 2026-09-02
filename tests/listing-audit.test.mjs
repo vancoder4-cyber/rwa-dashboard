@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  isReviewedLifecycleCategoryCorrection,
   LISTING_SOURCE_KEYS,
   mergeListingAudit,
   normalizeListingObservation,
@@ -93,6 +94,33 @@ test('listing audit emits Spot and Perp additions once and leaves an unavailable
   assert.equal(repeated.snapshot.events.filter(event => event.changeType === 'new').length, 2);
 });
 
+test('official product time supplements a diff-detected event but never creates one by itself', () => {
+  const baseline = mergeListingAudit(null, fullObservations(), new Date('2026-09-01T00:45:00Z'));
+  const officialListedAt = '2026-09-01T12:00:00.000Z';
+  const withAddition = fullObservations({
+    'perp:binance':{
+      market:'perp', venue:'binance', status:'full',
+      listings:[
+        row('perp:binance'),
+        { ...row('perp:binance', 'TIMED'), officialListedAt },
+      ],
+    },
+  });
+  const detected = mergeListingAudit(baseline.state, withAddition, new Date('2026-09-02T00:45:00Z'));
+  assert.equal(detected.newEvents.length, 1);
+  assert.equal(detected.newEvents[0].officialListedAt, officialListedAt);
+  assert.equal(detected.newEvents[0].timeBasis, 'official');
+  assert.equal(detected.newEvents[0].observedAt, '2026-09-02T00:45:00.000Z');
+
+  const noDirectoryChange = mergeListingAudit(baseline.state, fullObservations({
+    'perp:binance':{
+      market:'perp', venue:'binance', status:'full',
+      listings:[{ ...row('perp:binance'), officialListedAt }],
+    },
+  }), new Date('2026-09-02T00:45:00Z'));
+  assert.deepEqual(noDirectoryChange.newEvents, []);
+});
+
 test('listing events publish venue contract category and lifecycle as separate fields', () => {
   const first = mergeListingAudit(null, fullObservations(), new Date('2026-08-14T00:45:00Z'));
   const unitree = tradeXyzListingFromOfficial({
@@ -105,9 +133,11 @@ test('listing events publish venue contract category and lifecycle as separate f
     },
   }), new Date('2026-08-15T00:45:00Z'));
   const event = second.newEvents.find(candidate => candidate.venueSymbol === 'XYZ:UNITREE');
-  assert.equal(event.category, 'pre-ipo');
+  assert.equal(event.category, 'equity');
   assert.equal(event.venueCategory, 'equity');
-  assert.equal(event.lifecycleStatus, 'ipo-registered');
+  assert.equal(event.lifecycleStatus, 'public');
+  assert.equal(event.name, 'Unitree Robotics');
+  assert.equal(event.observedAt, event.detectedAt);
   const health = validateListingAuditSnapshot(second.snapshot, Date.parse('2026-08-15T01:00:00Z'));
   assert.equal(health.eventClassificationValid, true);
 
@@ -116,6 +146,55 @@ test('listing events publish venue contract category and lifecycle as separate f
   const invalidHealth = validateListingAuditSnapshot(missingVenueCategory, Date.parse('2026-08-15T01:00:00Z'));
   assert.equal(invalidHealth.eventClassificationValid, false);
   assert.equal(invalidHealth.status, 'fail');
+});
+
+test('a reviewed public-company lifecycle correction updates the same instrument without a listing event', () => {
+  const oldUnitree = {
+    ...row('perp:tradexyz', 'UNITREE'),
+    canonicalSymbol:'UNITREE',
+    category:'pre-ipo',
+    venueCategory:'equity',
+    lifecycleStatus:'ipo-registered',
+    name:'Unitree Robotics (Pre-IPO)',
+  };
+  const baseline = mergeListingAudit(null, fullObservations({
+    'perp:tradexyz':{
+      market:'perp', venue:'tradexyz', status:'full', listings:[oldUnitree],
+    },
+  }), new Date('2026-08-18T00:45:00Z'));
+  const publicUnitree = {
+    ...oldUnitree,
+    category:'equity',
+    lifecycleStatus:'public',
+    name:'Unitree Robotics',
+  };
+  const corrected = mergeListingAudit(baseline.state, fullObservations({
+    'perp:tradexyz':{
+      market:'perp', venue:'tradexyz', status:'full', listings:[publicUnitree],
+    },
+  }), new Date('2026-08-19T00:45:00Z'));
+  assert.equal(corrected.snapshot.sources.find(source => source.sourceKey === 'perp:tradexyz').status, 'full');
+  assert.deepEqual(corrected.newEvents, []);
+  assert.equal(corrected.state.known[`perp:tradexyz:${oldUnitree.venueSymbol}`]?.category, 'equity');
+});
+
+test('lifecycle correction bypass is one-way and limited to dated reviewed public companies', () => {
+  const previous = {
+    canonicalSymbol:'UNREVIEWED',
+    category:'pre-ipo',
+    venueCategory:'equity',
+    lifecycleStatus:'ipo-registered',
+  };
+  const current = {
+    ...previous,
+    category:'equity',
+    lifecycleStatus:'public',
+  };
+  assert.equal(isReviewedLifecycleCategoryCorrection(previous, current), false);
+  assert.equal(isReviewedLifecycleCategoryCorrection(
+    { ...current, canonicalSymbol:'UNITREE' },
+    { ...previous, canonicalSymbol:'UNITREE' },
+  ), false, 'a public-to-Pre-IPO reversal must never bypass identity review');
 });
 
 test('listing audit distinguishes delisting from a later relisting', () => {
@@ -260,9 +339,9 @@ test('trade.xyz preserves the official contract class separately from company li
     venue:'tradexyz',
     venueSymbol:'XYZ:UNITREE',
     canonicalSymbol:'UNITREE',
-    category:'pre-ipo',
+    category:'equity',
     venueCategory:'equity',
-    lifecycleStatus:'ipo-registered',
+    lifecycleStatus:'public',
     name:'Unitree Robotics',
     identityStatus:'verified',
     identityEvidence:'Hyperliquid perpCategories:stocks',
@@ -270,7 +349,7 @@ test('trade.xyz preserves the official contract class separately from company li
 
   const normalized = normalizeListingObservation(unitree);
   assert.equal(normalized.venueCategory, 'equity');
-  assert.equal(normalized.lifecycleStatus, 'ipo-registered');
+  assert.equal(normalized.lifecycleStatus, 'public');
 });
 
 test('listing collectors reject global trade.xyz fallback and Kraken same-suffix Crypto collisions', () => {
@@ -478,6 +557,7 @@ test('listing audit exposes an explicit Partial history state when the event saf
     listingKey:`spot:okx:SAFE-${index}`,
     changeType:'new',
     detectedAt:new Date(Date.UTC(2026, 7, 14, 0, 0, index % 60)).toISOString(),
+    observedAt:new Date(Date.UTC(2026, 7, 14, 0, 0, index % 60)).toISOString(),
     market:'spot',
     venue:'okx',
     venueSymbol:`SAFE-${index}`,
@@ -485,7 +565,9 @@ test('listing audit exposes an explicit Partial history state when the event saf
     category:'equity',
     venueCategory:'equity',
     lifecycleStatus:null,
-    name:null,
+    name:`SAFE${index}`,
+    officialListedAt:null,
+    timeBasis:'first_observed',
     identityStatus:'verified',
     identityEvidence:'official test fixture',
     inclusionStatus:'eligible',

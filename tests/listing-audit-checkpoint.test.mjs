@@ -115,8 +115,9 @@ test('Listing Audit durable switches are explicit and default to current Runtime
   assert.equal(resolveListingCheckpointWriteMode({ LISTING_CHECKPOINT_WRITE_MODE:'SHADOW' }), 'shadow');
   assert.equal(resolveListingReadMode({ LISTING_READ_MODE:'dual-read' }), 'dual-read');
   assert.equal(resolveListingReadMode({ LISTING_READ_MODE:'durable-fallback' }), 'durable-fallback');
+  assert.equal(resolveListingReadMode({ LISTING_READ_MODE:'postgres-authoritative' }), 'postgres-authoritative');
   assert.throws(() => resolveListingCheckpointWriteMode({ LISTING_CHECKPOINT_WRITE_MODE:'on' }), /off, shadow, or required/);
-  assert.throws(() => resolveListingReadMode({ LISTING_READ_MODE:'postgres' }), /runtime-cache, dual-read, or durable-fallback/);
+  assert.throws(() => resolveListingReadMode({ LISTING_READ_MODE:'postgres' }), /postgres-authoritative/);
 });
 
 test('checkpoint accepts only an exact compact ten-source bundle with matching timestamp', () => {
