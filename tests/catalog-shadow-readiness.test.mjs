@@ -1344,6 +1344,8 @@ test('read-only query bundle is fixed at nine bounded catalog-reconciliation que
   const queries = buildCatalogShadowReadinessQueries(sql, 30);
   assert.equal(queries.length, 9);
   assert.match(queries[5].text, /metadata->>'mergedStatus', ''\) <> 'warming'/);
+  assert.match(queries[5].text, /metadata->>'lifecycleComparable'/);
+  assert.match(queries[5].text, /THEN 'false' ELSE 'true' END/);
   assert.equal(calls.length, 9);
   assert.ok(calls.every(call => /SELECT|WITH/.test(call.text)));
   assert.ok(calls.every(call => !/\b(?:INSERT|UPDATE|DELETE|TRUNCATE)\b/i.test(call.text)));

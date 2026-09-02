@@ -204,6 +204,8 @@ test('first daily baseline creates ten exact source runs and memberships without
   assert.equal(kraken.memberships[0].officialVenueSymbol, 'AAPLxUSD');
   assert.equal(kraken.memberships[0].normalizedVenueSymbol, 'AAPLXUSD');
   assert.equal(kraken.memberships[0].assetKey, 'equity:AAPL');
+  assert.equal(kraken.metadata.baselineAt, '2026-08-15T00:45:00.000Z');
+  assert.equal(kraken.metadata.lifecycleComparable, false);
   assert.match(kraken.artifact.pathname, /^catalog\/preview\/rwa-listing-audit\/2026-08-15\/spot:kraken\/[0-9a-f]{64}\.json$/);
 
   const artifact = JSON.parse(kraken.artifact.body);
@@ -213,6 +215,35 @@ test('first daily baseline creates ten exact source runs and memberships without
   assert.equal(artifact.source.sourceKey, 'spot:kraken');
   assert.equal(artifact.listings[0].officialProductKey, 'AAPLxUSD');
   assert.equal(createHash('sha256').update(kraken.artifact.body).digest('hex'), kraken.artifact.sha256);
+});
+
+test('same-day retry after a Runtime Cache baseline reset remains non-comparable for lifecycle events', () => {
+  const first = baselineInput();
+  const retryAt = '2026-08-15T01:45:00.000Z';
+  const retry = mergeAt(first.merged.state, first.observations, retryAt);
+  const batch = buildListingAuditPgBatch({
+    observations:first.observations,
+    merged:retry,
+    observedAt:retryAt,
+  });
+
+  assert.equal(retry.snapshot.status, 'full');
+  assert.equal(retry.newEvents.length, 0);
+  for (const run of batch.sourceRuns) {
+    assert.equal(run.mergedStatus, 'full');
+    assert.equal(run.metadata.baseline, false);
+    assert.equal(run.metadata.baselineAt, '2026-08-15T00:45:00.000Z');
+    assert.equal(run.metadata.lifecycleComparable, false);
+  }
+
+  const nextDayAt = '2026-08-16T00:45:00.000Z';
+  const nextDay = mergeAt(retry.state, first.observations, nextDayAt);
+  const nextDayBatch = buildListingAuditPgBatch({
+    observations:first.observations,
+    merged:nextDay,
+    observedAt:nextDayAt,
+  });
+  assert.ok(nextDayBatch.sourceRuns.every(run => run.metadata.lifecycleComparable === true));
 });
 
 test('review-required candidates enter only review_case and do not suppress verified memberships', () => {

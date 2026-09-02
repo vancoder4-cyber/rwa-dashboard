@@ -310,6 +310,14 @@ function buildSourceRun(sourceKey, rawObservation, summary, mergedState, observe
   const identityComplete = catalogObserved && reviewRows.length === 0 && rejectedRows.length === 0;
   const catalogSourceStatus = sourceStatus(summary);
   const status = catalogSourceStatus === 'full' && !identityComplete ? 'partial' : catalogSourceStatus;
+  const baselineAt = summary?.baselineAt ? isoTimestamp(summary.baselineAt) : null;
+  // The Runtime Cache producer owns lifecycle-event semantics. A source whose
+  // current public baseline was established in this UTC bucket is not
+  // comparable for New/Re-listed events, even when a same-day retry has
+  // already advanced its presentation status from Warming to Full.
+  const lifecycleComparable = Boolean(
+    baselineAt && baselineAt.slice(0, 10) < observedAt.slice(0, 10) && mergedStatus !== 'warming',
+  );
   const errorCodes = [];
   if (catalogSourceStatus === 'partial') errorCodes.push('CATALOG_PARTIAL');
   if (catalogSourceStatus === 'unavailable') errorCodes.push('CATALOG_UNAVAILABLE');
@@ -345,6 +353,8 @@ function buildSourceRun(sourceKey, rawObservation, summary, mergedState, observe
       rawStatus,
       mergedStatus,
       baseline: mergedStatus === 'warming',
+      baselineAt,
+      lifecycleComparable,
       withheldFromMembership: normalizedRows.length - verifiedRows.length,
       pendingRemovalCount: pendingRemovalKeys.length,
       pendingRemovalVenueSymbols,

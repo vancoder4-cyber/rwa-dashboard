@@ -1110,7 +1110,12 @@ export function buildCatalogShadowReadinessQueries(sql, limit = CATALOG_SHADOW_Q
       ), source_run_state AS (
         SELECT attempt.cycle_id, run.source_id,
           bool_or(run.endpoint_key = '${LISTING_PG_ENDPOINT_KEY}'
-            AND COALESCE(run.metadata->>'mergedStatus', '') <> 'warming') AS lifecycle_comparable
+            AND COALESCE(run.metadata->>'mergedStatus', '') <> 'warming'
+            AND COALESCE(
+              run.metadata->>'lifecycleComparable',
+              CASE WHEN COALESCE(run.metadata->>'mergedStatus', '') = 'warming'
+                THEN 'false' ELSE 'true' END
+            ) = 'true') AS lifecycle_comparable
         FROM ingest.collection_attempt AS attempt
         JOIN ingest.source_run AS run ON run.attempt_id = attempt.attempt_id
         JOIN recent_cycles AS cycle ON cycle.cycle_id = attempt.cycle_id
