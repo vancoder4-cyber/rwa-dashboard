@@ -4,7 +4,7 @@
     "node": "22.x"
   },
   "scripts": {
-    "build": "npm run verify:deploy-source && npm test && npm run check:inline && node scripts/build-static.mjs",
+    "build": "npm run verify:deploy-source && node scripts/run-authorized-preview-migration.mjs && npm test && npm run check:inline && node scripts/build-static.mjs",
     "test": "node scripts/run-tests.mjs",
     "check:inline": "node scripts/check-inline-js.mjs",
     "verify:deploy-source": "node scripts/verify-deployment-source.mjs",
