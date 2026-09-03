@@ -113,3 +113,11 @@ environment. Trigger the required rebuild with a reviewed commit merged to
 published artifact hashes to agree before invoking any authenticated writer.
 Never use a local Production deploy, CLI redeploy or Preview promotion as a
 configuration-only release shortcut.
+
+Do not activate `postgres-authoritative` for the authenticated writer while
+`publication.listing_audit_checkpoint` is empty. Bootstrap in `dual-read` with
+`PG_WRITE_MODE=required` and `LISTING_CHECKPOINT_WRITE_MODE=required`, run one
+authenticated audit from the last trusted Runtime Cache bundle, and require
+`reconciliation=match` before the final PostgreSQL-authoritative Git rebuild.
+An empty or unavailable checkpoint is a blocking unknown state, never a reason
+to create a fresh baseline from historical database membership.
