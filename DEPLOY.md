@@ -105,3 +105,11 @@ For an OKX-affecting release, the Preview and final production artifact must sat
 In the browser, switch `EN → 中文 → EN`, open OKX Perpetuals, Spot, Top 30, Signal Radar and one Asset Intelligence Drawer, and confirm that ticker/venue identity, selected tabs, filters and loaded data do not change with language. In both Perpetual and Spot, toggle `US-listed / 美股`; every remaining asset row must carry the same US tag, category + market filtering must use AND, and non-U.S./crypto collisions must remain excluded.
 
 Merge the verified commit to `main` and let the Git integration build Production. Require `audit:deployment` to pass, then repeat `audit:data`, `audit:health`, `/api/health`, the browser assertions and the production 5xx/log review against <https://avenir-rwa-analyst.vercel.app/>. Do not rebuild or deploy an unverified local revision.
+
+For a Production environment-variable cutover, changing the Vercel setting is
+only the configuration step: existing deployments keep their original runtime
+environment. Trigger the required rebuild with a reviewed commit merged to
+`main`, then require the new Git-origin deployment SHA, runtime provenance and
+published artifact hashes to agree before invoking any authenticated writer.
+Never use a local Production deploy, CLI redeploy or Preview promotion as a
+configuration-only release shortcut.
