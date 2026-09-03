@@ -88,6 +88,11 @@ const OI_LIQUIDATION_EVALUATION_STATUSES = new Set(['triggered', 'clear', 'warmi
 const OI_PRICE_24H_SELECTION_METHOD = 'largest-current-oi-listing-with-available-change';
 const OI_TOP_TRADER_METRIC = 'top-trader-position-ratio';
 const OI_TOP_TRADER_SCOPE = 'top-20%-by-margin-balance-position-ratio';
+const LISTING_READ_MODES = new Set(['runtime-cache', 'dual-read', 'durable-fallback', 'postgres-authoritative']);
+const LISTING_READ_SOURCES = new Set(['runtime-cache', 'postgres-checkpoint', 'postgres-events', 'empty']);
+const LISTING_RUNTIME_READ_STATUSES = new Set(['not-requested', 'stored', 'empty', 'unavailable']);
+const LISTING_DURABLE_READ_STATUSES = new Set(['not-requested', 'stored', 'empty', 'unavailable']);
+const LISTING_EVENT_STORE_READ_STATUSES = new Set(['not-requested', 'stored', 'empty', 'unavailable']);
 const OI_MARKET_CONTEXT_VERSION = 'rwa-oi-market-context/v2';
 const OI_LIQUIDATION_WRITE_STATUSES = new Set([
   'stored',
@@ -215,7 +220,65 @@ export async function probeUsMarketDirectory(baseUrl) {
   }
 }
 
-export function validateListingAuditSnapshot(payload, now = Date.now()) {
+export function validateListingAuditReadPath(payload, expectedMode = null) {
+  const readPath = payload?.persistence?.readPath;
+  const mode = String(readPath?.mode || '');
+  const source = String(readPath?.source || '');
+  const reconciliation = String(readPath?.reconciliation || '');
+  const runtimeStatus = String(readPath?.runtimeCache?.status || '');
+  const durableStatus = String(readPath?.durableCheckpoint?.status || '');
+  const runtimeAt = readPath?.runtimeCache?.observedAt ?? null;
+  const durableAt = readPath?.durableCheckpoint?.observedAt ?? null;
+  const eventStoreStatus = String(readPath?.eventStore?.status || 'not-requested');
+  const eventStoreAt = readPath?.eventStore?.observedAt ?? null;
+  const validObservedAt = (status, value) => status === 'stored'
+    ? typeof value === 'string' && Number.isFinite(Date.parse(value))
+    : value === null;
+  const baseValid = Boolean(readPath) && LISTING_READ_MODES.has(mode) &&
+    LISTING_READ_SOURCES.has(source) && LISTING_RUNTIME_READ_STATUSES.has(runtimeStatus) &&
+    LISTING_DURABLE_READ_STATUSES.has(durableStatus) &&
+    LISTING_EVENT_STORE_READ_STATUSES.has(eventStoreStatus) &&
+    validObservedAt(runtimeStatus, runtimeAt) && validObservedAt(durableStatus, durableAt) &&
+    validObservedAt(eventStoreStatus, eventStoreAt) &&
+    (!expectedMode || mode === expectedMode);
+  let coherent = false;
+  if (baseValid && mode === 'runtime-cache') {
+    coherent = durableStatus === 'not-requested' &&
+      ((runtimeStatus === 'stored' && source === 'runtime-cache' && reconciliation === 'durable-not-requested') ||
+       (runtimeStatus === 'empty' && source === 'empty' && reconciliation === 'runtime-empty'));
+  } else if (baseValid && mode === 'dual-read') {
+    coherent = runtimeStatus !== 'unavailable' && source === (runtimeStatus === 'stored' ? 'runtime-cache' : 'empty') &&
+      ['match', 'runtime-empty', 'runtime-behind', 'runtime-ahead', 'checksum-mismatch',
+        'durable-empty', 'durable-unavailable'].includes(reconciliation);
+  } else if (baseValid && mode === 'durable-fallback') {
+    coherent = durableStatus === 'stored' && (
+      (runtimeStatus === 'stored' && reconciliation === 'match' && source === 'runtime-cache') ||
+      (runtimeStatus === 'stored' && reconciliation === 'runtime-behind' && source === 'postgres-checkpoint') ||
+      (runtimeStatus === 'empty' && reconciliation === 'runtime-empty' && source === 'postgres-checkpoint') ||
+      (runtimeStatus === 'unavailable' && reconciliation === 'runtime-unavailable' && source === 'postgres-checkpoint')
+    );
+  } else if (baseValid && mode === 'postgres-authoritative') {
+    coherent = source === 'postgres-events' && reconciliation === 'database-authoritative' &&
+      runtimeStatus === 'not-requested' && durableStatus === 'not-requested' &&
+      ['stored', 'empty'].includes(eventStoreStatus);
+  }
+  return {
+    valid:baseValid && coherent,
+    mode,
+    source,
+    reconciliation,
+    runtimeStatus,
+    durableStatus,
+    eventStoreStatus,
+    replicaReconciled:mode === 'postgres-authoritative' || reconciliation === 'match' ||
+      (mode === 'runtime-cache' && reconciliation === 'durable-not-requested'),
+    degraded:mode === 'dual-read'
+      ? reconciliation !== 'match'
+      : mode === 'durable-fallback' && source === 'postgres-checkpoint',
+  };
+}
+
+export function validateListingAuditSnapshot(payload, now = Date.now(), options = {}) {
   const generatedAtMs = Date.parse(payload?.generatedAt);
   const ageHours = Number.isFinite(generatedAtMs) ? (now - generatedAtMs) / 3_600_000 : null;
   const expectedSources = Number(payload?.coverage?.expectedSources);
@@ -258,22 +321,46 @@ export function validateListingAuditSnapshot(payload, now = Date.now()) {
       : historyDroppedAtLeast > 0 && historyDroppedThrough !== null) &&
     (!Array.isArray(payload?.events) || payload.events.length <= historyMaxEvents);
   const lifecycleStatuses = new Set(['public', 'pre-ipo', 'ipo-registered']);
-  const eventClassificationValid = Array.isArray(payload?.events) && payload.events.every(event =>
-    RWA_SIGNAL_CATEGORIES.has(String(event?.venueCategory || '').trim().toLowerCase()) &&
-    Object.prototype.hasOwnProperty.call(event || {}, 'lifecycleStatus') &&
-    (event.lifecycleStatus === null || lifecycleStatuses.has(String(event.lifecycleStatus).trim().toLowerCase()))
-  );
+  const eventClassificationValid = Array.isArray(payload?.events) && payload.events.every(event => {
+    const market = String(event?.market || '').trim().toLowerCase();
+    const venue = String(event?.venue || '').trim().toLowerCase();
+    const venueSymbol = String(event?.venueSymbol || '').trim().toUpperCase();
+    const detectedAt = Date.parse(event?.detectedAt);
+    const observedAt = Date.parse(event?.observedAt || event?.detectedAt);
+    const officialListedAt = event?.officialListedAt === null ? null : Date.parse(event?.officialListedAt);
+    const timeBasis = String(event?.timeBasis || '').trim().toLowerCase();
+    const expectedListingKey = `${market}:${venue}:${venueSymbol}`;
+    const changeType = String(event?.changeType || '').trim().toLowerCase();
+    const expectedInclusion = changeType === 'delisted' ? 'removed' : 'eligible';
+    return typeof event?.eventId === 'string' && event.eventId.trim().length > 0 &&
+      event?.listingKey === expectedListingKey && ['perp', 'spot'].includes(market) &&
+      ['tradexyz', 'bitget', 'gate', 'kraken', 'binance', 'okx'].includes(venue) &&
+      ['new', 'relisted', 'delisted'].includes(changeType) && Number.isFinite(detectedAt) &&
+      observedAt === detectedAt && ['official', 'first_observed'].includes(timeBasis) &&
+      (timeBasis === 'official') === Number.isFinite(officialListedAt) &&
+      event?.identityStatus === 'verified' && event?.inclusionStatus === expectedInclusion &&
+      typeof event?.name === 'string' && event.name.trim().length > 0 &&
+      RWA_SIGNAL_CATEGORIES.has(String(event?.category || '').trim().toLowerCase()) &&
+      RWA_SIGNAL_CATEGORIES.has(String(event?.venueCategory || '').trim().toLowerCase()) &&
+      Object.prototype.hasOwnProperty.call(event || {}, 'lifecycleStatus') &&
+      (event.lifecycleStatus === null || lifecycleStatuses.has(String(event.lifecycleStatus).trim().toLowerCase()));
+  });
+  const readPathRequired = options.requireReadPath === true;
+  const readPath = validateListingAuditReadPath(payload, options.expectedReadMode || null);
+  const readPathContractValid = readPathRequired ? readPath.valid : !payload?.persistence?.readPath || readPath.valid;
   const contractValid = payload?.schemaVersion === LISTING_AUDIT_SCHEMA_VERSION &&
     Array.isArray(payload?.sources) && Array.isArray(payload?.events) && Array.isArray(payload?.pendingReviews) &&
-    expectedSources === LISTING_SOURCE_KEYS.length && exactSourceKeys && historyContractValid && eventClassificationValid;
+    expectedSources === LISTING_SOURCE_KEYS.length && exactSourceKeys && historyContractValid &&
+    eventClassificationValid && readPathContractValid;
   const fresh = ageHours !== null && ageHours >= -0.1 && ageHours <= 36;
   const complete = contractValid && fresh && availableSourceTimestampsFresh && !historyTruncated &&
     availableSources === LISTING_SOURCE_KEYS.length && unavailableSources === 0;
-  const status = !contractValid || !fresh || !availableSourceTimestampsFresh
+  const baseStatus = !contractValid || !fresh || !availableSourceTimestampsFresh
     ? 'fail'
     : historyTruncated ? 'fail'
       : complete && payload.status === 'full' ? 'pass'
         : availableSources > 0 ? 'warn' : 'fail';
+  const status = baseStatus === 'pass' && readPath.degraded ? 'warn' : baseStatus;
   return {
     status,
     contractValid,
@@ -287,6 +374,15 @@ export function validateListingAuditSnapshot(payload, now = Date.now()) {
     availableSourceTimestampsFresh,
     historyContractValid,
     eventClassificationValid,
+    readPathRequired,
+    readPathContractValid,
+    readPathMode:readPath.mode || null,
+    readPathSource:readPath.source || null,
+    readPathReconciliation:readPath.reconciliation || null,
+    runtimeCacheReadStatus:readPath.runtimeStatus || null,
+    durableCheckpointReadStatus:readPath.durableStatus || null,
+    eventStoreReadStatus:readPath.eventStoreStatus || null,
+    replicaReconciled:readPath.replicaReconciled,
     historyTruncated,
     historyStatusCoherent,
     historyRetentionDays,
@@ -299,19 +395,34 @@ export function validateListingAuditSnapshot(payload, now = Date.now()) {
       : !contractValid ? 'Listing audit response or history contract is invalid'
         : !fresh || !availableSourceTimestampsFresh ? 'No successful listing audit snapshot within 36 hours'
           : historyTruncated ? 'Listing audit event history exceeded its safety limit and is truncated'
+            : readPath.degraded ? 'Listing audit is serving safely while its Runtime Cache replica is degraded or still reconciling'
             : 'Listing audit is warming or one or more venue catalogs are unavailable',
   };
 }
 
-async function probeListingAudit(baseUrl) {
+export async function probeListingAudit(baseUrl) {
   const startedAt = Date.now();
   try {
     const payload = await fetchJsonWithPolicy(
       `${baseUrl}/api/listing-changes`,
-      {},
+      {
+        headers:{
+          Accept:'application/json',
+          // Health must inspect the latest Runtime Cache publication, not a
+          // previous CDN response still inside stale-while-revalidate. This is
+          // especially important immediately after a controlled Cron recovery
+          // or read-mode cutover, when the cached payload can describe the old
+          // persistence path for up to fifteen minutes.
+          'Cache-Control':'no-cache',
+          Pragma:'no-cache',
+        },
+      },
       { timeoutMs: 8_000, retries: 0 },
     );
-    const validation = validateListingAuditSnapshot(payload);
+    const validation = validateListingAuditSnapshot(payload, Date.now(), {
+      requireReadPath:true,
+      expectedReadMode:String(process.env.LISTING_READ_MODE || 'runtime-cache').trim().toLowerCase(),
+    });
     return checkResult('daily-listing-audit', validation.status, {
       latencyMs: Date.now() - startedAt,
       snapshotStatus: payload?.status || 'unavailable',
@@ -324,6 +435,14 @@ async function probeListingAudit(baseUrl) {
       availableSourceTimestampsFresh: validation.availableSourceTimestampsFresh,
       historyContractValid: validation.historyContractValid,
       eventClassificationValid: validation.eventClassificationValid,
+      readPathContractValid: validation.readPathContractValid,
+      readPathMode: validation.readPathMode,
+      readPathSource: validation.readPathSource,
+      readPathReconciliation: validation.readPathReconciliation,
+      runtimeCacheReadStatus: validation.runtimeCacheReadStatus,
+      durableCheckpointReadStatus: validation.durableCheckpointReadStatus,
+      eventStoreReadStatus: validation.eventStoreReadStatus,
+      replicaReconciled: validation.replicaReconciled,
       historyTruncated: validation.historyTruncated,
       historyStatusCoherent: validation.historyStatusCoherent,
       historyRetentionDays: validation.historyRetentionDays,

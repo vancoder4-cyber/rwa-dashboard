@@ -204,6 +204,8 @@ test('first daily baseline creates ten exact source runs and memberships without
   assert.equal(kraken.memberships[0].officialVenueSymbol, 'AAPLxUSD');
   assert.equal(kraken.memberships[0].normalizedVenueSymbol, 'AAPLXUSD');
   assert.equal(kraken.memberships[0].assetKey, 'equity:AAPL');
+  assert.equal(kraken.metadata.baselineAt, '2026-08-15T00:45:00.000Z');
+  assert.equal(kraken.metadata.lifecycleComparable, false);
   assert.match(kraken.artifact.pathname, /^catalog\/preview\/rwa-listing-audit\/2026-08-15\/spot:kraken\/[0-9a-f]{64}\.json$/);
 
   const artifact = JSON.parse(kraken.artifact.body);
@@ -213,6 +215,35 @@ test('first daily baseline creates ten exact source runs and memberships without
   assert.equal(artifact.source.sourceKey, 'spot:kraken');
   assert.equal(artifact.listings[0].officialProductKey, 'AAPLxUSD');
   assert.equal(createHash('sha256').update(kraken.artifact.body).digest('hex'), kraken.artifact.sha256);
+});
+
+test('same-day retry after a Runtime Cache baseline reset remains non-comparable for lifecycle events', () => {
+  const first = baselineInput();
+  const retryAt = '2026-08-15T01:45:00.000Z';
+  const retry = mergeAt(first.merged.state, first.observations, retryAt);
+  const batch = buildListingAuditPgBatch({
+    observations:first.observations,
+    merged:retry,
+    observedAt:retryAt,
+  });
+
+  assert.equal(retry.snapshot.status, 'full');
+  assert.equal(retry.newEvents.length, 0);
+  for (const run of batch.sourceRuns) {
+    assert.equal(run.mergedStatus, 'full');
+    assert.equal(run.metadata.baseline, false);
+    assert.equal(run.metadata.baselineAt, '2026-08-15T00:45:00.000Z');
+    assert.equal(run.metadata.lifecycleComparable, false);
+  }
+
+  const nextDayAt = '2026-08-16T00:45:00.000Z';
+  const nextDay = mergeAt(retry.state, first.observations, nextDayAt);
+  const nextDayBatch = buildListingAuditPgBatch({
+    observations:first.observations,
+    merged:nextDay,
+    observedAt:nextDayAt,
+  });
+  assert.ok(nextDayBatch.sourceRuns.every(run => run.metadata.lifecycleComparable === true));
 });
 
 test('review-required candidates enter only review_case and do not suppress verified memberships', () => {
@@ -570,7 +601,9 @@ test('verified identity guard rejects category/canonical drift but permits non-i
   assert.match(metadataGuard.text, /current_asset_version\.category <> incoming\.category/);
   assert.match(metadataGuard.text, /current_asset_version\.canonical_underlying <> incoming\.canonical_underlying/);
   assert.match(metadataGuard.text, /incoming\.lifecycle_status = 'public'/);
-  assert.match(metadataGuard.text, /incoming\.lifecycle_status IN \('pre-ipo', 'ipo-registered'\)/);
+  assert.match(metadataGuard.text, /incoming\.canonical_underlying = ANY\(\$2::text\[\]\)/);
+  assert.match(metadataGuard.text, /current_asset_version\.category = 'pre-ipo'/);
+  assert.ok(metadataGuard.params[1].includes('UNITREE'));
   assert.doesNotMatch(metadataGuard.text, /incoming\.(?:display_name|name|quote_currency|official_status|asset_fingerprint|instrument_fingerprint)/);
   const metadataPayload = JSON.parse(metadataGuard.params[0]);
   const metadataGuardRow = metadataPayload.find(row => row.official_product_key === 'AAPL-GATE-PERP');
@@ -603,11 +636,11 @@ test('verified identity guard rejects category/canonical drift but permits non-i
 
   const reviewedLifecycleBatch = structuredClone(sequence.retryBatch);
   const reviewedLifecycleMembership = sourceRun(reviewedLifecycleBatch).memberships[0];
-  reviewedLifecycleMembership.assetKey = 'pre-ipo:SHEIN';
-  reviewedLifecycleMembership.category = 'pre-ipo';
-  reviewedLifecycleMembership.canonicalUnderlying = 'SHEIN';
+  reviewedLifecycleMembership.assetKey = 'equity:UNITREE';
+  reviewedLifecycleMembership.category = 'equity';
+  reviewedLifecycleMembership.canonicalUnderlying = 'UNITREE';
   reviewedLifecycleMembership.venueCategory = 'equity';
-  reviewedLifecycleMembership.lifecycleStatus = 'pre-ipo';
+  reviewedLifecycleMembership.lifecycleStatus = 'public';
   const reviewedLifecycleGuard = pgCalls(reviewedLifecycleBatch)
     .find(call => call.text.includes('verified_identity_guard'));
   const reviewedLifecycleRow = JSON.parse(reviewedLifecycleGuard.params[0])
@@ -619,11 +652,11 @@ test('verified identity guard rejects category/canonical drift but permits non-i
     venueCategory:reviewedLifecycleRow.venue_category,
     lifecycleStatus:reviewedLifecycleRow.lifecycle_status,
   }, {
-    assetKey:'pre-ipo:SHEIN',
-    category:'pre-ipo',
-    canonicalUnderlying:'SHEIN',
+    assetKey:'equity:UNITREE',
+    category:'equity',
+    canonicalUnderlying:'UNITREE',
     venueCategory:'equity',
-    lifecycleStatus:'pre-ipo',
+    lifecycleStatus:'public',
   });
 
   const conflictingBatch = structuredClone(sequence.retryBatch);
@@ -690,9 +723,11 @@ test('verified identity conflict diagnostics are read-only, bounded, and expose 
       assert.match(calls[2].text, /LIMIT 20/);
       assert.match(calls[2].text, /current_asset\.asset_key <> incoming\.asset_key/);
       assert.match(calls[2].text, /incoming\.lifecycle_status = 'public'/);
-      assert.match(calls[2].text, /incoming\.lifecycle_status IN \('pre-ipo', 'ipo-registered'\)/);
+      assert.match(calls[2].text, /incoming\.canonical_underlying = ANY\(\$2::text\[\]\)/);
+      assert.match(calls[2].text, /current_asset_version\.category = 'pre-ipo'/);
       const incoming = JSON.parse(calls[2].params[0]);
       assert.ok(incoming.length > 0);
+      assert.ok(calls[2].params[1].includes('UNITREE'));
       return queries.map((_query, index) => index === 2 ? [{
         source_key:'perp:gate',
         official_product_key:'AAPL-GATE-PERP',
@@ -1009,7 +1044,7 @@ test('lifecycle shadow rows exclude review candidates and are empty on baseline 
   assert.equal(buildListingAuditPgBatch({ observations: changedObservations, merged: repeated }).events.length, 0);
 });
 
-test('concurrent duplicate lifecycle inserts preserve the first confirmed observedAt and actual sink counts', () => {
+test('concurrent duplicate lifecycle inserts preserve first observation and only allow official-time enrichment', () => {
   const baseline = baselineInput();
   const changedObservations = fullObservations({
     'perp:gate': targetObservation('perp:gate', [
@@ -1033,8 +1068,10 @@ test('concurrent duplicate lifecycle inserts preserve the first confirmed observ
   for (const batch of [firstBatch, laterConcurrentBatch]) {
     const calls = pgCalls(batch);
     const eventInsert = calls.find(call => call.text.includes('INSERT INTO analytics.catalog_change_event'));
-    assert.match(eventInsert.text, /ON CONFLICT \(source_id, instrument_version_id, event_type, effective_day\)\s+DO NOTHING/);
-    assert.doesNotMatch(eventInsert.text, /DO UPDATE SET[\s\S]*(?:observed_at|evidence)/);
+    assert.match(eventInsert.text, /ON CONFLICT \(source_id, instrument_version_id, event_type, effective_day\)\s+DO UPDATE SET/);
+    assert.doesNotMatch(eventInsert.text, /DO UPDATE SET[\s\S]*observed_at\s*=/);
+    assert.match(eventInsert.text, /official_listed_at = COALESCE/);
+    assert.match(eventInsert.text, /evidence = CASE[\s\S]*'officialListedAt'/);
     const sinkSql = calls.find(call => call.text.includes("'postgres-catalog-shadow', 'stored'"));
     assert.match(sinkSql.text, /actual_counts\.membership_count \+ actual_counts\.lifecycle_count/);
     assert.match(sinkSql.text, /SELECT stored\.sink_name, stored\.row_count, stored\.checksum,[\s\S]*actual_counts\.membership_count, actual_counts\.lifecycle_count/);

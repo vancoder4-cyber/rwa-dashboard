@@ -548,6 +548,14 @@ th.op-col:hover { color:var(--foreground-dim) !important; }
 .listing-badge.review-required, .listing-badge.pending-refresh { color:#9A6700; background:rgba(255,184,0,.12); }
 .listing-evidence { max-width:280px; color:var(--foreground-dim); font-size:8.5px; line-height:1.45; }
 .listing-empty { padding:34px 18px; border-top:1px solid var(--border); text-align:center; color:var(--foreground-dim); font-size:10px; line-height:1.6; }
+.recent-listing-panel { margin-top:16px; overflow:hidden; }
+.recent-listing-panel .listing-monitor-head { padding-bottom:10px; }
+.recent-listing-panel .listing-monitor-banner { margin-bottom:10px; }
+.recent-listing-panel .listing-table { min-width:760px; }
+.recent-listing-actions { display:flex; justify-content:flex-end; padding:10px 16px 14px; border-top:1px solid var(--border); }
+.recent-listing-more { appearance:none; border:1px solid var(--border); border-radius:8px; padding:6px 11px; background:rgba(255,255,255,.55); color:var(--accent); font-size:9px; font-weight:750; cursor:pointer; }
+.recent-listing-more:hover, .recent-listing-more:focus-visible { border-color:rgba(0,122,255,.3); background:rgba(0,122,255,.06); outline:none; }
+.listing-time-basis { display:block; margin-top:2px; color:var(--foreground-dim); font-size:8px; }
 .volume-anomaly-monitor { margin-bottom:14px; overflow:hidden; }
 .volume-anomaly-summary.high .listing-summary-value { color:#C62828; }
 .volume-anomaly-summary.medium .listing-summary-value { color:#9A6700; }
@@ -1556,6 +1564,20 @@ input[type="checkbox"] {
   <div class="sub-view active" id="sub-aggregator">
     <div class="summary-page">
       <div class="kpi-strip" id="kpiStrip"></div>
+      <section class="section-card recent-listing-panel" id="recentPerpListingsSection" aria-labelledby="recentPerpListingsTitle">
+        <div class="listing-monitor-head">
+          <div>
+            <h3 class="listing-monitor-title" id="recentPerpListingsTitle">Recently Listed Perpetuals</h3>
+            <p class="listing-monitor-lede">Verified and eligible exact contracts from the Dashboard PostgreSQL listing authority. The default view covers the latest seven days.</p>
+          </div>
+          <div class="listing-monitor-asof" id="recentPerpListingsAsOf">Daily check<br>not loaded</div>
+        </div>
+        <div class="listing-monitor-banner warming" id="recentPerpListingsStatus">Listing monitoring is temporarily unavailable; recent additions cannot be determined.</div>
+        <div id="recentPerpListingsRegion" aria-live="polite"><div class="listing-empty">Loading recent perpetual listings…</div></div>
+        <div class="recent-listing-actions">
+          <button type="button" class="recent-listing-more" id="recentPerpListingsMore" onclick="toggleRecentListings('perp')" aria-expanded="false" aria-controls="recentPerpListingsRegion">View all · 45 days</button>
+        </div>
+      </section>
       <div class="venue-cards-grid" id="venueCardsGrid"></div>
       <div class="section-card" id="top30VolSection" style="margin-top:16px"></div>
       <div class="section-card" id="coverageSection"></div>
@@ -1950,6 +1972,21 @@ input[type="checkbox"] {
       <div class="spot-kpi"><div class="spot-kpi-label">Avg Bid-Ask Spread</div><div class="spot-kpi-val" style="color:var(--positive)" id="spotKpiSpread">—</div><div class="spot-kpi-sub">Liquidity indicator</div></div>
       <div class="spot-kpi"><div class="spot-kpi-label">Peak Funding APR*</div><div class="spot-kpi-val" style="color:var(--positive)" id="spotKpiBestArb">—</div><div class="spot-kpi-sub" id="spotKpiBestArbSub">—</div></div>
     </div>
+
+    <section class="section-card recent-listing-panel" id="recentSpotListingsSection" aria-labelledby="recentSpotListingsTitle">
+      <div class="listing-monitor-head">
+        <div>
+          <h3 class="listing-monitor-title" id="recentSpotListingsTitle">Recently Listed Spot Pairs</h3>
+          <p class="listing-monitor-lede">Verified and eligible exact spot pairs from the Dashboard PostgreSQL listing authority. The default view covers the latest seven days.</p>
+        </div>
+        <div class="listing-monitor-asof" id="recentSpotListingsAsOf">Daily check<br>not loaded</div>
+      </div>
+      <div class="listing-monitor-banner warming" id="recentSpotListingsStatus">Listing monitoring is temporarily unavailable; recent additions cannot be determined.</div>
+      <div id="recentSpotListingsRegion" aria-live="polite"><div class="listing-empty">Loading recent spot listings…</div></div>
+      <div class="recent-listing-actions">
+        <button type="button" class="recent-listing-more" id="recentSpotListingsMore" onclick="toggleRecentListings('spot')" aria-expanded="false" aria-controls="recentSpotListingsRegion">View all · 45 days</button>
+      </div>
+    </section>
 
     <div class="section-card">
       <div class="section-title" style="margin-bottom:16px"><svg class="ic ic-18" viewBox="0 0 24 24"><path d="M3 21h18"/><path d="M3 10h18"/><path d="M5 6l7-3 7 3"/><path d="M4 10v11"/><path d="M20 10v11"/><path d="M8 14v3"/><path d="M12 14v3"/><path d="M16 14v3"/></svg>Exchange Summary</div>
@@ -2660,7 +2697,7 @@ const SECURITY_LISTING_REGISTRY = Object.freeze({
     aliases:Object.freeze([])
   }),
   UNITREE: Object.freeze({
-    category:'pre-ipo', status:'ipo-registered', name:'Unitree Robotics (Pre-IPO)', exchange:'SSE STAR', listedOn:'',
+    category:'equity', status:'public', name:'Unitree Robotics', exchange:'SSE STAR', listedOn:'2026-08-19',
     aliases:Object.freeze([])
   })
 });
@@ -6210,6 +6247,7 @@ function renderVisibleDataPage() {
       renderSpotArbRank();
       updateSpotKpis();
       updateSpotStatusLine();
+      renderRecentListings('spot');
     }
     else if (spotSubView === 'allAssets') renderSpotAllAssets();
     else if (spotSubView !== 'overview') renderSpotVenueTable(spotSubView);
@@ -6243,7 +6281,7 @@ function switchSubTab(sub, tabEl) {
 // VIEW 1: ALL VENUES OVERVIEW
 // ═══════════════════════════════════════════════
 
-function renderOverview() { renderKPIs(); renderVenueCards(); renderTop30Volume(); renderCoverage(); renderDivergence(); }
+function renderOverview() { renderKPIs(); renderRecentListings('perp'); renderVenueCards(); renderTop30Volume(); renderCoverage(); renderDivergence(); }
 
 // ═══════════════════════════════════════════════
 // KPI TREND SNAPSHOTS (read-only server aggregate history)
@@ -8318,15 +8356,140 @@ let listingChangesError = '';
 let listingChangesFailures = 0;
 let listingChangesRetryAt = 0;
 let listingEventsExpanded = false;
+const recentListingExpanded = { perp:false, spot:false };
 const listingMonitorFilter = { window:'7', market:'all', venue:'all', status:'all', search:'' };
 
 function radarPageIsActive() {
   return pageIsVisible() && document.querySelector('.top-tab[data-p="cross"]')?.classList.contains('active');
 }
 
+function listingDataConsumerIsActive() {
+  if (!pageIsVisible()) return false;
+  return ['perps','spot','cross'].includes(activeTopPage());
+}
+
 function listingNewEvents(payload = listingChangesCache?.payload) {
   return (Array.isArray(payload?.events) ? payload.events : [])
     .filter(event => ['new','relisted'].includes(String(event?.changeType || '').toLowerCase()));
+}
+
+function listingPublicEventValid(event) {
+  const market = String(event?.market || '').toLowerCase();
+  const venue = String(event?.venue || '').toLowerCase();
+  const venueSymbol = String(event?.venueSymbol || '').toUpperCase();
+  const detectedAt = Date.parse(event?.detectedAt);
+  const observedAt = Date.parse(event?.observedAt);
+  const officialListedAt = event?.officialListedAt === null ? null : Date.parse(event?.officialListedAt);
+  const timeBasis = String(event?.timeBasis || '').toLowerCase();
+  const changeType = String(event?.changeType || '').toLowerCase();
+  const expectedInclusion = changeType === 'delisted' ? 'removed' : 'eligible';
+  return typeof event?.eventId === 'string' && event.eventId.trim().length > 0 &&
+    event.listingKey === `${market}:${venue}:${venueSymbol}` &&
+    ['perp','spot'].includes(market) && ['tradexyz','bitget','gate','kraken','binance','okx'].includes(venue) &&
+    ['new','relisted','delisted'].includes(changeType) && Number.isFinite(detectedAt) && observedAt === detectedAt &&
+    ['official','first_observed'].includes(timeBasis) &&
+    (timeBasis === 'official') === Number.isFinite(officialListedAt) &&
+    event.identityStatus === 'verified' && event.inclusionStatus === expectedInclusion &&
+    typeof event?.canonicalSymbol === 'string' && event.canonicalSymbol.trim().length > 0 &&
+    typeof event?.name === 'string' && event.name.trim().length > 0 &&
+    ['equity','etf','commodity','index','fx','bond','pre-ipo'].includes(String(event?.category || '').toLowerCase()) &&
+    ['equity','etf','commodity','index','fx','bond','pre-ipo'].includes(String(event?.venueCategory || '').toLowerCase()) &&
+    Object.prototype.hasOwnProperty.call(event || {}, 'lifecycleStatus');
+}
+
+function recentListingRows(market, payload = listingChangesCache?.payload, now = Date.now()) {
+  const days = recentListingExpanded[market] ? 45 : 7;
+  const cutoff = now - days * 24 * 60 * 60 * 1000;
+  return listingNewEvents(payload)
+    .filter(event => event.market === market && event.identityStatus === 'verified' && event.inclusionStatus === 'eligible')
+    .filter(event => {
+      const timestamp = Date.parse(event.detectedAt);
+      return Number.isFinite(timestamp) && timestamp >= cutoff && timestamp <= now + 5 * 60 * 1000;
+    })
+    .sort((left, right) => Date.parse(right.detectedAt) - Date.parse(left.detectedAt) ||
+      String(left.eventId).localeCompare(String(right.eventId)));
+}
+
+function recentListingCategoryLabel(event) {
+  const category = String(event?.venueCategory || '').toLowerCase();
+  const labels = { equity:'Equity', etf:'ETF', commodity:'Commodity', index:'Index', fx:'FX', bond:'Bond', 'pre-ipo':'Pre-IPO' };
+  return labels[category] || category || 'Unavailable';
+}
+
+function recentListingStatus(market, payload, rows) {
+  if (listingChangesLoading && !payload) return { status:'warming', text:'Loading the latest authoritative listing audit…' };
+  if (!payload || !listingSnapshotFresh(payload) || ['warming','unavailable'].includes(payload.status)) {
+    return { status:'unavailable', text:'Listing monitoring is temporarily unavailable; recent additions cannot be determined.' };
+  }
+  const unavailable = Number(payload?.coverage?.unavailableSources) || 0;
+  if (listingChangesError || payload.status === 'partial' || unavailable > 0 || payload?.history?.truncated === true) {
+    return {
+      status:'partial',
+      text:`Coverage is incomplete. ${rows.length} reliable event${rows.length === 1 ? '' : 's'} shown; missing sources are not treated as no new listings.`,
+    };
+  }
+  return rows.length
+    ? { status:'full', text:'Listing coverage is complete; events come from the Dashboard PostgreSQL authority.' }
+    : { status:'full', text:recentListingExpanded[market] ? 'No new trading pairs in the past 45 days.' : 'No new trading pairs in the past 7 days.' };
+}
+
+function renderRecentListings(market) {
+  const prefix = market === 'perp' ? 'recentPerpListings' : 'recentSpotListings';
+  const region = document.getElementById(`${prefix}Region`);
+  const statusElement = document.getElementById(`${prefix}Status`);
+  const asOf = document.getElementById(`${prefix}AsOf`);
+  const more = document.getElementById(`${prefix}More`);
+  if (!region || !statusElement || !asOf || !more) return;
+  const payload = listingChangesCache?.payload || null;
+  const allRows = recentListingRows(market, payload);
+  const visible = recentListingExpanded[market] ? allRows : allRows.slice(0, 5);
+  const state = recentListingStatus(market, payload, allRows);
+  statusElement.className = `listing-monitor-banner ${state.status}`;
+  statusElement.textContent = state.text;
+  asOf.innerHTML = `Daily check<br>${payload?.generatedAt ? escapeHtml(radarTimestamp(payload.generatedAt)) : 'not loaded'}`;
+  more.setAttribute('aria-expanded', String(recentListingExpanded[market]));
+  more.textContent = recentListingExpanded[market] ? 'Show recent · 7 days' : 'View all · 45 days';
+
+  const canConfirmEmpty = Boolean(payload && state.status === 'full');
+  if (!visible.length) {
+    const days = recentListingExpanded[market] ? 45 : 7;
+    const title = canConfirmEmpty
+      ? (market === 'perp' ? `No newly listed perpetuals in the past ${days} days` : `No newly listed spot pairs in the past ${days} days`)
+      : 'Listing monitoring unavailable';
+    const detail = canConfirmEmpty
+      ? 'All ten official catalog sources were comparable for the latest successful audit.'
+      : 'The current coverage cannot support a no-new-listing conclusion.';
+    region.innerHTML = `<div class="listing-empty"><strong>${escapeHtml(title)}</strong><br>${escapeHtml(detail)}</div>`;
+    return;
+  }
+  const rows = visible.map(event => {
+    const venueName = VENUES[event.venue]?.name || SPOT_VENUE_NAMES?.[event.venue] || event.venue;
+    const changeLabel = event.changeType === 'relisted' ? 'Re-listed' : 'New listing';
+    const displayAt = event.timeBasis === 'official' ? event.officialListedAt : event.detectedAt;
+    const timeLabel = event.timeBasis === 'official' ? 'Official listing time' : 'System first-confirmed time';
+    const lifecycle = event.lifecycleStatus
+      ? `<span class="listing-time-basis">Company stage · ${escapeHtml(event.lifecycleStatus)}</span>`
+      : '';
+    return `<tr class="listing-row">
+      <td><span class="listing-badge ${escapeHtml(event.changeType)}">${escapeHtml(changeLabel)}</span></td>
+      <td><strong>${escapeHtml(venueName)}</strong><div class="listing-instrument" data-i18n-skip>${escapeHtml(event.venueSymbol)}</div></td>
+      <td><div class="listing-symbol" data-i18n-skip>${escapeHtml(event.canonicalSymbol)}</div><div class="listing-instrument" data-i18n-skip>${escapeHtml(event.name)}</div></td>
+      <td>${escapeHtml(recentListingCategoryLabel(event))}${lifecycle}</td>
+      <td>${escapeHtml(radarTimestamp(displayAt))}<span class="listing-time-basis">${escapeHtml(timeLabel)}</span></td>
+    </tr>`;
+  }).join('');
+  region.innerHTML = `<div class="listing-table-wrap"><table class="listing-table"><thead><tr><th>Event</th><th>Venue instrument</th><th>Underlying</th><th>Product category</th><th>Listing time</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+function renderRecentListingPanels() {
+  renderRecentListings('perp');
+  renderRecentListings('spot');
+}
+
+function toggleRecentListings(market) {
+  if (!['perp','spot'].includes(market)) return;
+  recentListingExpanded[market] = !recentListingExpanded[market];
+  renderRecentListings(market);
 }
 
 function listingAuditEvents(payload = listingChangesCache?.payload) {
@@ -8591,7 +8754,7 @@ function renderCompetitorListings() {
 }
 
 async function loadListingChanges(force = false) {
-  if (!radarPageIsActive()) return listingChangesCache?.payload || null;
+  if (!listingDataConsumerIsActive()) return listingChangesCache?.payload || null;
   if (listingChangesPromise) return listingChangesPromise;
   const now = Date.now();
   const fresh = listingChangesCache && now - listingChangesCache.receivedAt < LISTING_CHANGES_TTL;
@@ -8600,6 +8763,7 @@ async function loadListingChanges(force = false) {
   const task = (async () => {
     listingChangesLoading = true;
     listingChangesError = '';
+    renderRecentListingPanels();
     renderCompetitorListings();
     try {
       const response = await fetch('/api/listing-changes', { method:'GET' });
@@ -8608,6 +8772,7 @@ async function loadListingChanges(force = false) {
       if (payload?.schemaVersion !== LISTING_AUDIT_SCHEMA_VERSION || !Array.isArray(payload?.events) ||
           !Array.isArray(payload?.sources) || !Array.isArray(payload?.pendingReviews) ||
           !listingHistoryContractValid(payload?.history) || payload.events.length > Number(payload.history.maxEvents) ||
+          !payload.events.every(listingPublicEventValid) ||
           (payload.history.truncated && payload.status === 'full')) {
         throw new Error('Invalid listing audit snapshot');
       }
@@ -8624,6 +8789,7 @@ async function loadListingChanges(force = false) {
     } finally {
       listingChangesLoading = false;
       listingChangesPromise = null;
+      renderRecentListingPanels();
       renderCompetitorListings();
       renderSignalRadar();
     }
@@ -10607,6 +10773,8 @@ function switchTopPage(page) {
     ]);
   } else if (page === 'spot') {
     renderVisibleDataPage();
+    renderRecentListings('spot');
+    ensureListingChanges(false).catch(error => console.error('[Spot listings] page load failed:', error));
     scheduleSpotReferenceEnrichment();
     const hasSpotData = Object.values(SPOT_DATA).some(rows => Array.isArray(rows) && rows.length);
     if (!hasSpotData || Date.now() - lastSpotRefreshAt >= SPOT_REFRESH_INTERVAL) {
@@ -10614,6 +10782,8 @@ function switchTopPage(page) {
     }
   } else if (page !== 'cross') {
     renderVisibleDataPage();
+    renderRecentListings('perp');
+    ensureListingChanges(false).catch(error => console.error('[Perpetual listings] page load failed:', error));
   }
 }
 
@@ -12201,6 +12371,8 @@ function switchSpotSub(view, el) {
     renderSpotArbRank();
     updateSpotKpis();
     updateSpotStatusLine();
+    renderRecentListings('spot');
+    ensureListingChanges(false).catch(error => console.error('[Spot listings] overview load failed:', error));
   } else if (view === 'allAssets') {
     document.getElementById('spot-allAssets').style.display = '';
     renderSpotAllAssets();
@@ -13083,6 +13255,9 @@ async function resumeVisibleRefreshes() {
     ]);
     return;
   }
+  if (activePage === 'perps' || activePage === 'spot') {
+    await ensureListingChanges(false);
+  }
   const now = Date.now();
   const needsPerpOverlay = activePage === 'perps' || activePage === 'spot' || activePage === 'traditional';
   if (needsPerpOverlay && (!allData.length || now - lastPerpRefreshAt >= REFRESH_INTERVAL)) {
@@ -13142,10 +13317,12 @@ function startPolling() {
     }
   }, SPOT_REFRESH_INTERVAL);
   signalRefreshTimer = setInterval(() => {
+    if (listingDataConsumerIsActive()) {
+      ensureListingChanges(false).catch(error => console.error('[Listing Monitor] scheduled refresh failed:', error));
+    }
     if (radarPageIsActive()) {
       Promise.allSettled([
         ensureSignalSnapshot(false),
-        ensureListingChanges(false),
       ]);
     }
   }, SIGNAL_SNAPSHOT_TTL);
@@ -13168,6 +13345,7 @@ document.addEventListener('visibilitychange', () => {
     const overlay = document.getElementById('loadingOverlay');
     if (overlay) overlay.style.display = 'none';
     renderVisibleDataPage();
+    ensureListingChanges(false).catch(error => console.error('[Listing Monitor] init failed:', error));
     ensureUsMarketDirectory().catch(error => console.error('[US market directory] init failed:', error));
     // Perpetual and Spot are independent primary pages. Start both cold loads
     // together; Spot must never wait behind the full Perpetual venue fan-out.

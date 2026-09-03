@@ -203,6 +203,29 @@
     'History':'历史',
     'Aggregated OI and proxy values':'汇总 OI 与代理数值',
     'Competitor New Listings':'竞品新上线资产',
+    'Recently Listed Perpetuals':'最近新上合约',
+    'Recently Listed Spot Pairs':'最近新上现货',
+    'Verified and eligible exact contracts from the Dashboard PostgreSQL listing authority. The default view covers the latest seven days.':'来自 Dashboard PostgreSQL 上架权威的已验证、可纳入精确合约。默认展示最近七天。',
+    'Verified and eligible exact spot pairs from the Dashboard PostgreSQL listing authority. The default view covers the latest seven days.':'来自 Dashboard PostgreSQL 上架权威的已验证、可纳入精确现货交易对。默认展示最近七天。',
+    'Listing monitoring is temporarily unavailable; recent additions cannot be determined.':'上架监控暂不可用，不能判断近期是否有新增。',
+    'Loading recent perpetual listings…':'正在加载最近新上合约…',
+    'Loading recent spot listings…':'正在加载最近新上现货…',
+    'View all · 45 days':'查看全部 · 最近 45 天',
+    'Show recent · 7 days':'返回最近 7 天',
+    'Loading the latest authoritative listing audit…':'正在加载最新权威上架审计…',
+    'Listing coverage is complete; events come from the Dashboard PostgreSQL authority.':'上架覆盖完整；事件来自 Dashboard PostgreSQL 权威数据。',
+    'No new trading pairs in the past 7 days.':'近 7 日暂无新上交易对。',
+    'No new trading pairs in the past 45 days.':'近 45 日暂无新上交易对。',
+    'Listing monitoring unavailable':'上架监控暂不可用',
+    'The current coverage cannot support a no-new-listing conclusion.':'当前覆盖不足，不能判断近期是否有新增。',
+    'All ten official catalog sources were comparable for the latest successful audit.':'最近一次成功审计的十个官方目录来源均可比较。',
+    'Event':'事件',
+    'Underlying':'对应标的',
+    'Product category':'产品分类',
+    'Listing time':'上架时间',
+    'Official listing time':'官方上线时间',
+    'System first-confirmed time':'系统首次确认时间',
+    'Company stage':'公司生命周期',
     'Daily official catalog review with a rolling seven-day view. Verified listings are eligible for the existing Perpetual or Spot loaders; exact website inclusion is confirmed by venue instrument, while ambiguous identities remain Review required.':'每日检查官方目录，并以滚动七天展示。已验证标的具备进入现有永续合约或现货加载流程的资格；本站是否已收录以同一平台的精确标的为准，身份不明确的标的保持待审核。',
     'Daily check':'每日检查',
     'not loaded':'尚未加载',
@@ -216,8 +239,8 @@
     'Filter listing venue':'筛选上架平台',
     'Filter listing status':'筛选上架状态',
     'All listing statuses':'全部上架状态',
-    'New listing':'新上线',
-    'Re-listed':'重新上线',
+    'New listing':'新上架',
+    'Re-listed':'重新上架',
     'Review required':'待审核',
     'Included':'已收录',
     'Pending refresh':'等待刷新',
@@ -904,6 +927,18 @@
     }],
     [/^No new competitor listings detected in the rolling (7|30)-day window\.$/, function (m) {
       return '滚动 ' + m[1] + ' 天内未发现竞品新上线资产。';
+    }],
+    [/^Coverage is incomplete\. (\d[\d,]*) reliable events? shown; missing sources are not treated as no new listings\.$/, function (m) {
+      return '覆盖不完整。已展示 ' + m[1] + ' 条可靠事件；缺失来源不会被当作“没有新增”。';
+    }],
+    [/^No newly listed perpetuals in the past (7|45) days$/, function (m) {
+      return '近 ' + m[1] + ' 日暂无新上合约';
+    }],
+    [/^No newly listed spot pairs in the past (7|45) days$/, function (m) {
+      return '近 ' + m[1] + ' 日暂无新上现货';
+    }],
+    [/^Company stage · (.+)$/, function (m) {
+      return '公司生命周期 · ' + translateCore(m[1], 'zh-CN');
     }],
     [/^No new competitor listings detected in the rolling (7|30)-day window\. (\d[\d,]*) active identity reviews? remain visible until resolved\.$/, function (m) {
       return '滚动 ' + m[1] + ' 天内未发现竞品新上线资产。' + m[2] + ' 个待身份审核项会持续显示，直至解决。';

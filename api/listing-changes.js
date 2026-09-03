@@ -4,6 +4,15 @@ import {
   emptyListingAuditSnapshot,
   mergeListingAudit,
 } from './_lib/listing-audit.js';
+import {
+  LISTING_AUDIT_EVENTS_ENCODING,
+  LISTING_AUDIT_KNOWN_ENCODING,
+  prepareListingAuditCheckpoint,
+  readListingAuditCheckpoint,
+  resolveListingCheckpointWriteMode,
+  resolveListingReadMode,
+  writeListingAuditCheckpoint,
+} from './_lib/listing-audit-checkpoint.js';
 import { collectListingSourceObservations } from './_lib/listing-sources.js';
 import {
   acquireListingAuditPublicationLease,
@@ -20,6 +29,7 @@ import {
   setNoStore,
   setPublicCache,
 } from './_lib/upstream.js';
+import { readListingEventAuthority } from './_lib/listing-event-authority.js';
 
 export const config = { regions: ['iad1'], maxDuration: 120 };
 
@@ -66,9 +76,6 @@ function isPublicationLeaseServiceFailure(error) {
   return false;
 }
 
-const COMPACT_KNOWN_ENCODING = 'listing-row-array/v1';
-const COMPACT_EVENTS_ENCODING = 'listing-event-array/v1';
-
 function listingKeyParts(key) {
   const [market, venue, ...venueParts] = String(key || '').split(':');
   return { market, venue, venueSymbol:venueParts.join(':') };
@@ -87,6 +94,7 @@ export function compactListingAuditState(state) {
     row?.removedAt || null,
     row?.venueCategory || row?.category || null,
     row?.lifecycleStatus || null,
+    row?.officialListedAt || null,
   ]]));
   const events = (Array.isArray(state?.events) ? state.events : []).map(event => [
     event?.eventId || null,
@@ -101,11 +109,13 @@ export function compactListingAuditState(state) {
     event?.inclusionStatus === 'review-required' ? 'r' : event?.inclusionStatus === 'removed' ? 'm' : 'e',
     event?.venueCategory || event?.category || null,
     event?.lifecycleStatus || null,
+    event?.officialListedAt || null,
+    event?.timeBasis || (event?.officialListedAt ? 'official' : 'first_observed'),
   ]);
   return {
     ...state,
-    knownEncoding: COMPACT_KNOWN_ENCODING,
-    eventsEncoding: COMPACT_EVENTS_ENCODING,
+    knownEncoding: LISTING_AUDIT_KNOWN_ENCODING,
+    eventsEncoding: LISTING_AUDIT_EVENTS_ENCODING,
     known,
     events,
   };
@@ -113,7 +123,7 @@ export function compactListingAuditState(state) {
 
 export function hydrateListingAuditState(state) {
   if (!state) return null;
-  const known = state.knownEncoding === COMPACT_KNOWN_ENCODING
+  const known = state.knownEncoding === LISTING_AUDIT_KNOWN_ENCODING
     ? Object.fromEntries(Object.entries(state.known || {}).flatMap(([key, compact]) => {
       if (!Array.isArray(compact) || compact.length < 9) return [];
       const { market, venue, venueSymbol } = listingKeyParts(key);
@@ -128,6 +138,7 @@ export function hydrateListingAuditState(state) {
         category:compact[1],
         venueCategory:compact[9] || compact[1],
         lifecycleStatus:compact[10] || null,
+        officialListedAt:compact[11] || null,
         name:compact[2],
         identityStatus,
         identityEvidence:compact[4],
@@ -140,12 +151,13 @@ export function hydrateListingAuditState(state) {
       }]];
     }))
     : state.known;
-  const events = state.eventsEncoding === COMPACT_EVENTS_ENCODING
+  const events = state.eventsEncoding === LISTING_AUDIT_EVENTS_ENCODING
     ? (Array.isArray(state.events) ? state.events : []).flatMap(compact => {
       if (!Array.isArray(compact) || compact.length < 10) return [];
       const [
         eventId, listingKey, changeCode, detectedAt, canonicalSymbol, category, name,
         identityCode, identityEvidence, inclusionCode, venueCategory, lifecycleStatus,
+        officialListedAt, timeBasis,
       ] = compact;
       const { market, venue, venueSymbol } = listingKeyParts(listingKey);
       return [{
@@ -153,6 +165,7 @@ export function hydrateListingAuditState(state) {
         listingKey,
         changeType:changeCode === 'r' ? 'relisted' : changeCode === 'd' ? 'delisted' : 'new',
         detectedAt,
+        observedAt:detectedAt,
         market,
         venue,
         venueSymbol,
@@ -160,7 +173,9 @@ export function hydrateListingAuditState(state) {
         category,
         venueCategory:venueCategory || category,
         lifecycleStatus:lifecycleStatus || null,
-        name,
+        officialListedAt:officialListedAt || null,
+        timeBasis:timeBasis || (officialListedAt ? 'official' : 'first_observed'),
+        name:name || canonicalSymbol,
         identityStatus:identityCode === 'r' ? 'review-required' : 'verified',
         identityEvidence,
         inclusionStatus:inclusionCode === 'r' ? 'review-required' : inclusionCode === 'm' ? 'removed' : 'eligible',
@@ -194,23 +209,151 @@ export function hydrateListingAuditSnapshot(bundle) {
   return { ...snapshot, events };
 }
 
-function responseSnapshot(snapshot) {
+function responseSnapshot(snapshot, readPath = null) {
   return {
     ...snapshot,
     persistence: {
       ...snapshot.persistence,
       region: process.env.VERCEL_REGION || 'iad1',
+      ...(readPath ? { readPath } : {}),
     },
   };
 }
 
-export async function readListingChangesSnapshot() {
-  const cache = getCache({ namespace: CACHE_NAMESPACE });
-  const bundle = await cache.get(BUNDLE_KEY);
-  const snapshot = hydrateListingAuditSnapshot(bundle);
+function runtimeBundleResult(bundle, error = null) {
+  if (error) return { status:'unavailable', bundle:null, observedAt:null, checksum:null, error };
+  if (!bundle) return { status:'empty', bundle:null, observedAt:null, checksum:null, error:null };
+  try {
+    const prepared = prepareListingAuditCheckpoint(bundle);
+    return {
+      status:'stored',
+      bundle,
+      observedAt:prepared.observedAt,
+      checksum:prepared.payloadSha256,
+      error:null,
+    };
+  } catch (validationError) {
+    return {
+      status:'unavailable',
+      bundle:null,
+      observedAt:null,
+      checksum:null,
+      error:validationError,
+    };
+  }
+}
+
+function reconciliationStatus(runtime, durable) {
+  if (runtime.status !== 'stored') return `runtime-${runtime.status}`;
+  if (durable.status !== 'stored') return `durable-${durable.status}`;
+  if (runtime.observedAt === durable.observedAt && runtime.checksum === durable.checksum) return 'match';
+  const runtimeAt = Date.parse(runtime.observedAt);
+  const durableAt = Date.parse(durable.observedAt);
+  if (runtimeAt < durableAt) return 'runtime-behind';
+  if (runtimeAt > durableAt) return 'runtime-ahead';
+  return 'checksum-mismatch';
+}
+
+function readPathMetadata(mode, source, reconciliation, runtime, durable) {
+  return {
+    mode,
+    source,
+    reconciliation,
+    runtimeCache:{ status:runtime.status, observedAt:runtime.observedAt },
+    durableCheckpoint:{ status:durable.status, observedAt:durable.observedAt },
+  };
+}
+
+export function selectListingAuditBundle({ mode, runtime, durable }) {
+  const reconciliation = reconciliationStatus(runtime, durable);
+  if (mode === 'runtime-cache') {
+    if (runtime.status === 'unavailable') throw runtime.error || new Error('Listing Audit Runtime Cache unavailable');
+    return {
+      bundle:runtime.bundle,
+      readPath:readPathMetadata(mode, runtime.bundle ? 'runtime-cache' : 'empty', reconciliation, runtime, durable),
+    };
+  }
+  if (mode === 'dual-read') {
+    if (runtime.status === 'unavailable') throw runtime.error || new Error('Listing Audit Runtime Cache unavailable');
+    return {
+      bundle:runtime.bundle,
+      readPath:readPathMetadata(mode, runtime.bundle ? 'runtime-cache' : 'empty', reconciliation, runtime, durable),
+    };
+  }
+  if (mode !== 'durable-fallback') throw new TypeError(`Unsupported Listing Audit read mode: ${mode}`);
+  if (durable.status !== 'stored' || !durable.bundle) {
+    const error = new Error('Listing Audit durable checkpoint unavailable');
+    error.code = 'LISTING_DURABLE_CHECKPOINT_UNAVAILABLE';
+    throw error;
+  }
+  if (runtime.status !== 'stored') {
+    return {
+      bundle:durable.bundle,
+      readPath:readPathMetadata(mode, 'postgres-checkpoint', reconciliation, runtime, durable),
+    };
+  }
+  if (reconciliation === 'match') {
+    return {
+      bundle:runtime.bundle,
+      readPath:readPathMetadata(mode, 'runtime-cache', reconciliation, runtime, durable),
+    };
+  }
+  if (reconciliation === 'runtime-behind') {
+    return {
+      bundle:durable.bundle,
+      readPath:readPathMetadata(mode, 'postgres-checkpoint', reconciliation, runtime, durable),
+    };
+  }
+  const error = new Error(`Listing Audit replica reconciliation failed: ${reconciliation}`);
+  error.code = 'LISTING_AUDIT_REPLICA_MISMATCH';
+  throw error;
+}
+
+async function loadListingAuditBundle({
+  cache,
+  env,
+  readCheckpoint = readListingAuditCheckpoint,
+}) {
+  const configuredMode = resolveListingReadMode(env);
+  // The public PostgreSQL event reader is not a writer baseline. While that
+  // mode is active, the writer continues from the exact durable comparison
+  // checkpoint so cache eviction cannot recreate an empty baseline.
+  const mode = configuredMode === 'postgres-authoritative' ? 'durable-fallback' : configuredMode;
+  if (mode === 'runtime-cache') {
+    const bundle = await cache.get(BUNDLE_KEY);
+    const runtime = runtimeBundleResult(bundle);
+    return selectListingAuditBundle({
+      mode,
+      runtime,
+      durable:{ status:'not-requested', bundle:null, observedAt:null, checksum:null, error:null },
+    });
+  }
+  const [runtime, durable] = await Promise.all([
+    cache.get(BUNDLE_KEY)
+      .then(bundle => runtimeBundleResult(bundle))
+      .catch(error => runtimeBundleResult(null, error)),
+    readCheckpoint({ env }),
+  ]);
+  return selectListingAuditBundle({ mode, runtime, durable });
+}
+
+export async function readListingChangesSnapshot(dependencies = {}) {
+  const env = dependencies.env || process.env;
+  const mode = resolveListingReadMode(env);
+  if (mode === 'postgres-authoritative') {
+    const authority = await (dependencies.readEventAuthority || readListingEventAuthority)({ env });
+    return responseSnapshot(authority.snapshot, authority.readPath);
+  }
+  const cache = dependencies.cache || getCache({ namespace: CACHE_NAMESPACE });
+  const selected = await loadListingAuditBundle({
+    cache,
+    env,
+    readCheckpoint:dependencies.readCheckpoint || readListingAuditCheckpoint,
+  });
+  const snapshot = hydrateListingAuditSnapshot(selected.bundle);
   return snapshot
-    ? responseSnapshot(snapshot)
-    : responseSnapshot(emptyListingAuditSnapshot());
+    ? responseSnapshot(snapshot, selected.readPath)
+    : responseSnapshot(emptyListingAuditSnapshot(), selected.readPath);
 }
 
 export function listingSnapshotIsCacheable(snapshot) {
@@ -242,9 +385,14 @@ export async function runListingAudit(req, res, dependencies = {}) {
   const pgWriteMode = resolvePgWriteMode(persistenceEnv);
   let previousBundle;
   try {
-    previousBundle = await cache.get(BUNDLE_KEY);
+    const selected = await loadListingAuditBundle({
+      cache,
+      env:persistenceEnv,
+      readCheckpoint:dependencies.readCheckpoint || readListingAuditCheckpoint,
+    });
+    previousBundle = selected.bundle;
   } catch (error) {
-    console.error('[listing-audit] runtime state read failed', error);
+    console.error('[listing-audit] publication state read failed', error);
     setNoStore(res);
     listingAuditRunning = false;
     return res.status(503).json({
@@ -337,7 +485,17 @@ export async function runListingAudit(req, res, dependencies = {}) {
       });
     }
     if (publicationLease.mode !== 'off' && publicationLease.status !== 'degraded') {
-      const leasedPreviousBundle = await cache.get(BUNDLE_KEY);
+      // Re-run the configured selector after acquiring the distributed lease.
+      // In durable-fallback mode an evicted Runtime Cache is expected to select
+      // the exact PostgreSQL checkpoint again; comparing that checkpoint to the
+      // raw null cache value would incorrectly reject a safe recovery as a
+      // concurrent state advance.
+      const leasedSelection = await loadListingAuditBundle({
+        cache,
+        env:persistenceEnv,
+        readCheckpoint:dependencies.readCheckpoint || readListingAuditCheckpoint,
+      });
+      const leasedPreviousBundle = leasedSelection.bundle;
       const initialPreviousChecksum = listingAuditPersistenceChecksum(previousBundle ?? null);
       const leasedPreviousChecksum = listingAuditPersistenceChecksum(leasedPreviousBundle ?? null);
       if (initialPreviousChecksum !== leasedPreviousChecksum) {
@@ -403,6 +561,15 @@ export async function runListingAudit(req, res, dependencies = {}) {
       }
     }
     publishedBundleChecksum = bundleChecksum;
+    const checkpointWrite = await (
+      dependencies.writeCheckpoint || writeListingAuditCheckpoint
+    )(bundle, merged.snapshot.generatedAt, { env:persistenceEnv });
+    const checkpointWriteMode = resolveListingCheckpointWriteMode(persistenceEnv);
+    if (checkpointWriteMode === 'required' && checkpointWrite?.status !== 'stored') {
+      const error = new Error(`Required Listing Audit checkpoint write ${checkpointWrite?.status || 'unavailable'}`);
+      error.code = 'LISTING_AUDIT_CHECKPOINT_WRITE_REQUIRED';
+      throw error;
+    }
     let runtimeCacheCommit;
     let runtimeCacheVerification;
     try {
@@ -452,6 +619,7 @@ export async function runListingAudit(req, res, dependencies = {}) {
         identityStatus: event.identityStatus,
       })),
       durableWrite,
+      checkpointWrite,
       runtimeCacheCommit,
       runtimeCacheVerification: {
         ...runtimeCacheVerification,
@@ -470,7 +638,17 @@ export async function runListingAudit(req, res, dependencies = {}) {
       console.warn('[listing-audit]', JSON.stringify(summary));
     }
     setNoStore(res);
-    return res.status(snapshot.status === 'unavailable' ? 503 : 200).json(snapshot);
+    return res.status(snapshot.status === 'unavailable' ? 503 : 200).json({
+      ...snapshot,
+      persistence:{
+        ...snapshot.persistence,
+        durableCheckpoint:{
+          writeMode:checkpointWriteMode,
+          writeStatus:checkpointWrite?.status || 'unavailable',
+          observedAt:checkpointWrite?.observedAt || null,
+        },
+      },
+    });
   } catch (error) {
     console.error('[listing-audit] run or atomic bundle write failed', error);
     setNoStore(res);

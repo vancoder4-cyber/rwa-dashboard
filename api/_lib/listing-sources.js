@@ -4,6 +4,7 @@ import {
   SECURITY_ETF_UNDERLYINGS,
   categoryFromOfficialSignalType,
   normalizeSignalIdentity,
+  securityDisplayName,
   securityLifecycleStatus,
 } from './security-identity.js';
 import {
@@ -72,6 +73,12 @@ function normalized(value) {
 
 function normalizedUpper(value) {
   return normalized(value).toUpperCase();
+}
+
+function officialEpochTimestamp(value) {
+  const milliseconds = Number(value);
+  if (!Number.isSafeInteger(milliseconds) || milliseconds < Date.UTC(2020, 0, 1)) return null;
+  return new Date(milliseconds).toISOString();
 }
 
 function boundedSourcePolicy(deadlineAt, { retries = 0, baseDelayMs = 250 } = {}) {
@@ -183,7 +190,7 @@ function listing(market, venue, venueSymbol, canonicalSymbol, category, extras =
     category,
     venueCategory,
     lifecycleStatus: securityLifecycleStatus(canonicalSymbol, category),
-    name: normalized(extras.name) || null,
+    name: normalized(extras.name) || securityDisplayName(canonicalSymbol),
     identityStatus: extras.identityStatus || 'verified',
     identityEvidence: extras.identityEvidence || null,
   };
@@ -196,6 +203,7 @@ function listing(market, venue, venueSymbol, canonicalSymbol, category, extras =
   if (Array.isArray(extras.marketAliases)) {
     row.marketAliases = [...new Set(extras.marketAliases.map(normalizedUpper).filter(Boolean))];
   }
+  if (extras.officialListedAt) row.officialListedAt = extras.officialListedAt;
   return row;
 }
 
@@ -361,6 +369,10 @@ async function collectBinancePerp(baseUrl) {
     if (!identity) continue;
     rows.push(listing('perp', 'binance', contract.symbol, identity.symbol, identity.category, {
       venueCategory:category,
+      // Binance's exchangeInfo onboardDate is official product metadata. It is
+      // copied only onto an independently diff-detected event and never used to
+      // manufacture a listing lifecycle transition.
+      officialListedAt:officialEpochTimestamp(contract?.onboardDate),
       identityEvidence: isMetal
         ? 'audited Binance tokenized-metal exception'
         : `Binance contractType=TRADIFI_PERPETUAL; underlyingType=${contract.underlyingType}`,

@@ -4,10 +4,13 @@ export const DATABASE_URL_ENV_KEY = 'DATABASE_URL';
 export const DATABASE_URL_UNPOOLED_ENV_KEY = 'DATABASE_URL_UNPOOLED';
 export const PREVIEW_DATABASE_URL_ENV_KEY = 'PREVIEW_NEON_DATABASE_URL';
 export const PREVIEW_DATABASE_URL_UNPOOLED_ENV_KEY = 'PREVIEW_NEON_DATABASE_URL_UNPOOLED';
+export const LISTING_DATABASE_URL_ENV_KEY = 'LISTING_DATABASE_URL';
+export const PREVIEW_LISTING_DATABASE_URL_ENV_KEY = 'PREVIEW_NEON_LISTING_DATABASE_URL';
 export const DATABASE_TRANSACTION_TIMEOUT_MS = 25_000;
 
 let databaseSql = null;
 let migrationDatabaseSql = null;
+let listingDatabaseSql = null;
 
 export function databaseEnvironmentKeys(env = process.env) {
   if (String(env?.VERCEL_ENV || '').trim().toLowerCase() === 'preview') {
@@ -33,12 +36,32 @@ export function migrationDatabaseConnectionString(env = process.env) {
   return String(env?.[unpooled] || '').trim() || databaseConnectionString(env);
 }
 
+export function listingDatabaseEnvironmentKey(env = process.env) {
+  return String(env?.VERCEL_ENV || '').trim().toLowerCase() === 'preview'
+    ? PREVIEW_LISTING_DATABASE_URL_ENV_KEY
+    : LISTING_DATABASE_URL_ENV_KEY;
+}
+
+export function listingDatabaseConnectionString(env = process.env) {
+  const key = listingDatabaseEnvironmentKey(env);
+  const value = String(env?.[key] || '').trim();
+  if (!value) return null;
+  if (value === databaseConnectionString(env)) {
+    throw new Error(`${key} must use a dedicated read-only login, not the writer/migration owner connection`);
+  }
+  return value;
+}
+
 export function databaseConfigured(env = process.env) {
   return databaseConnectionString(env) !== null;
 }
 
 export function migrationDatabaseConfigured(env = process.env) {
   return migrationDatabaseConnectionString(env) !== null;
+}
+
+export function listingDatabaseConfigured(env = process.env) {
+  return listingDatabaseConnectionString(env) !== null;
 }
 
 export function getDatabaseSql() {
@@ -67,7 +90,20 @@ export function getMigrationDatabaseSql() {
   return migrationDatabaseSql;
 }
 
-export async function runDatabaseTransaction(buildQueries, options = {}) {
+export function getListingDatabaseSql() {
+  if (listingDatabaseSql) return listingDatabaseSql;
+
+  const connectionString = listingDatabaseConnectionString();
+  if (!connectionString) {
+    const key = listingDatabaseEnvironmentKey();
+    throw new Error(`${key} is required for the Listing Audit durable reader`);
+  }
+
+  listingDatabaseSql = neon(connectionString);
+  return listingDatabaseSql;
+}
+
+async function runTransaction(sql, buildQueries, options = {}) {
   if (typeof buildQueries !== 'function') {
     throw new TypeError('buildQueries must be a synchronous function');
   }
@@ -79,7 +115,6 @@ export async function runDatabaseTransaction(buildQueries, options = {}) {
   const fetchOptions = { ...(options.fetchOptions || {}) };
   if (!fetchOptions.signal) fetchOptions.signal = AbortSignal.timeout(timeoutMs);
 
-  const sql = getDatabaseSql();
   return sql.transaction((transactionSql) => {
     const queries = buildQueries(transactionSql);
     if (!Array.isArray(queries) || queries.length === 0) {
@@ -94,7 +129,16 @@ export async function runDatabaseTransaction(buildQueries, options = {}) {
   });
 }
 
+export async function runDatabaseTransaction(buildQueries, options = {}) {
+  return runTransaction(getDatabaseSql(), buildQueries, options);
+}
+
+export async function runListingDatabaseTransaction(buildQueries, options = {}) {
+  return runTransaction(getListingDatabaseSql(), buildQueries, { ...options, readOnly:true });
+}
+
 export function resetDatabaseClientForTests() {
   databaseSql = null;
   migrationDatabaseSql = null;
+  listingDatabaseSql = null;
 }

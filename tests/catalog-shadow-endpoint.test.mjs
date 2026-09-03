@@ -46,6 +46,13 @@ test('in-region catalog readiness is read-only and returns the sanitized reconci
     readyForPhase2:true,
     scope:{ marketFactsChecked:false, rollingMarketHistoryVerified:false },
   };
+  const checkpoint = {
+    status:'stored',
+    observedAt:'2026-08-25T13:00:00.000Z',
+    checksum:'a'.repeat(64),
+    bytes:1234,
+    error:null,
+  };
   await serveCatalogShadowReadiness({
     method:'GET', query:{}, headers:{ authorization:'Bearer readiness-test-secret' },
   }, response, {
@@ -58,12 +65,53 @@ test('in-region catalog readiness is read-only and returns the sanitized reconci
       calls.push(['readiness', input]);
       return report;
     },
+    readCheckpoint:async input => {
+      calls.push(['checkpoint', input]);
+      return checkpoint;
+    },
   });
   assert.equal(response.statusCode, 200);
-  assert.deepEqual(response.payload, report);
+  assert.deepEqual(response.payload, {
+    ...report,
+    durableCheckpointReader:{
+      status:'stored',
+      observedAt:checkpoint.observedAt,
+      checksum:checkpoint.checksum,
+      bytes:checkpoint.bytes,
+      error:null,
+    },
+  });
   assert.equal(calls[0][1], 'https://preview-main.vercel.app');
-  assert.equal(calls[1][1].runtimeSnapshot.schemaVersion, 'rwa-listing-audit/v1');
-  assert.equal(calls[1][1].runtimeError, null);
+  assert.deepEqual(calls[1][1], { env });
+  assert.equal(calls[2][1].runtimeSnapshot.schemaVersion, 'rwa-listing-audit/v1');
+  assert.equal(calls[2][1].runtimeError, null);
+});
+
+test('in-region catalog readiness exposes only a sanitized durable-reader error', async () => {
+  const response = responseRecorder();
+  await serveCatalogShadowReadiness({
+    method:'GET', query:{}, headers:{ authorization:'Bearer readiness-test-secret' },
+  }, response, {
+    env,
+    loadSnapshot:async () => ({ schemaVersion:'rwa-listing-audit/v1' }),
+    readCheckpoint:async () => ({
+      status:'unavailable',
+      error:'postgres://reader:secret@host/database permission denied',
+    }),
+    runReadiness:async () => ({
+      schemaVersion:'rwa-catalog-shadow-readiness/v2',
+      status:'fail',
+    }),
+  });
+  assert.equal(response.statusCode, 503);
+  assert.deepEqual(response.payload.durableCheckpointReader, {
+    status:'unavailable',
+    observedAt:null,
+    checksum:null,
+    bytes:null,
+    error:'[redacted-url] permission denied',
+  });
+  assert.doesNotMatch(response.payload.durableCheckpointReader.error, /reader|secret|postgres:\/\//);
 });
 
 test('in-region catalog readiness fails closed without leaking connection URLs', async () => {

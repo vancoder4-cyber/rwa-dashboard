@@ -105,7 +105,7 @@ trade.xyz 当前专用 `xyz` DEX universe 有 5 个 `perpCategories` 空缺：`U
 - `QNT/QNTX/QNTSTOCK/QNTB`：统一为已上市的 Quantinuum Equity，但只有场所先确认 security 后才应用 alias。
 - `MINIMAX/ZHIPU/CXMT`：已上市 Equity。
 - `OPENAI/ANTHROPIC/SHEIN/ANDURIL/KALSHI/KIMI/NEURALINK/POLYMARKET`：Pre-IPO；后五项由 Gate 官方 `stocks + is_pre_market=true` catalog 交叉审计纳入。
-- `UNITREE`：已获 IPO 注册、尚未找到开始交易公告，因此仍为 Pre-IPO。
+- `UNITREE`：上海证券交易所公告确认 2026-08-19 起在科创板上市交易（证券代码 688836），因此为已上市 Equity / `public`；场所仍可使用 `UNITREE` 等产品代码，不能继续沿用 Pre-IPO 生命周期。
 - `EWH/DFEN`：全局 ETF 类别修正；Gate 的 `QQQX/SPYX/TQQQX/SLVON` 是仅在 Gate 官方 RWA catalog 门控后生效的 ETF wrapper，不能作为全局 ticker 类别修正。
 - `H100`：计算资源类 Commodity，不是股票指数。
 - 已公开上市的公司不能因为场所残留 `is_pre_market` 就继续显示为 Pre-IPO。
@@ -114,11 +114,13 @@ trade.xyz 当前专用 `xyz` DEX universe 有 5 个 `perpCategories` 空缺：`U
 
 上市状态只能在 `SECURITY_LISTING_REGISTRY` 更新一次，由它统一派生 canonical category、名称和 aliases。场所 snapshot 的 `PRE-IPO` 分组只是当时的产品目录，不拥有最终分类权；即使 fallback 分组过期，也必须经过 registry 再分类。
 
-场所页同时保留一层独立的场所产品分类。trade.xyz 页以当前 `xyz` DEX 的 exact `perpCategories` 为准展示筛选与行标签；例如官方 `xyz:UNITREE = stocks` 在该场所页显示为 Equity，而公司级 `ipo-registered` 生命周期仍由 registry 单独保留。当前 `xyz` DEX 没有 exact Pre-IPO 合约时，场所页隐藏空的 Pre-IPO 筛选，不能把其他 HIP-3 DEX（例如 `vntl:*`）的分类借给 `xyz:*`。
+场所页同时保留一层独立的场所产品分类。trade.xyz 页以当前 `xyz` DEX 的 exact `perpCategories` 为准展示筛选与行标签；例如官方 `xyz:UNITREE = stocks` 在该场所页显示为 Equity，而公司级 `public` 生命周期由 registry 单独保留。当前 `xyz` DEX 没有 exact Pre-IPO 合约时，场所页隐藏空的 Pre-IPO 筛选，不能把其他 HIP-3 DEX（例如 `vntl:*`）的分类借给 `xyz:*`。
 
-上架事件也必须发布这两层口径：`venueCategory` 是该交易场所精确产品的官方类别，`category` 是经过 lifecycle registry 细化后的 canonical 资产类别，`lifecycleStatus` 单独说明 `public / pre-ipo / ipo-registered`。例如 `xyz:UNITREE` 的上架消息必须写“合约分类：Equity”，并另写“公司阶段：已获 IPO 注册、尚未开始公开交易”；不能把公司阶段冒充成 trade.xyz 的合约分类。下游 Push Bot 只能使用这些 Dashboard 字段，不得自行按名称或 ticker 推断。
+上架事件也必须发布这两层口径：`venueCategory` 是该交易场所精确产品的官方类别，`category` 是经过 lifecycle registry 细化后的 canonical 资产类别，`lifecycleStatus` 单独说明 `public / pre-ipo / ipo-registered`。例如 `xyz:UNITREE` 的上架消息必须写“合约分类：Equity”，并另写“公司阶段：已上市”；不能把旧公司阶段冒充成 trade.xyz 的合约分类。下游 Push Bot 只能使用这些 Dashboard 字段，不得自行按名称或 ticker 推断。
 
-Durable catalog 中的同一官方产品只有在 canonical underlying 完全不变、旧/新类别严格属于 `equity ↔ pre-ipo`，且 reviewed `lifecycleStatus` 与新类别一致时，才允许做版本化的公司生命周期分类纠正。这不是 New/Re-listed 事件。Ticker、canonical underlying、ETF、Commodity、Index、FX 或 Bond 的变化仍然是硬身份冲突，必须阻止发布并人工核对。
+`UNITREE` 本次生命周期修正的官方依据是上海证券交易所 2026-08-18 发布的[上市交易公告](https://www.sse.com.cn/disclosure/announcement/listing/ipo/c/c_20260818_10829204.shtml)：股票自 2026-08-19 起上市交易。该修正更新既有精确产品的身份版本，不产生 New/Re-listed；某交易所后来新增一个精确 `venueSymbol` 时，仍由正常目录差分独立产生该场所的 listed 事件。
+
+Durable catalog 中的同一官方产品只有在 canonical underlying 完全不变、旧类别为 `pre-ipo`、新类别为 `equity`、新 `lifecycleStatus=public`，且 canonical 已进入 `REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS` 的有日期官方依据白名单时，才允许做版本化的单向公司生命周期分类纠正。这不是 New/Re-listed 事件。反向修正、非白名单标的，以及 ticker、canonical underlying、ETF、Commodity、Index、FX 或 Bond 的变化仍然是硬身份冲突，必须阻止发布并人工核对；新增白名单项必须同时补官方来源和防反向测试。
 
 官方类型只允许精确归一化映射，例如 `PRE-IPO/PRE_IPO/PREIPO -> PREIPO`、`PRE-MARKET -> PREMARKET`。禁止用 `includes('PRE')` 判断，否则 `PREFERRED_STOCK` 等无关类型也可能被误判为 Pre-IPO。布尔字段也必须显式解析，字符串 `"false"` 不能按 JavaScript truthy 值处理。
 
@@ -326,7 +328,7 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 - MiniMax 上市状态：[HKEX allotment results（0100，2026-01-09 开始交易）](https://www1.hkexnews.hk/listedco/listconews/sehk/2026/0108/2026010801342.pdf)。
 - Z.AI / Zhipu 上市身份：[HKEX issuer announcement（2513）](https://www.hkexnews.hk/listedco/listconews/sehk/2026/0112/2026011201131.pdf)。
 - 长鑫科技上市状态：[上交所上市交易公告（688825，2026-07-27）](https://www.sse.com.cn/disclosure/announcement/listing/ipo/c/c_20260724_10826610.shtml)。
-- Unitree 当前阶段：[证监会 IPO 注册批复（2026-07-01）](https://www.csrc.gov.cn/csrc/c105906/c7642867/content.shtml)；注册不等于已经开始交易。
+- Unitree 上市状态：[上交所上市交易公告（688836，2026-08-19）](https://www.sse.com.cn/disclosure/announcement/listing/ipo/c/c_20260818_10829204.shtml)；此前的 IPO 注册批复只用于历史审计，不能覆盖后续正式上市事实。
 - GigaDevice 双重上市：[GigaDevice Successfully Lists in Hong Kong](https://www.gigadevice.com/about/news-and-event/news/gigadevice-listed-on-hkex)。
 
 ## 16. 健壮性与定期 Review
@@ -414,19 +416,22 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 - 每个 source 的首次成功读取只建立基线，不生成 New。只有完整、无重复且通过类别漂移检查的官方 catalog 才能替换该 source 的 last-good 基线；Unavailable/Partial 不得清空基线，也不得制造假下架。单次缺失先记为 pending removal，至少跨两个不同 UTC 日的完整观测仍缺失后才记下架，同日重试不算第二次观测。通过官方身份门控的合理纯新增必须生成提醒，不能被普通 10% 缩表保护吞掉；包含删除的显著漂移及同时超过 50 个、50% 的极端纯增长继续隔离复核。新增、下架、重新上线必须分别记录，页面“竞品新上线资产”只显示新增和重新上线。
 - 身份门控继续遵循本文件总规则。明确官方 RWA 类型且通过现有通用 admission gate 的标的可标 `verified`；普通 Crypto 类型直接拒绝。Gate Spot 不提供资产类别，只有 2026-08-14 已逐 pair 审计且仍在官方 live catalog 的 `PAXG_USDT`、`XAUT_USDT` 两个 legacy commodity pair 与精确 wrapper 可以直接验证；不得扩成其他 quote 或相似贵金属 ticker。其他新 suffix 即使与另一官方 RWA 目录同 canonical，也只能标 `review-required`，在精确 wrapper 身份确认前不得自动加入行情数据。
 - Listing Audit 只观察和报告，不能写 allowlist、类别、生命周期、baseline 常量或客户端资产表。页面的 `Included` 必须同时匹配当前 Spot/Perpetual 数据中同一 venue 的精确 `venueSymbol` 与 `category:canonical` 身份；仅有相同 canonical underlying 不足以宣称该新 listing 已收录。
-- `pendingReviews` 是独立的活动复核队列，不受页面 7/30 天事件窗口截断；只要标的仍活跃且身份未解决，就必须持续显示。它不能因事件过期而自动放行；精确官方身份确认后可转为 `verified`，连续完整目录确认下架后才可移出活动队列。
-- 受 `CRON_SECRET` 保护的 `/api/listing-audit-cron` 是唯一 writer；公开 `/api/listing-changes` 是 GET-only、无 query 的 CDN 缓存 reader。状态与公开快照作为一个紧凑 bundle 保存于 `iad1` 的 Runtime Cache namespace `rwa-listing-audit-v2`；`cache.set` 后必须立即从同一 namespace/key 回读并校验完整 bundle checksum，缺失或不一致即为 publication failure，不能记录 `stored`。V2 在 Gate Spot 精确 legacy commodity 覆盖补全后重新建立无提醒基线，禁止把监控修正误报为 New。source 目录只保存身份键、known identity 使用紧凑行编码、事件历史只持久化一份；事件以 45 天为保留目标，inactive identity 保留 180 天，单项不超过 1.75 MB。事件数量安全上限可能在 45 天之前触发；此时必须公开 `history={retentionDays,maxEvents,truncated,droppedAtLeast,droppedThrough,retainedFrom}`，禁止整体状态为 Full，并把页面窗口计数表达为已保留历史的下限。通常降为 Partial；若 source 状态本身已经是 Unavailable，则保留更严重的 Unavailable，writer 继续返回 503。不得静默裁剪后继续宣称 Full 或“没有新资产”，health 与每日审计必须至少为非通过。该缓存是区域 best-effort 而非永久审计数据库或 system of record；逐出后必须重新 Warming，不能把现有目录误报为全量 New。
+- `pendingReviews` 是独立的活动复核队列，不受页面 7/45 天事件窗口截断；只要标的仍活跃且身份未解决，就必须持续显示。它不能因事件过期而自动放行；精确官方身份确认后可转为 `verified`，连续完整目录确认下架后才可移出活动队列。
+- 受 `CRON_SECRET` 保护的 `/api/listing-audit-cron` 是唯一 writer；公开 `/api/listing-changes` 是 GET-only、无 query 的 CDN 缓存 reader，浏览器不能触发目录采集、建立基线或写数据库。`analytics.catalog_change_event` 是唯一、持久的上架生命周期事件权威；可信 `collection_cycle` / `source_run` 决定最近一次成功审计时间和十源覆盖。`catalog_membership` 只能作为已验证的精确身份关联，严禁根据当前或历史 membership 的集合差补造事件。事件必须由 writer 在可信完整目录差分时写入，并携带稳定事件 ID、上一/当前 source run、身份状态及内部证据。`officialListedAt` 只能补充已由差分确认的事件，不能以 `onboardDate` 或相似日期字段单独制造事件。
+- `LISTING_READ_MODE=postgres-authoritative` 时，`/api/listing-changes` 只通过专用最小权限 reader 和 `publication.listing_*_v1` 安全视图恢复最近 45 日事件及最近可信 source-run 覆盖；不得回读 Runtime Cache 来决定历史是否存在。只有 `verified + eligible` 的 listed/relisted 事件可以进入页面与 Push Bot，listed 对外映射为 `changeType=new`，delisted 保留在审计历史但不进入日报。`generatedAt` 必须来自最近一次成功审计，不能使用请求时间。原始证据、连接串、run/cycle 内部 ID 和数据库权限信息不得返回前端。
+- `rwa-listing-audit-v2` Runtime Cache 与 CDN 只作为可丢失的低延迟副本；清空、重新部署或区域逐出不能重置 PostgreSQL 事件历史或制造空基线。紧凑 checkpoint 仍可用于 writer 连续性和回滚期间的旧读取模式，但不再取得事件历史权威。事件以 45 天为默认查询窗口、2,000 条为上限；截断必须降为 Partial 并公开 `history`，不能静默宣称 Full 或“没有新资产”。数据库无可信 source run、迁移/权限失败或事件投影不合法时必须 fail closed 为 Warming/Unavailable，不能以空数组冒充“确认无事件”。
 - Nasdaq Trader 官方目录的 `etfs` 数组只用于在场所 RWA/security 门控之后细分宽泛 Stock/Equity 类别。当前 Kraken xStocks Listing Audit 依赖该官方 ETF 目录区分 Equity 与 ETF；目录不可用或契约不完整时，该 source 必须 Unavailable，不能把未知 ETF 猜成 Equity。官方 ETF 目录不是 RWA 准入白名单。
 - OKX 的 183 Perpetual（至少 149 SWAP + 34 X-Perp）和 51 Spot（至少 48 UTS + 精确 3 gold）是已审核下限，不是阻止官方新增的永久精确数量。低于任一分项、Crypto/category 泄漏、重复或 market-data join 不完整继续失败；合法增长由 Listing Audit 单独提醒。
 
-## 20. 数据库 Phase 0 / Phase 1 边界
+## 20. 数据库 Phase 0 / Phase 1 与 Listing 事件权威边界
 
 - 数据库迁移不改变本文件第 1–19 节的任何准入、alias、category、生命周期、market tag、单位、状态或公式规则。交易所官方产品 metadata 仍是身份权威；PostgreSQL 只记录既有服务端门控的结果和证据，不能成为第二套自动准入引擎。
 - 持久主键必须使用稳定 `asset_id` / `instrument_id` 及其 version 外键。`ticker`、`canonicalSymbol`、名称、价格相似度或跨场所同名只能作为版本化属性/检索字段，禁止作为事实表、历史表或告警表的独立连接键。
-- **Phase 0** 只包含 Neon/PostgreSQL 连接、迁移 ledger、schema/role/权限、服务端开关、监控与 raw archive 契约。安全默认值固定为 `PG_WRITE_MODE=off`、`RAW_ARCHIVE_MODE=off`；仅配置 `DATABASE_URL` / `DATABASE_URL_UNPOOLED` / `BLOB_READ_WRITE_TOKEN` 不得自动启用 writer。所有生产读取、Vercel Runtime Cache writer、CDN、Cron 以及当前 HTTP 503 语义保持不变；数据库不可用不得影响现网页面/API。
+- **Phase 0** 只包含 Neon/PostgreSQL 连接、迁移 ledger、schema/role/权限、服务端开关、监控与 raw archive 契约。安全默认值固定为 `PG_WRITE_MODE=off`、`RAW_ARCHIVE_MODE=off`；仅配置 `DATABASE_URL` / `DATABASE_URL_UNPOOLED` / `LISTING_DATABASE_URL` / `BLOB_READ_WRITE_TOKEN` 不得自动启用 writer 或 reader。Listing 数据库读取必须使用独立的非 owner、非 superuser、非 catalog-writer 登录，且只属于 `rwa_listing_audit_reader`；复用通用 writer/migration 连接必须 fail closed。所有生产读取、Vercel Runtime Cache writer、CDN、Cron 以及当前 HTTP 503 语义在开关关闭时保持不变。
 - **Phase 1** 只 shadow-write `api/_lib/listing-audit.js` 声明的十个官方 catalog：Perpetual 的 trade.xyz、Bitget、Gate、Binance、OKX，以及 Spot 的 Bitget、Gate、Kraken、Binance、OKX。允许落库的范围是 source/cycle/run、由已验证/已复核 catalog observation 确定性生成的 `normalized-catalog-v1` artifact、已准入 identity/instrument version、exact accepted catalog membership、review case 与 listing lifecycle event；读取仍以当前 Runtime Cache 为准。该 artifact 不是 upstream HTTP raw body，禁止标成 raw。
+- **Listing 事件权威切换**只把已由 Phase 1 writer 确认的 `analytics.catalog_change_event`、对应身份版本和可信 source run 变成 `/api/listing-changes` 的服务端读取权威；不授权新的身份准入、市场事实写入、回填或浏览器写入。切换前必须应用迁移 `0006`、验证专用 reader 只能读取三个安全 publication view，并在隔离 Preview 证明 Runtime Cache 清空后事件 ID、名称、分类和时间不变。开关默认不自动启用；Preview 和 Production 分别授权。
 - Phase 1 的 source run、Runtime Cache sink、数据库 sink 与 normalized-artifact sink 必须分别记录结果。数据库成功不能掩盖当前 writer 失败；数据库/artifact 失败在观察期暴露为 shadow pipeline 告警，但不能伪造现网 catalog Full，也不能把 Partial/Unavailable 目录写成 absence/delist。
-- Phase 0/1 的 typed price/OI/funding/fact/derived tables 仍不得开始持续写入或切换读取。唯一已批准的连续性例外是迁移 `0004` 的四行有界 `publication.signal_history_checkpoint`：它保存服务端已验证、已容量约束的现有历史 payload，供 Runtime Cache 被逐出后恢复；不新增身份、公式或信号，不保存 upstream raw body，也不能冒充逐条事实/完整回放系统。
+- Phase 0/1 的 typed price/OI/funding/fact/derived tables 仍不得开始持续写入或切换读取。连续性例外只有两类：迁移 `0004` 的四行有界 `publication.signal_history_checkpoint`，以及迁移 `0005` 的单行有界 `publication.listing_audit_checkpoint`。后者只能保存当前 writer 已接受的精确紧凑 bundle，并用 checksum、字节数、schema、时间戳、十源集合和对应 collection cycle 约束；它不能从 catalog membership 推导内容，也不取得身份准入权。两个开关默认分别为 `LISTING_CHECKPOINT_WRITE_MODE=off`、`LISTING_READ_MODE=runtime-cache`；迁移存在或连接串存在都不得自动切换 reader。两类 checkpoint 都不新增身份、公式或信号，不保存 upstream raw body，也不能冒充逐条事实/完整回放系统。
 - `review-required` 只能写入 `identity.review_case`；在精确官方身份完成复核前，不得创建 accepted asset/instrument version、`catalog_membership` 或 listing event。Rejected/普通 Crypto 也不得进入 accepted membership。
 - Phase 1 shadow 数据只有在十源 exact membership、accepted/rejected/identity-conflict/review-case 计数、cohort fingerprint 与当前 Listing Audit 连续对账通过后，才可讨论下一阶段；任何 reconciliation 差异必须 fail closed 进入人工复核，不得用数据库行反向修改 allowlist。
 - Phase 0 只建立 raw archive schema/契约；Phase 1 **不**归档官方 upstream raw response。真正 raw body 采集属于后续 collector instrumentation。启用后 PostgreSQL 仍只保存 URI、SHA-256、字节数、压缩、采集时间和 retention class，正文进入不可变对象归档；Authorization header、连接串、签名 URL 与其他 secret 永远禁止归档或写日志。

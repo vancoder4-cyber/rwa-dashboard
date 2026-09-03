@@ -146,6 +146,13 @@ function readinessFixture(dayCount = CATALOG_SHADOW_OPERATIONAL_POLICY.readCutov
           enforced: true,
           ttlSeconds: 180,
         },
+        readPath: {
+          mode:'runtime-cache',
+          source:'runtime-cache',
+          reconciliation:'durable-not-requested',
+          runtimeCache:{ status:'stored', observedAt:latestCompletedAt },
+          durableCheckpoint:{ status:'not-requested', observedAt:null },
+        },
       },
       sources: LISTING_SOURCE_KEYS.map(sourceKey => ({
         sourceKey,
@@ -637,6 +644,27 @@ test('source count, exact membership, and Runtime Cache count/timestamp mismatch
   unavailable.runtimeSnapshot = null;
   unavailable.runtimeError = new Error('cache unavailable');
   assert.equal(buildCatalogShadowReadiness(unavailable).status, 'fail');
+
+  const databaseFallback = readinessFixture();
+  Object.assign(databaseFallback.runtimeSnapshot.persistence.readPath, {
+    mode:'durable-fallback',
+    source:'postgres-checkpoint',
+    reconciliation:'runtime-empty',
+    runtimeCache:{ status:'empty', observedAt:null },
+    durableCheckpoint:{ status:'stored', observedAt:databaseFallback.runtimeSnapshot.generatedAt },
+  });
+  const fallbackReport = buildCatalogShadowReadiness(databaseFallback);
+  assert.equal(fallbackReport.status, 'fail');
+  assert.ok(fallbackReport.runtimeCache.reasons.some(reason => /not served from the stored Runtime Cache/.test(reason)));
+
+  const matchedDurableReplica = readinessFixture();
+  Object.assign(matchedDurableReplica.runtimeSnapshot.persistence.readPath, {
+    mode:'durable-fallback',
+    source:'runtime-cache',
+    reconciliation:'match',
+    durableCheckpoint:{ status:'stored', observedAt:matchedDurableReplica.runtimeSnapshot.generatedAt },
+  });
+  assert.equal(buildCatalogShadowReadiness(matchedDurableReplica).status, 'pass');
 });
 
 test('missing source counts, normalized artifacts, or exact official evidence never pass readiness', () => {
@@ -797,6 +825,7 @@ test('same UTC-day retry keeps a first-run New version event-eligible after sour
   const retryCompletedAt = `${LATEST_DAY}T01:15:00.000Z`;
   fixture.attemptRows.find(row => row.cycle_id === `cycle-${LATEST_DAY}`).attempt_completed_at = retryCompletedAt;
   fixture.runtimeSnapshot.generatedAt = retryCompletedAt;
+  fixture.runtimeSnapshot.persistence.readPath.runtimeCache.observedAt = retryCompletedAt;
   latestRows(fixture, 'sinkRows')
     .find(row => row.sink_name === 'runtime-cache-listing-audit')
     .committed_at = retryCompletedAt;
@@ -1315,6 +1344,8 @@ test('read-only query bundle is fixed at nine bounded catalog-reconciliation que
   const queries = buildCatalogShadowReadinessQueries(sql, 30);
   assert.equal(queries.length, 9);
   assert.match(queries[5].text, /metadata->>'mergedStatus', ''\) <> 'warming'/);
+  assert.match(queries[5].text, /metadata->>'lifecycleComparable'/);
+  assert.match(queries[5].text, /THEN 'false' ELSE 'true' END/);
   assert.equal(calls.length, 9);
   assert.ok(calls.every(call => /SELECT|WITH/.test(call.text)));
   assert.ok(calls.every(call => !/\b(?:INSERT|UPDATE|DELETE|TRUNCATE)\b/i.test(call.text)));
