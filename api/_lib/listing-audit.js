@@ -1,3 +1,5 @@
+import { REVIEWED_ETF_IDENTITIES } from './security-identity.js';
+
 export const LISTING_AUDIT_SCHEMA_VERSION = 'rwa-listing-audit/v1';
 export const LISTING_AUDIT_STATE_VERSION = 1;
 export const LISTING_EVENT_RETENTION_DAYS = 45;
@@ -32,6 +34,7 @@ export const REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS = Object.freeze([
   'QNT',
   'UNITREE',
 ]);
+export const REVIEWED_ETF_CATEGORY_CORRECTIONS = Object.freeze(Object.keys(REVIEWED_ETF_IDENTITIES));
 
 const MARKETS = new Set(['perp', 'spot']);
 const VENUES = new Set(['tradexyz', 'bitget', 'gate', 'kraken', 'binance', 'okx']);
@@ -65,13 +68,18 @@ export function normalizeListingObservation(input) {
   const venue = normalized(input?.venue).toLowerCase();
   const venueSymbol = normalizedUpper(input?.venueSymbol);
   const canonicalSymbol = normalizedUpper(input?.canonicalSymbol);
-  const category = normalized(input?.category).toLowerCase();
+  const rawCategory = normalized(input?.category).toLowerCase();
   const rawVenueCategory = normalized(input?.venueCategory).toLowerCase();
-  const venueCategory = rawVenueCategory || category;
+  const venueCategory = rawVenueCategory || rawCategory;
   const rawLifecycleStatus = normalized(input?.lifecycleStatus).toLowerCase();
   const lifecycleStatus = rawLifecycleStatus || null;
   const officialListedAt = isoTimestamp(input?.officialListedAt);
   const identityStatus = normalized(input?.identityStatus || 'verified').toLowerCase();
+  const reviewedEtf = REVIEWED_ETF_IDENTITIES[canonicalSymbol];
+  const category = reviewedEtf && identityStatus === 'verified' &&
+    ['equity', 'etf'].includes(rawCategory) && ['equity', 'etf'].includes(venueCategory)
+    ? 'etf'
+    : rawCategory;
   if (!MARKETS.has(market) || !VENUES.has(venue)) return null;
   if (!LISTING_KEY_PATTERN.test(venueSymbol) || !CANONICAL_PATTERN.test(canonicalSymbol)) return null;
   if (
@@ -92,7 +100,7 @@ export function normalizeListingObservation(input) {
     venueCategory,
     lifecycleStatus,
     officialListedAt,
-    name: normalized(input?.name) || null,
+    name: reviewedEtf && category === 'etf' ? reviewedEtf.name : normalized(input?.name) || null,
     identityStatus,
     identityEvidence: normalized(input?.identityEvidence) || null,
     inclusionStatus: identityStatus === 'verified' ? 'eligible' : 'review-required',
@@ -371,6 +379,22 @@ export function mergeListingAudit(previousState, rawObservations, now = new Date
     const effectiveRows = [...currentRows, ...retainedMissingRows]
       .sort((left, right) => left.key.localeCompare(right.key));
 
+    // Persist reviewed identity refinements for a first-day missing product as
+    // identity metadata only. The product remains active/pending until a later
+    // independent daily catalog confirms removal, and no lifecycle event is
+    // created by this correction.
+    for (const listing of retainedMissingRows) {
+      const known = next.known[listing.key] || listing;
+      next.known[listing.key] = {
+        ...known,
+        ...listing,
+        everSeen: true,
+        active: true,
+        firstSeenAt: known.firstSeenAt || previousSource?.baselineAt || nowIso,
+        lastSeenAt: known.lastSeenAt || previousSource?.observedAt || nowIso,
+      };
+    }
+
     for (const listing of addedRows) {
       const known = next.known[listing.key];
       const changeType = known?.everSeen ? 'relisted' : 'new';
@@ -387,7 +411,7 @@ export function mergeListingAudit(previousState, rawObservations, now = new Date
       };
     }
     for (const listing of removedRows) {
-      const known = next.known[listing.key] || listing;
+      const known = { ...(next.known[listing.key] || {}), ...listing };
       const event = eventFromListing('delisted', null, eventBucket, known);
       event.detectedAt = nowIso;
       event.observedAt = nowIso;

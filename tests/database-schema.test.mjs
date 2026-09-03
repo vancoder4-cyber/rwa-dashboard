@@ -49,16 +49,28 @@ test('migration files are ordered, immutable-checksummed, and parse into stateme
     '0004_signal_history_checkpoint.sql',
     '0005_listing_audit_checkpoint.sql',
     '0006_listing_event_authority.sql',
+    '0007_sk_hynix_etf_identity_correction.sql',
   ]);
-  assert.deepEqual(migrations.map(row => row.version), ['0001', '0002', '0003', '0004', '0005', '0006']);
+  assert.deepEqual(migrations.map(row => row.version), ['0001', '0002', '0003', '0004', '0005', '0006', '0007']);
   for (const migration of migrations) {
     assert.match(migration.filename, MIGRATION_FILE_PATTERN);
     assert.match(migration.checksum, /^[0-9a-f]{64}$/);
     assert.equal(migration.checksum, migrationChecksum(migration.sql));
-    const minimumStatements = ['0003', '0004', '0005', '0006'].includes(migration.version) ? 3 : 11;
+    const minimumStatements = ['0003', '0004', '0005', '0006', '0007'].includes(migration.version) ? 3 : 11;
     assert.ok(migration.statements.length >= minimumStatements);
     assert.ok(migration.statements.every(statement => statement.trim().length > 0));
   }
+});
+
+test('reviewed SK Hynix ETF migration corrects identity without creating lifecycle events', async () => {
+  const sql = await readFile(path.join(MIGRATION_DIRECTORY, '0007_sk_hynix_etf_identity_correction.sql'), 'utf8');
+  assert.match(sql, /VALUES \('etf:SKDD'\), \('etf:SKUU'\)/);
+  assert.match(sql, /old_asset_version\.category = 'equity'/);
+  assert.match(sql, /old_asset_version\.canonical_underlying IN \('SKDD', 'SKUU'\)/);
+  assert.match(sql, /SET asset_version_id = corrected_asset_version\.asset_version_id/);
+  assert.doesNotMatch(sql, /(?:INSERT INTO|UPDATE|DELETE FROM) analytics\.catalog_change_event/);
+  assert.doesNotMatch(sql, /asset_key\s*=\s*'(?:equity:)?SKHY(?:NIX)?'/,
+    'the ETF correction must never persist an alias to SK Hynix equity');
 });
 
 test('SQL splitter preserves comments, quoted semicolons, and dollar-quoted role blocks', () => {

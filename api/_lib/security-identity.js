@@ -56,6 +56,23 @@ export const SECURITY_LISTING_REGISTRY = Object.freeze({
   UNITREE: Object.freeze({ category:'equity', status:'public', name:'Unitree Robotics', listedOn:'2026-08-19', aliases:Object.freeze([]) }),
 });
 
+// Dated, issuer- and exchange-reviewed ETF identities whose venue catalogs use
+// a broad stock/equity product class. These records refine an already admitted
+// security; they are never a standalone RWA allowlist or a ticker alias to the
+// referenced company.
+export const REVIEWED_ETF_IDENTITIES = Object.freeze({
+  SKDD: Object.freeze({
+    category:'etf',
+    name:'GraniteShares 2x Short SK Hynix Daily ETF',
+    listedOn:'2026-07-14',
+  }),
+  SKUU: Object.freeze({
+    category:'etf',
+    name:'GraniteShares 2x Long SK Hynix Daily ETF',
+    listedOn:'2026-07-14',
+  }),
+});
+
 const SECURITY_ALIAS_MAP = Object.freeze(Object.fromEntries(
   Object.entries(SECURITY_LISTING_REGISTRY).flatMap(([canonical, record]) =>
     [canonical, ...record.aliases].map(alias => [alias, canonical])
@@ -97,7 +114,7 @@ export const SECURITY_ETF_UNDERLYINGS = Object.freeze([
   'NVDL','OIH','PALL','PDBC','PPLT','PSQ','QQQ','QQQI','QQQM','REMX','SCHD','SGOV','SHY','SLV',
   'SHLD','SMH','SNXX','SOXL','SOXS','SOXX','SPMO','SPY','SPXU','SPYX','SQQQ','TAN','TIP','TLT','TMF','TNA','TQQQ',
   'TZA','UNG','UPRO','URA','URNM','USFR','USO','UVXY','VGT','VNQ','VOO','VTI','VTV','VXUS','XLK',
-  'XBI','XLE','XLU','XLV','YANG','YINN','EWT','DRAM','KORU','KSTR','LYTE','NCLD','EWH','DFEN','MUU',
+  'XBI','XLE','XLU','XLV','YANG','YINN','EWT','DRAM','KORU','KSTR','LYTE','NCLD','EWH','DFEN','MUU','SKDD','SKUU',
 ]);
 const SECURITY_ETF_SET = new Set(SECURITY_ETF_UNDERLYINGS);
 
@@ -163,7 +180,7 @@ export function securityLifecycleStatus(symbol, category) {
 export function securityDisplayName(symbol) {
   const raw = String(symbol || '').trim().toUpperCase();
   const canonical = SECURITY_ALIAS_MAP[raw] || raw;
-  return SECURITY_LISTING_REGISTRY[canonical]?.name || null;
+  return SECURITY_LISTING_REGISTRY[canonical]?.name || REVIEWED_ETF_IDENTITIES[canonical]?.name || null;
 }
 
 function normalizedCategory(value) {

@@ -18,6 +18,7 @@ import {
   BROAD_STOCK_INDEX_UNDERLYINGS,
   GATE_SPOT_EXACT_LEGACY_PAIRS,
   GATE_SPOT_VERIFIED_WRAPPERS,
+  REVIEWED_ETF_IDENTITIES,
   SECURITY_ETF_UNDERLYINGS,
   SECURITY_LISTING_REGISTRY,
   TOKENIZED_ETF_WRAPPERS,
@@ -193,6 +194,8 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
   assert.deepEqual(normalizeSignalIdentity('QQQB', 'equity', { allowBinanceBstock:true }), { symbol:'QQQ', category:'etf' });
   assert.deepEqual(normalizeSignalIdentity('SOXLB', 'equity', { allowBinanceBstock:true }), { symbol:'SOXL', category:'etf' });
   assert.deepEqual(normalizeSignalIdentity('MUU', 'equity'), { symbol:'MUU', category:'etf' });
+  assert.deepEqual(normalizeSignalIdentity('SKDD', 'equity', { venue:'okx' }), { symbol:'SKDD', category:'etf' });
+  assert.deepEqual(normalizeSignalIdentity('SKUU', 'equity', { venue:'okx' }), { symbol:'SKUU', category:'etf' });
   assert.deepEqual(normalizeSignalIdentity('SPYX', 'equity'), { symbol:'SPYX', category:'etf' });
   assert.deepEqual(normalizeSignalIdentity('QQQX', 'equity'), { symbol:'QQQX', category:'equity' });
   assert.deepEqual(normalizeSignalIdentity('SPYX', 'equity', { venue:'gate' }), { symbol:'SPY', category:'etf' });
@@ -213,6 +216,10 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
   assert.equal(categoryFromOfficialSignalType('CN_EQUITY'), 'equity');
   assert.equal(categoryFromOfficialSignalType('crypto_etf_token'), null);
   assert.equal(categoryFromOfficialSignalType('ETFCOIN'), null);
+  assert.deepEqual(REVIEWED_ETF_IDENTITIES, {
+    SKDD:{ category:'etf', name:'GraniteShares 2x Short SK Hynix Daily ETF', listedOn:'2026-07-14' },
+    SKUU:{ category:'etf', name:'GraniteShares 2x Long SK Hynix Daily ETF', listedOn:'2026-07-14' },
+  });
 
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   assert.match(html, /const BROAD_STOCK_INDEX_SYMBOLS = new Set\(\['SP500','NDX100','KR200','JP225'\]\)/);
@@ -259,6 +266,8 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
   );
   const clientEtfs = [...new Set([...etfSource.matchAll(/'([A-Z0-9-]+)'/g)].map(match => match[1]))].sort();
   assert.deepEqual(clientEtfs, [...SECURITY_ETF_UNDERLYINGS].sort(), 'ETF identity drift between client and server');
+  assert.match(html, /SKDD:\s*\{\s*name:\s*"GraniteShares 2x Short SK Hynix Daily ETF",\s*category:\s*"etf"\s*\}/);
+  assert.match(html, /SKUU:\s*\{\s*name:\s*"GraniteShares 2x Long SK Hynix Daily ETF",\s*category:\s*"etf"\s*\}/);
   const wrapperSource = sourceBetween(
     html,
     'const TOKENIZED_ETF_WRAPPERS = Object.freeze({',

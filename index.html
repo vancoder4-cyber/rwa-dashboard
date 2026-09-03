@@ -2517,6 +2517,8 @@ const RWA_ASSETS = {
   AMD: { name: "Advanced Micro Devices", category: "equity" },
   MU: { name: "Micron", category: "equity" },
   MUU: { name: "Direxion Daily MU Bull 2X ETF", category: "etf" },
+  SKDD: { name: "GraniteShares 2x Short SK Hynix Daily ETF", category: "etf" },
+  SKUU: { name: "GraniteShares 2x Long SK Hynix Daily ETF", category: "etf" },
   MSTR: { name: "Strategy Inc.", category: "equity" },
   CRCL: { name: "Circle Internet Group", category: "equity" },
   NFLX: { name: "Netflix", category: "equity" },
@@ -2628,6 +2630,9 @@ const ETF_SYMBOLS = new Set([
 // Nasdaq official identity check: MUU is Direxion Daily MU Bull 2X ETF, not
 // Micron common equity. Keep the wrapper category aligned across all venues.
 ETF_SYMBOLS.add('MUU');
+// GraniteShares/Nasdaq official identities: these are daily leveraged ETFs
+// referencing SK Hynix ADR (SKHY), not SK Hynix common equity aliases.
+['SKDD','SKUU'].forEach(symbol => ETF_SYMBOLS.add(symbol));
 
 // Venue wrapper tickers whose underlying is an ETF even when the venue's broad
 // product class says stock or metal.

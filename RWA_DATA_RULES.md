@@ -1,7 +1,7 @@
 # RWA Asset Identity & Data Rules
 
 > 本文记录 RWA Dashboard 的资产准入、ticker 归一、类别/地区标签及上线校验规则。  
-> 最近审计：2026-08-25。生产站点：<https://avenir-rwa-analyst.vercel.app/>
+> 最近审计：2026-09-03。生产站点：<https://avenir-rwa-analyst.vercel.app/>
 
 ## 1. 核心原则
 
@@ -107,6 +107,7 @@ trade.xyz 当前专用 `xyz` DEX universe 有 5 个 `perpCategories` 空缺：`U
 - `OPENAI/ANTHROPIC/SHEIN/ANDURIL/KALSHI/KIMI/NEURALINK/POLYMARKET`：Pre-IPO；后五项由 Gate 官方 `stocks + is_pre_market=true` catalog 交叉审计纳入。
 - `UNITREE`：上海证券交易所公告确认 2026-08-19 起在科创板上市交易（证券代码 688836），因此为已上市 Equity / `public`；场所仍可使用 `UNITREE` 等产品代码，不能继续沿用 Pre-IPO 生命周期。
 - `EWH/DFEN`：全局 ETF 类别修正；Gate 的 `QQQX/SPYX/TQQQX/SLVON` 是仅在 Gate 官方 RWA catalog 门控后生效的 ETF wrapper，不能作为全局 ticker 类别修正。
+- `SKDD/SKUU`：GraniteShares 2x Short/Long SK Hynix Daily ETF。两者是 Nasdaq 上市的每日杠杆 ETF，参考标的是 SK Hynix ADR `SKHY`；它们不是 SK Hynix 普通股，也绝不能 alias 成 `SKHY/SKHYNIX`。只有场所先以官方 RWA/security catalog 准入后，才可把宽泛 Stock/Equity 类别细化为 ETF。
 - `H100`：计算资源类 Commodity，不是股票指数。
 - 已公开上市的公司不能因为场所残留 `is_pre_market` 就继续显示为 Pre-IPO。
 
@@ -120,7 +121,9 @@ trade.xyz 当前专用 `xyz` DEX universe 有 5 个 `perpCategories` 空缺：`U
 
 `UNITREE` 本次生命周期修正的官方依据是上海证券交易所 2026-08-18 发布的[上市交易公告](https://www.sse.com.cn/disclosure/announcement/listing/ipo/c/c_20260818_10829204.shtml)：股票自 2026-08-19 起上市交易。该修正更新既有精确产品的身份版本，不产生 New/Re-listed；某交易所后来新增一个精确 `venueSymbol` 时，仍由正常目录差分独立产生该场所的 listed 事件。
 
-Durable catalog 中的同一官方产品只有在 canonical underlying 完全不变、旧类别为 `pre-ipo`、新类别为 `equity`、新 `lifecycleStatus=public`，且 canonical 已进入 `REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS` 的有日期官方依据白名单时，才允许做版本化的单向公司生命周期分类纠正。这不是 New/Re-listed 事件。反向修正、非白名单标的，以及 ticker、canonical underlying、ETF、Commodity、Index、FX 或 Bond 的变化仍然是硬身份冲突，必须阻止发布并人工核对；新增白名单项必须同时补官方来源和防反向测试。
+Durable catalog 中的同一官方产品只有在 canonical underlying 完全不变、旧类别为 `pre-ipo`、新类别为 `equity`、新 `lifecycleStatus=public`，且 canonical 已进入 `REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS` 的有日期官方依据白名单时，才允许做版本化的单向公司生命周期分类纠正。这不是 New/Re-listed 事件。另一个同样狭窄的例外是：已经由场所官方 security catalog 准入、canonical 完全不变、原始 `venueCategory` 为宽泛 Equity/ETF，且 canonical 位于 `REVIEWED_ETF_CATEGORY_CORRECTIONS` 的标的，允许从旧 `equity` 身份单向纠正为 `etf`；截至 2026-09-03 该白名单仅有 `SKDD/SKUU`。反向修正、非白名单标的，以及 ticker、canonical underlying、Commodity、Index、FX 或 Bond 的变化仍然是硬身份冲突，必须阻止发布并人工核对；新增白名单项必须同时补官方来源、防反向测试和“不生成 New/Re-listed”测试。
+
+`SKDD/SKUU` 纠正依据为 GraniteShares 官方产品页与 Nasdaq Trader 2026-07-13 的 ETP 上市通知：两只 ETF 自 2026-07-14 开始交易。OKX 2026-09-02 的公告只证明精确产品 `SKDD-USD_UM_XPERP-310829` 于 2026-09-03 06:00 UTC 下架；它不能改变 `SKDD-USDT-SWAP` 的独立在架状态，也不能把身份纠正伪造成上架/重新上架事件。官方来源：<https://graniteshares.com/etfs/skdd/>、<https://graniteshares.com/etfs/skuu/>、<https://www.nasdaqtrader.com/TraderNews.aspx?id=ETP2026-113>、<https://www.okx.com/en-us/help/okx-to-delist-x-perp-for-skddusd>。
 
 官方类型只允许精确归一化映射，例如 `PRE-IPO/PRE_IPO/PREIPO -> PREIPO`、`PRE-MARKET -> PREMARKET`。禁止用 `includes('PRE')` 判断，否则 `PREFERRED_STOCK` 等无关类型也可能被误判为 Pre-IPO。布尔字段也必须显式解析，字符串 `"false"` 不能按 JavaScript truthy 值处理。
 
