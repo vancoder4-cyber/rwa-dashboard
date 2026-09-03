@@ -121,3 +121,11 @@ authenticated audit from the last trusted Runtime Cache bundle, and require
 `reconciliation=match` before the final PostgreSQL-authoritative Git rebuild.
 An empty or unavailable checkpoint is a blocking unknown state, never a reason
 to create a fresh baseline from historical database membership.
+
+Immediately after the authenticated writer completes, a previously cached
+public `GET /api/listing-changes` response may remain visible until its declared
+CDN max-age expires. Use the authenticated in-region readiness probe to verify
+the new Runtime Cache/checkpoint timestamp and reconciliation first; then wait
+for or explicitly revalidate the public cache before UI/API acceptance. Never
+interpret an older cached response as a failed database write, and never add a
+browser cache-busting query parameter to the fixed-purpose endpoint.
