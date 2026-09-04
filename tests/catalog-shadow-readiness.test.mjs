@@ -174,6 +174,28 @@ function readinessFixture(dayCount = CATALOG_SHADOW_OPERATIONAL_POLICY.readCutov
   return fixture;
 }
 
+function postgresAuthoritativeFixture(dayCount = CATALOG_SHADOW_OPERATIONAL_POLICY.readCutover) {
+  const fixture = readinessFixture(dayCount);
+  const generatedAt = fixture.runtimeSnapshot.generatedAt;
+  fixture.runtimeSnapshot.persistence = {
+    mode:'postgresql-event-authority',
+    status:'full',
+    readPath:{
+      mode:'postgres-authoritative',
+      source:'postgres-events',
+      reconciliation:'database-authoritative',
+      runtimeCache:{ status:'not-requested', observedAt:null },
+      durableCheckpoint:{ status:'not-requested', observedAt:null },
+      eventStore:{
+        status:'stored',
+        observedAt:generatedAt,
+        view:'publication.listing_change_event_v1',
+      },
+    },
+  };
+  return fixture;
+}
+
 function latestRows(fixture, collection) {
   return fixture[collection].filter(row => (row.cycle_id ?? row.cycleId) === `cycle-${LATEST_DAY}`);
 }
@@ -665,6 +687,57 @@ test('source count, exact membership, and Runtime Cache count/timestamp mismatch
     durableCheckpoint:{ status:'stored', observedAt:matchedDurableReplica.runtimeSnapshot.generatedAt },
   });
   assert.equal(buildCatalogShadowReadiness(matchedDurableReplica).status, 'pass');
+});
+
+test('PostgreSQL-authoritative public read reconciles safe event views without requiring Runtime Cache as the read source', () => {
+  const fixture = postgresAuthoritativeFixture();
+  const report = buildCatalogShadowReadiness(fixture);
+
+  assert.equal(report.status, 'pass');
+  assert.equal(report.readyForPhase2DesignReview, true);
+  assert.equal(report.scope.publicReadMode, 'postgres-authoritative');
+  assert.equal(report.listingRead.authority, 'postgresql-event-authority');
+  assert.equal(report.listingRead.match, true);
+  assert.equal(report.listingRead.checksumComparison, 'not-applicable-to-authoritative-event-read');
+  assert.equal(report.runtimeCache, report.listingRead, 'legacy field remains an alias for compatibility');
+  assert.match(
+    report.checks.find(row => row.id === 'runtime-cache-reconciliation').detail,
+    /PostgreSQL-authoritative counts, sources, event store and timestamp match durable evidence/,
+  );
+  assert.ok(report.limitations.some(line => /safe publication views/.test(line)));
+});
+
+test('PostgreSQL-authoritative public read fails closed on path, event-store, timestamp, or source-run drift', () => {
+  const cases = [
+    ['wrong source', fixture => { fixture.runtimeSnapshot.persistence.readPath.source = 'runtime-cache'; }],
+    ['runtime consulted', fixture => {
+      fixture.runtimeSnapshot.persistence.readPath.runtimeCache = {
+        status:'stored', observedAt:fixture.runtimeSnapshot.generatedAt,
+      };
+    }],
+    ['event store unavailable', fixture => {
+      fixture.runtimeSnapshot.persistence.readPath.eventStore = {
+        status:'unavailable', observedAt:null, view:'publication.listing_change_event_v1',
+      };
+    }],
+    ['unsafe view', fixture => {
+      fixture.runtimeSnapshot.persistence.readPath.eventStore.view = 'analytics.catalog_change_event';
+    }],
+    ['wrong generatedAt', fixture => {
+      fixture.runtimeSnapshot.generatedAt = `${LATEST_DAY}T00:46:00.000Z`;
+      fixture.runtimeSnapshot.persistence.readPath.eventStore.observedAt = fixture.runtimeSnapshot.generatedAt;
+    }],
+    ['source count drift', fixture => { fixture.runtimeSnapshot.sources[0].listingCount = 2; }],
+  ];
+  for (const [label, mutate] of cases) {
+    const fixture = postgresAuthoritativeFixture();
+    mutate(fixture);
+    const report = buildCatalogShadowReadiness(fixture);
+    assert.equal(report.status, 'fail', label);
+    assert.equal(report.readyForPhase2DesignReview, false, label);
+    assert.equal(report.remediation.code, 'REPAIR_POSTGRES_AUTHORITATIVE_LISTING_READ', label);
+    assert.ok(report.remediation.actions.some(action => /Do not rebuild events from Runtime Cache or catalog membership/.test(action)));
+  }
 });
 
 test('missing source counts, normalized artifacts, or exact official evidence never pass readiness', () => {

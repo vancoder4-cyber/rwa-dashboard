@@ -30,6 +30,7 @@ const DATABASE_CATEGORY = Object.freeze({
   bond: 'bond',
   'pre-ipo': 'pre-ipo',
 });
+const REVIEWED_ETF_CATEGORY_CORRECTION_SET = new Set(REVIEWED_ETF_CATEGORY_CORRECTIONS);
 
 function normalized(value) {
   return String(value ?? '').trim();
@@ -241,9 +242,11 @@ function buildSourceRun(sourceKey, rawObservation, summary, mergedState, observe
     const reviewRequired = listing.identityStatus !== 'verified';
     const assetKey = `${category}:${listing.canonicalSymbol}`;
     // Keep the cross-venue asset-version identity stable even when venues use
-    // different display-name spellings. The exact event snapshots its own
-    // admitted venue name in evidence below.
-    const displayName = listing.canonicalSymbol;
+    // different display-name spellings. Only the dated ETF correction registry
+    // may replace the ticker fallback with an issuer-reviewed canonical name.
+    const displayName = REVIEWED_ETF_CATEGORY_CORRECTION_SET.has(listing.canonicalSymbol)
+      ? listing.name || listing.canonicalSymbol
+      : listing.canonicalSymbol;
     const assetFingerprint = sha256(JSON.stringify([
       assetKey,
       category,

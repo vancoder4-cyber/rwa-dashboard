@@ -6,6 +6,7 @@ import {
   LISTING_PG_PIPELINE_VERSION,
   LISTING_PG_PUBLICATION_LEASE_SECONDS,
 } from './listing-pg-shadow.js';
+import { LISTING_EVENT_VIEW_VERSION } from './listing-event-authority.js';
 import { runDatabaseTransaction } from './database.js';
 
 export const CATALOG_SHADOW_READINESS_SCHEMA_VERSION = 'rwa-catalog-shadow-readiness/v2';
@@ -100,6 +101,7 @@ export function catalogShadowRemediation({
   failures = [],
   hasCurrentCycle = false,
   runtimeMatch = null,
+  readMode = null,
 } = {}) {
   if (status === 'pass') return null;
   if (!hasCurrentCycle) {
@@ -110,6 +112,18 @@ export function catalogShadowRemediation({
         'Run one authenticated listing-audit Cron for the current UTC bucket.',
         'Require ten trusted source runs and all three independent sink outcomes.',
         'Re-run the read-only catalog-shadow audit; do not advance a writer or read cutover while warming.',
+      ],
+    };
+  }
+  if (readMode === 'postgres-authoritative' && runtimeMatch === false) {
+    return {
+      code: 'REPAIR_POSTGRES_AUTHORITATIVE_LISTING_READ',
+      summary: 'The public PostgreSQL-authoritative Listing Audit read does not reconcile with its durable catalog evidence.',
+      actions: [
+        'Inspect the exact authoritative-read reconciliation reasons and the latest trusted source/sink evidence.',
+        'Verify the dedicated least-privilege reader, safe publication views, source-run timestamp and event-store status.',
+        'Do not rebuild events from Runtime Cache or catalog membership, and do not reset the accepted PostgreSQL baseline.',
+        'Repair forward, rerun the authenticated read-only audit and require exact source counts and timestamps before release.',
       ],
     };
   }
@@ -158,6 +172,8 @@ function normalizedRuntime(runtimeSnapshot, runtimeError) {
       historyTruncated: null,
       publicationLease: null,
       readPath: null,
+      persistenceMode: null,
+      persistenceStatus: null,
       error: runtimeError ? String(runtimeError?.message || runtimeError) : 'Runtime Cache snapshot was not supplied',
     };
   }
@@ -172,6 +188,8 @@ function normalizedRuntime(runtimeSnapshot, runtimeError) {
     sources: Array.isArray(runtimeSnapshot.sources) ? runtimeSnapshot.sources : [],
     historyTruncated: runtimeSnapshot?.history?.truncated === true,
     schemaVersion: runtimeSnapshot.schemaVersion || null,
+    persistenceMode:String(runtimeSnapshot?.persistence?.mode || ''),
+    persistenceStatus:String(runtimeSnapshot?.persistence?.status || ''),
     publicationLease: runtimeSnapshot?.persistence?.publicationLease &&
       typeof runtimeSnapshot.persistence.publicationLease === 'object'
       ? {
@@ -191,6 +209,9 @@ function normalizedRuntime(runtimeSnapshot, runtimeError) {
           runtimeObservedAt:isoTimestamp(runtimeSnapshot.persistence.readPath.runtimeCache?.observedAt),
           durableStatus:String(runtimeSnapshot.persistence.readPath.durableCheckpoint?.status || ''),
           durableObservedAt:isoTimestamp(runtimeSnapshot.persistence.readPath.durableCheckpoint?.observedAt),
+          eventStoreStatus:String(runtimeSnapshot.persistence.readPath.eventStore?.status || ''),
+          eventStoreObservedAt:isoTimestamp(runtimeSnapshot.persistence.readPath.eventStore?.observedAt),
+          eventStoreView:String(runtimeSnapshot.persistence.readPath.eventStore?.view || ''),
         }
       : null,
     error: null,
@@ -599,9 +620,27 @@ function runtimeComparison(runtime, latestCycle, sourceRows, membershipRows, sin
     };
   }
   const reasons = [];
-  if (!runtime.available) reasons.push(runtime.error || 'Runtime Cache snapshot unavailable');
+  const authoritativeRead = runtime.readPath?.mode === 'postgres-authoritative';
+  if (!runtime.available) reasons.push(runtime.error || 'Public Listing Audit snapshot unavailable');
   if (!runtime.readPath) {
     reasons.push('Public Listing Audit response does not expose its read source');
+  } else if (authoritativeRead) {
+    if (runtime.persistenceMode !== 'postgresql-event-authority' || runtime.persistenceStatus !== 'full') {
+      reasons.push('Public Listing Audit does not expose a Full PostgreSQL event authority');
+    }
+    if (runtime.readPath.source !== 'postgres-events' ||
+      runtime.readPath.reconciliation !== 'database-authoritative' ||
+      runtime.readPath.runtimeStatus !== 'not-requested' ||
+      runtime.readPath.runtimeObservedAt !== null ||
+      runtime.readPath.durableStatus !== 'not-requested' ||
+      runtime.readPath.durableObservedAt !== null) {
+      reasons.push('Public Listing Audit read path does not prove an isolated PostgreSQL-authoritative event read');
+    }
+    if (runtime.readPath.eventStoreStatus !== 'stored' ||
+      runtime.readPath.eventStoreObservedAt !== runtime.generatedAt ||
+      runtime.readPath.eventStoreView !== LISTING_EVENT_VIEW_VERSION) {
+      reasons.push('Public Listing Audit event-store evidence does not match the safe authoritative view and generatedAt');
+    }
   } else {
     if (runtime.readPath.source !== 'runtime-cache' || runtime.readPath.runtimeStatus !== 'stored') {
       reasons.push('Public Listing Audit response was not served from the stored Runtime Cache replica');
@@ -619,13 +658,13 @@ function runtimeComparison(runtime, latestCycle, sourceRows, membershipRows, sin
       reasons.push('Public Listing Audit Runtime Cache read timestamp differs from generatedAt');
     }
   }
-  if (runtime.schemaVersion !== LISTING_AUDIT_SCHEMA_VERSION) reasons.push('Runtime Cache schema version is not the expected listing audit contract');
-  if (runtime.historyTruncated) reasons.push('Runtime Cache listing history is truncated');
-  if (runtime.utcDay !== latestCycle.utcDay) reasons.push('Runtime Cache and PostgreSQL latest UTC days differ');
-  if (runtime.publicationLease?.mode !== 'postgres-distributed-lease' ||
+  if (runtime.schemaVersion !== LISTING_AUDIT_SCHEMA_VERSION) reasons.push('Public Listing Audit schema version is not the expected contract');
+  if (runtime.historyTruncated) reasons.push('Public Listing Audit history is truncated');
+  if (runtime.utcDay !== latestCycle.utcDay) reasons.push('Public Listing Audit and PostgreSQL latest UTC days differ');
+  if (!authoritativeRead && (runtime.publicationLease?.mode !== 'postgres-distributed-lease' ||
     runtime.publicationLease?.status !== 'enforced' ||
     runtime.publicationLease?.enforced !== true ||
-    runtime.publicationLease?.ttlSeconds !== LISTING_PG_PUBLICATION_LEASE_SECONDS) {
+    runtime.publicationLease?.ttlSeconds !== LISTING_PG_PUBLICATION_LEASE_SECONDS)) {
     reasons.push(`Runtime Cache publication was not protected by the required ${LISTING_PG_PUBLICATION_LEASE_SECONDS}-second PostgreSQL lease`);
   }
   const latestSources = sourceRows.filter(row => String(value(row, 'cycle_id', 'cycleId')) === latestCycle.cycleId);
@@ -634,7 +673,11 @@ function runtimeComparison(runtime, latestCycle, sourceRows, membershipRows, sin
     .map(row => [String(value(row, 'source_key', 'sourceKey')), row]));
   const latestChanges = new Map(latestCycle.changes.sources.map(row => [row.sourceKey, row]));
   const runtimeSources = new Map(runtime.sources.map(row => [String(row?.sourceKey || ''), row]));
-  if (!sameStrings([...runtimeSources.keys()], EXPECTED_SOURCE_KEYS)) reasons.push('Runtime Cache source set is not the exact ten sources');
+  if (!sameStrings([...runtimeSources.keys()], EXPECTED_SOURCE_KEYS)) reasons.push(
+    authoritativeRead
+      ? 'Authoritative Listing Audit source set is not the exact ten sources'
+      : 'Runtime Cache source set is not the exact ten sources',
+  );
   let expectedActiveListings = 0;
   for (const source of latestSources) {
     const sourceKey = String(value(source, 'source_key', 'sourceKey') || '');
@@ -645,18 +688,23 @@ function runtimeComparison(runtime, latestCycle, sourceRows, membershipRows, sin
     const sourceHealth = sourceRunHealth(source);
     const sourceChange = latestChanges.get(sourceKey);
     if (!publicSource) continue;
-    if (publicSource.status !== value(source, 'merged_status', 'mergedStatus')) reasons.push(`${sourceKey} Runtime status differs from stored merge status`);
-    const runtimeListingCount = nonNegativeInteger(publicSource.listingCount);
+    if (publicSource.status !== value(source, 'merged_status', 'mergedStatus')) reasons.push(`${sourceKey} public status differs from stored merge status`);
+    const publicListingCount = nonNegativeInteger(publicSource.listingCount);
     const membershipCount = nonNegativeInteger(value(membership, 'membership_count', 'membershipCount'));
     const pendingRemovalCount = nonNegativeInteger(publicSource.pendingRemovalCount);
-    if (admitted === null || withheld === null || runtimeListingCount === null || runtimeListingCount !== admitted + withheld) {
+    const storedListingCount = nonNegativeInteger(value(source, 'listing_count', 'listingCount'));
+    if (authoritativeRead) {
+      if (publicListingCount === null || storedListingCount === null || publicListingCount !== storedListingCount) {
+        reasons.push(`${sourceKey} authoritative listing count differs from the trusted source run`);
+      }
+    } else if (admitted === null || withheld === null || publicListingCount === null || publicListingCount !== admitted + withheld) {
       reasons.push(`${sourceKey} Runtime listing count does not equal the exact source cohort total (admitted + withheld rows)`);
     }
     if (admitted === null || membershipCount === null || membershipCount !== admitted) {
       reasons.push(`${sourceKey} database membership differs from admitted rows`);
     }
     if (pendingRemovalCount === null) {
-      reasons.push(`${sourceKey} Runtime pending-removal count is missing or invalid`);
+      reasons.push(`${sourceKey} public pending-removal count is missing or invalid`);
     } else if (sourceHealth.trustedPendingRemoval) {
       const expectedPendingCount = !sourceChange?.comparable || sourceChange?.removed === null ||
         sourceChange?.pendingEventAdded === null || sourceChange?.pendingReview === null ||
@@ -666,16 +714,21 @@ function runtimeComparison(runtime, latestCycle, sourceRows, membershipRows, sin
           sourceChange.pendingIdentityResolved;
       if (pendingRemovalCount <= 0 || pendingRemovalCount !== sourceHealth.persistedPendingRemovalCount ||
         (sourceChange?.comparable && (expectedPendingCount === null || pendingRemovalCount !== expectedPendingCount))) {
-        reasons.push(`${sourceKey} Runtime pending-removal count does not match prior removals plus same-day pending listed/review candidates`);
+        reasons.push(`${sourceKey} public pending-removal count does not match prior removals plus same-day pending listed/review candidates`);
       }
     } else if (pendingRemovalCount !== 0) {
-      reasons.push(`${sourceKey} Runtime reports pending removals for a non-pending source run`);
+      reasons.push(`${sourceKey} public read reports pending removals for a non-pending source run`);
     }
-    if (admitted === null || withheld === null || pendingRemovalCount === null) expectedActiveListings = NaN;
+    if (authoritativeRead) {
+      if (publicListingCount === null) expectedActiveListings = NaN;
+      else if (Number.isFinite(expectedActiveListings)) expectedActiveListings += publicListingCount;
+    } else if (admitted === null || withheld === null || pendingRemovalCount === null) expectedActiveListings = NaN;
     else if (Number.isFinite(expectedActiveListings)) expectedActiveListings += admitted + withheld + pendingRemovalCount;
   }
   if (!Number.isFinite(expectedActiveListings) || runtime.activeListings !== expectedActiveListings) {
-    reasons.push('Runtime active listing count does not equal admitted + withheld + pending-removal rows');
+    reasons.push(authoritativeRead
+      ? 'Authoritative active listing count does not equal the exact public source-run total'
+      : 'Runtime active listing count does not equal admitted + withheld + pending-removal rows');
   }
   const runtimeSink = sinkRows.find(row =>
     String(value(row, 'cycle_id', 'cycleId')) === latestCycle.cycleId &&
@@ -686,10 +739,17 @@ function runtimeComparison(runtime, latestCycle, sourceRows, membershipRows, sin
     : null;
   const sinkCommittedAt = isoTimestamp(value(runtimeSink, 'committed_at', 'committedAt'));
   if (!runtimeSink || value(runtimeSink, 'sink_status', 'sinkStatus') !== 'stored') reasons.push('Runtime Cache sink evidence is not stored');
-  if (runtime.activeListings === null || sinkRowCount === null || runtime.activeListings !== sinkRowCount) reasons.push('Runtime active listing count differs from sink evidence');
-  if (runtime.generatedAt !== latestCycle.attempts.completedAt || runtime.generatedAt !== sinkCommittedAt) reasons.push('Runtime generatedAt differs from PostgreSQL attempt/sink time');
+  if (!authoritativeRead && (runtime.activeListings === null || sinkRowCount === null || runtime.activeListings !== sinkRowCount)) {
+    reasons.push('Runtime active listing count differs from sink evidence');
+  }
+  if (runtime.generatedAt !== latestCycle.attempts.completedAt || (!authoritativeRead && runtime.generatedAt !== sinkCommittedAt)) {
+    reasons.push(authoritativeRead
+      ? 'Authoritative generatedAt differs from the latest trusted PostgreSQL attempt'
+      : 'Runtime generatedAt differs from PostgreSQL attempt/sink time');
+  }
   return {
     ...runtime,
+    authority:authoritativeRead ? 'postgresql-event-authority' : 'runtime-cache-replica',
     status: reasons.length ? 'mismatch' : 'match',
     match: reasons.length === 0,
     reasons: sortedUnique(reasons),
@@ -699,7 +759,7 @@ function runtimeComparison(runtime, latestCycle, sourceRows, membershipRows, sin
       recordedRowCount: sinkRowCount,
       committedAt: sinkCommittedAt,
     },
-    checksumComparison: 'not-exposed-by-public-runtime-payload',
+    checksumComparison: authoritativeRead ? 'not-applicable-to-authoritative-event-read' : 'not-exposed-by-public-runtime-payload',
   };
 }
 
@@ -800,7 +860,11 @@ export function buildCatalogShadowReadiness({
   if (duplicateUtcDays.length) hardFailures.push('duplicate UTC collection cycles exist');
   if (latest && !latest.infrastructureHealthy) hardFailures.push('latest catalog cycle failed current Phase 1 conservation');
   if (latestAgeHours !== null && (latestAgeHours < -0.1 || latestAgeHours > CATALOG_SHADOW_MAX_LATEST_AGE_HOURS)) hardFailures.push('latest PostgreSQL cycle is stale or future-dated');
-  if (cycles.length && runtime.match !== true) hardFailures.push('latest Runtime Cache snapshot does not reconcile with PostgreSQL');
+  if (cycles.length && runtime.match !== true) hardFailures.push(
+    runtime.readPath?.mode === 'postgres-authoritative'
+      ? 'latest PostgreSQL-authoritative Listing Audit response does not reconcile with durable evidence'
+      : 'latest Runtime Cache snapshot does not reconcile with PostgreSQL',
+  );
   hardFailures.push(...integrityFailures);
   const currentEvidenceHealthy = Boolean(latest && latest.infrastructureHealthy && hardFailures.length === 0);
   const baselineReady = currentEvidenceHealthy && consecutive >= CATALOG_SHADOW_CAPABILITY_MINIMUMS.baselineCatalog;
@@ -851,7 +915,7 @@ export function buildCatalogShadowReadiness({
       status: capabilityBlocked ? 'blocked' : readyForPhase2DesignReview ? 'ready' : 'warming',
       detail: readyForPhase2DesignReview
         ? 'Current catalog shadow evidence is healthy enough for a separate Phase 2 design review; no writer or read path is enabled.'
-        : 'A healthy current catalog cycle and Runtime Cache reconciliation are required; elapsed time is not a gate.',
+        : 'A healthy current catalog cycle and matching public Listing Audit read are required; elapsed time is not a gate.',
     },
   };
   const operationalPolicies = Object.fromEntries(Object.entries(CATALOG_SHADOW_OPERATIONAL_POLICY).map(([name, minimum]) => [
@@ -889,7 +953,11 @@ export function buildCatalogShadowReadiness({
     check('membership-conservation', latest?.reasons.some(reason => reason.includes('membership')) ? 'fail' : latest ? 'pass' : 'warming',
       'Accepted source counts equal exact verified membership rows'),
     check('runtime-cache-reconciliation', runtime.match === true ? 'pass' : cycles.length ? 'fail' : 'warming',
-      runtime.match === true ? 'Latest public Runtime Cache counts, sources and timestamp match sink evidence' : runtime.reasons.join('; ')),
+      runtime.match === true
+        ? runtime.authority === 'postgresql-event-authority'
+          ? 'Latest public PostgreSQL-authoritative counts, sources, event store and timestamp match durable evidence'
+          : 'Latest public Runtime Cache counts, sources and timestamp match sink evidence'
+        : runtime.reasons.join('; ')),
     check('same-day-idempotency', latest && !latest.attempts.idempotent ? 'fail' : latest ? 'pass' : 'warming',
       'Same UTC day reuses one attempt_no=1 and unique source/sink/membership keys'),
     check('lifecycle-scd2', integrityFailures.length || latest?.lifecycle.invalid || latest?.reasons.some(reason => reason.includes('lifecycle event') || reason.includes('membership additions')) ? 'fail' : latest ? 'pass' : 'warming',
@@ -914,6 +982,7 @@ export function buildCatalogShadowReadiness({
       expectedSourcesPerCycle: EXPECTED_SOURCE_KEYS.length,
       expectedSourceKeys: [...EXPECTED_SOURCE_KEYS],
       expectedSinks: [...CATALOG_SHADOW_EXPECTED_SINKS],
+      publicReadMode:runtime.readPath?.mode || null,
       marketFactsChecked: false,
       rollingMarketHistoryVerified: false,
       phase2DesignElapsedGate: false,
@@ -945,7 +1014,9 @@ export function buildCatalogShadowReadiness({
       failures: hardFailures,
       hasCurrentCycle: Boolean(latest),
       runtimeMatch: runtime.match,
+      readMode: runtime.readPath?.mode || null,
     }),
+    listingRead: runtime,
     runtimeCache: runtime,
     cycles,
     failures: sortedUnique(hardFailures),
@@ -959,7 +1030,9 @@ export function buildCatalogShadowReadiness({
     limitations: [
       'Phase 1 checks catalog shadow data only; it does not collect or validate price, volume, OI, funding, reference or traditional-market facts.',
       'No rolling market history is stored in Phase 1, so this report does not claim to reconcile or replay market-history revisions.',
-      'The public Runtime Cache payload does not expose the private bundle checksum; reconciliation uses exact source keys, timestamps, active counts and recorded sink evidence.',
+      runtime.authority === 'postgresql-event-authority'
+        ? 'The public PostgreSQL-authoritative payload exposes only safe publication views; reconciliation uses exact source keys, timestamps, event-store status and private read-only database evidence without exposing lineage IDs or credentials.'
+        : 'The public Runtime Cache payload does not expose the private bundle checksum; reconciliation uses exact source keys, timestamps, active counts and recorded sink evidence.',
       'Stored normalized-catalog artifact manifests and official-catalog evidence are checked by metadata and foreign-key lineage only; this report does not download and replay Blob contents.',
       'Capability readiness means the minimum comparison window exists; it does not claim that a new listing or delisting occurred.',
       'Operational 3/7/7 streaks are policy gates only. readyForPhase2DesignReview has no elapsed-time gate and never enables a writer, read cutover or alert delivery.',
