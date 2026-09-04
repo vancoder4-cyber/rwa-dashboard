@@ -324,8 +324,8 @@ test('listing audit cache epoch is internally consistent and leaves no pre-relea
   assert.match(source, /const BUNDLE_KEY = 'audit-bundle-v2'/);
   assert.equal((source.match(/rwa-listing-audit-v2/g) || []).length, 3);
   assert.doesNotMatch(source, /rwa-listing-audit-v1|audit-bundle-v1/);
-  assert.match(source, /if \(listingSnapshotIsCacheable\(snapshot\)\) \{[\s\S]*?setPublicCache\(res, 300, 600\)[\s\S]*?Vercel-Cache-Tag[\s\S]*?\} else \{[\s\S]*?setNoStore\(res\)/,
-    'an uninitialized cache epoch must never CDN-cache its empty Warming snapshot');
+  assert.match(source, /if \(listingSnapshotCanUseCdnCache\(snapshot\)\) \{[\s\S]*?setPublicCache\(res, 300, 600\)[\s\S]*?Vercel-Cache-Tag[\s\S]*?\} else \{[\s\S]*?setNoStore\(res\)/,
+    'an uninitialized epoch or PostgreSQL-authoritative read must never be pinned behind a stale CDN response');
 });
 
 test('recent-listing panels are market-isolated, bounded, read-only, and preserve unknown states', async () => {

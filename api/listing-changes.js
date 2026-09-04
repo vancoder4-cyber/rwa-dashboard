@@ -360,6 +360,15 @@ export function listingSnapshotIsCacheable(snapshot) {
   return Number.isFinite(Date.parse(String(snapshot?.generatedAt || '')));
 }
 
+export function listingSnapshotCanUseCdnCache(snapshot) {
+  // PostgreSQL-authoritative reads must expose the latest trusted source run
+  // immediately after a writer commit. A previously cached HTTP response is a
+  // replica, not authority, and can otherwise make generatedAt and all ten
+  // source states lag the database until the CDN TTL expires.
+  return listingSnapshotIsCacheable(snapshot) &&
+    snapshot?.persistence?.readPath?.mode !== 'postgres-authoritative';
+}
+
 export async function verifyListingAuditRuntimeCacheWrite(cache, expectedChecksum) {
   const publishedBundle = await cache.get(BUNDLE_KEY);
   const actualChecksum = listingAuditPersistenceChecksum(publishedBundle ?? null);
@@ -691,12 +700,12 @@ export default async function handler(req, res) {
   }
   try {
     const snapshot = await readListingChangesSnapshot();
-    if (listingSnapshotIsCacheable(snapshot)) {
+    if (listingSnapshotCanUseCdnCache(snapshot)) {
       setPublicCache(res, 300, 600);
       res.setHeader('Vercel-Cache-Tag', 'rwa-listing-audit-v2');
     } else {
-      // Do not let a reader request made before the first v2 writer run pin an
-      // empty Warming response at the CDN after the baseline is initialized.
+      // Do not pin either an uninitialized Warming response or a stale copy of
+      // the PostgreSQL-authoritative response at the CDN.
       setNoStore(res);
     }
     return res.status(200).json(snapshot);

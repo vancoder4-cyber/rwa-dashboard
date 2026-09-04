@@ -13,6 +13,7 @@ import listingChangesHandler, {
   compactListingAuditBundle,
   hydrateListingAuditSnapshot,
   hydrateListingAuditState,
+  listingSnapshotCanUseCdnCache,
   listingSnapshotIsCacheable,
 } from '../api/listing-changes.js';
 import { validateListingAuditSnapshot } from '../api/health.js';
@@ -526,6 +527,14 @@ test('listing public reader is GET-only and rejects query-based cache variation 
   assert.equal(listingSnapshotIsCacheable({ generatedAt:null }), false);
   assert.equal(listingSnapshotIsCacheable({ generatedAt:'not-a-date' }), false);
   assert.equal(listingSnapshotIsCacheable({ generatedAt:'2026-08-14T09:17:16.350Z' }), true);
+  assert.equal(listingSnapshotCanUseCdnCache({
+    generatedAt:'2026-08-14T09:17:16.350Z',
+    persistence:{ readPath:{ mode:'runtime-cache' } },
+  }), true);
+  assert.equal(listingSnapshotCanUseCdnCache({
+    generatedAt:'2026-08-14T09:17:16.350Z',
+    persistence:{ readPath:{ mode:'postgres-authoritative' } },
+  }), false, 'the authoritative API must not lag a successful database audit behind a CDN replica');
   const methodResponse = responseRecorder();
   await listingChangesHandler({ method:'POST', query:{}, headers:{} }, methodResponse);
   assert.equal(methodResponse.statusCode, 405);
