@@ -51,13 +51,14 @@ test('migration files are ordered, immutable-checksummed, and parse into stateme
     '0006_listing_event_authority.sql',
     '0007_sk_hynix_etf_identity_correction.sql',
     '0008_sk_hynix_etf_display_names.sql',
+    '0009_listing_identity_projection.sql',
   ]);
-  assert.deepEqual(migrations.map(row => row.version), ['0001', '0002', '0003', '0004', '0005', '0006', '0007', '0008']);
+  assert.deepEqual(migrations.map(row => row.version), ['0001', '0002', '0003', '0004', '0005', '0006', '0007', '0008', '0009']);
   for (const migration of migrations) {
     assert.match(migration.filename, MIGRATION_FILE_PATTERN);
     assert.match(migration.checksum, /^[0-9a-f]{64}$/);
     assert.equal(migration.checksum, migrationChecksum(migration.sql));
-    const minimumStatements = ['0003', '0004', '0005', '0006', '0007', '0008'].includes(migration.version) ? 3 : 11;
+    const minimumStatements = ['0003', '0004', '0005', '0006', '0007', '0008', '0009'].includes(migration.version) ? 3 : 11;
     assert.ok(migration.statements.length >= minimumStatements);
     assert.ok(migration.statements.every(statement => statement.trim().length > 0));
   }
@@ -84,6 +85,19 @@ test('forward SK Hynix ETF name repair persists exact registry names without lif
   assert.doesNotMatch(sql, /(?:INSERT INTO|UPDATE|DELETE FROM) analytics\.catalog_change_event/);
   assert.doesNotMatch(sql, /asset_key\s*=\s*'(?:equity:)?SKHY(?:NIX)?'/,
     'the forward name repair must never persist an alias to SK Hynix equity');
+});
+
+test('listing publication takes canonical name and category from the bound identity version', async () => {
+  const sql = await readFile(path.join(MIGRATION_DIRECTORY, '0009_listing_identity_projection.sql'), 'utf8');
+  assert.match(sql, /CREATE OR REPLACE VIEW publication\.listing_change_event_v1/);
+  assert.match(sql, /WITH \(security_barrier = true\)/);
+  assert.match(sql, /asset_version\.display_name AS display_name/);
+  assert.match(sql, /asset_version\.category/);
+  assert.doesNotMatch(sql, /event\.evidence->>'name'/);
+  assert.doesNotMatch(sql, /normalized_attributes->>'name'/);
+  assert.match(sql, /REVOKE ALL ON publication\.listing_change_event_v1 FROM PUBLIC/);
+  assert.match(sql, /GRANT SELECT ON publication\.listing_change_event_v1\s+TO rwa_listing_audit_reader/);
+  assert.doesNotMatch(sql, /(?:INSERT INTO|UPDATE|DELETE FROM) analytics\.catalog_change_event/);
 });
 
 test('SQL splitter preserves comments, quoted semicolons, and dollar-quoted role blocks', () => {
