@@ -38,13 +38,16 @@ export async function serveArbitrageSnapshotCron(req, res, options = {}) {
     const write = options.write || writeAuthoritativeArbitragePublication;
     const publication = await collect(req, options.collectOptions);
     const stored = await write(publication);
+    const reusedExistingBucket = stored.status === 'already-stored';
     return res.status(200).json({
-      status:'stored',
+      status:stored.status || 'stored',
       mode,
-      generatedAt:publication.snapshot.generatedAt,
-      bucket:publication.snapshot.bucket,
-      routes:publication.snapshot.routes.length,
-      diagnostics:publication.diagnostics,
+      generatedAt:stored.generatedAt || publication.snapshot.generatedAt,
+      bucket:stored.bucket || publication.snapshot.bucket,
+      routes:stored.routeCount ?? publication.snapshot.routes.length,
+      diagnostics:reusedExistingBucket
+        ? { reusedExistingBucket:true, publishedRoutes:stored.routeCount }
+        : publication.diagnostics,
       snapshotId:stored.snapshotId,
       checksum:stored.checksum,
     });

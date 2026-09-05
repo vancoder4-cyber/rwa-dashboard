@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 
 import {
@@ -16,6 +17,7 @@ import {
   ARBITRAGE_SOURCE_KEYS,
   arbitrageWriteMode,
   buildArbitragePublicationQueries,
+  normalizeStoredArbitragePublication,
   normalizeAuthoritativeArbitrageIdentityRows,
   normalizeAuthoritativeArbitrageSourceRows,
 } from '../api/_lib/arbitrage-publication.js';
@@ -272,6 +274,52 @@ test('successful authenticated cron publishes once and exposes no internal evide
   assert.deepEqual(Object.keys(res.body).sort(), [
     'bucket', 'checksum', 'diagnostics', 'generatedAt', 'mode', 'routes', 'snapshotId', 'status',
   ]);
+});
+
+test('same-bucket replay keeps the first authoritative publication without failing', () => {
+  const attempted = emptySnapshot();
+  const first = normalizeStoredArbitragePublication({
+    snapshot_id:'snapshot-id',
+    payload_sha256:'a'.repeat(64),
+    route_count:3,
+    generated_at:'2026-09-04T10:00:30.000Z',
+    bucket_at:'2026-09-04T10:00:00.000Z',
+  }, attempted);
+  assert.deepEqual(first, {
+    status:'already-stored',
+    snapshotId:'snapshot-id',
+    checksum:'a'.repeat(64),
+    routeCount:3,
+    generatedAt:'2026-09-04T10:00:30.000Z',
+    bucket:'2026-09-04T10:00:00.000Z',
+  });
+  const exact = normalizeStoredArbitragePublication({
+    snapshot_id:'snapshot-id',
+    payload_sha256:createHash('sha256').update(JSON.stringify(attempted)).digest('hex'),
+    route_count:0,
+    generated_at:attempted.generatedAt,
+    bucket_at:attempted.bucket,
+  }, attempted);
+  assert.equal(exact.status, 'stored');
+  assert.equal(exact.routeCount, 0);
+});
+
+test('same-bucket replay response reports persisted metadata, not the discarded attempt', async () => {
+  const snapshot = emptySnapshot();
+  const res = response();
+  await serveArbitrageSnapshotCron({ method:'GET', query:{}, headers:{} }, res, {
+    authorized:true,
+    writeMode:'shadow',
+    collect:async () => ({ snapshot, routeFacts:[], sources:[], diagnostics:{ candidateRoutes:4 } }),
+    write:async () => ({
+      status:'already-stored', snapshotId:'first-snapshot', checksum:'a'.repeat(64), routeCount:3,
+      generatedAt:'2026-09-04T10:00:30.000Z', bucket:'2026-09-04T10:00:00.000Z',
+    }),
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.status, 'already-stored');
+  assert.equal(res.body.routes, 3);
+  assert.deepEqual(res.body.diagnostics, { reusedExistingBucket:true, publishedRoutes:3 });
 });
 
 test('collector joins only exact database identities and emits one policy-qualified route', async () => {

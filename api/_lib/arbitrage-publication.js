@@ -311,12 +311,37 @@ export function buildArbitragePublicationQueries(sql, publication) {
       [...common, facts.length, checksum, snapshot.generatedAt],
     ),
     sql.query(
-      `SELECT snapshot_id::text, payload_sha256, route_count
+      `SELECT snapshot_id::text, payload_sha256, route_count, generated_at, bucket_at
        FROM publication.arbitrage_opportunity_snapshot
        WHERE cycle_id = (${cycleLookup})`,
       common,
     ),
   ];
+}
+
+export function normalizeStoredArbitragePublication(stored, attemptedSnapshot) {
+  const expectedChecksum = sha256(json(attemptedSnapshot));
+  const actualChecksum = String(stored?.payload_sha256 ?? stored?.payloadSha256 ?? '');
+  const routeCount = Number(stored?.route_count ?? stored?.routeCount);
+  const snapshotId = String(stored?.snapshot_id ?? stored?.snapshotId ?? '');
+  const generatedAtMs = Date.parse(stored?.generated_at ?? stored?.generatedAt ?? '');
+  const bucketMs = Date.parse(stored?.bucket_at ?? stored?.bucketAt ?? '');
+  const generatedAt = Number.isFinite(generatedAtMs) ? new Date(generatedAtMs).toISOString() : null;
+  const bucket = Number.isFinite(bucketMs) ? new Date(bucketMs).toISOString() : null;
+  if (!snapshotId || !/^[a-f0-9]{64}$/i.test(actualChecksum) || !Number.isInteger(routeCount) || routeCount < 0 ||
+      !generatedAt || bucket !== attemptedSnapshot.bucket) {
+    throw new TypeError('Stored arbitrage publication metadata is invalid');
+  }
+  return {
+    status:actualChecksum === expectedChecksum && routeCount === attemptedSnapshot.routes.length
+      ? 'stored'
+      : 'already-stored',
+    snapshotId,
+    checksum:actualChecksum,
+    routeCount,
+    generatedAt,
+    bucket,
+  };
 }
 
 export async function writeAuthoritativeArbitragePublication(publication) {
@@ -325,11 +350,5 @@ export async function writeAuthoritativeArbitragePublication(publication) {
     { timeoutMs:25_000 },
   );
   const stored = results.at(-1)?.[0];
-  const expectedChecksum = sha256(json(publication.snapshot));
-  const actualChecksum = String(stored?.payload_sha256 ?? stored?.payloadSha256 ?? '');
-  const routeCount = Number(stored?.route_count ?? stored?.routeCount);
-  if (actualChecksum !== expectedChecksum || routeCount !== publication.snapshot.routes.length) {
-    throw new TypeError('Existing arbitrage bucket differs from the attempted idempotent publication');
-  }
-  return { status:'stored', snapshotId:String(stored?.snapshot_id ?? stored?.snapshotId), checksum:actualChecksum };
+  return normalizeStoredArbitragePublication(stored, publication.snapshot);
 }
