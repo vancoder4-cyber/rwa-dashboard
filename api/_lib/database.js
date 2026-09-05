@@ -6,11 +6,14 @@ export const PREVIEW_DATABASE_URL_ENV_KEY = 'PREVIEW_NEON_DATABASE_URL';
 export const PREVIEW_DATABASE_URL_UNPOOLED_ENV_KEY = 'PREVIEW_NEON_DATABASE_URL_UNPOOLED';
 export const LISTING_DATABASE_URL_ENV_KEY = 'LISTING_DATABASE_URL';
 export const PREVIEW_LISTING_DATABASE_URL_ENV_KEY = 'PREVIEW_NEON_LISTING_DATABASE_URL';
+export const ARBITRAGE_DATABASE_URL_ENV_KEY = 'ARBITRAGE_DATABASE_URL';
+export const PREVIEW_ARBITRAGE_DATABASE_URL_ENV_KEY = 'PREVIEW_NEON_ARBITRAGE_DATABASE_URL';
 export const DATABASE_TRANSACTION_TIMEOUT_MS = 25_000;
 
 let databaseSql = null;
 let migrationDatabaseSql = null;
 let listingDatabaseSql = null;
+let arbitrageDatabaseSql = null;
 
 export function databaseEnvironmentKeys(env = process.env) {
   if (String(env?.VERCEL_ENV || '').trim().toLowerCase() === 'preview') {
@@ -52,6 +55,22 @@ export function listingDatabaseConnectionString(env = process.env) {
   return value;
 }
 
+export function arbitrageDatabaseEnvironmentKey(env = process.env) {
+  return String(env?.VERCEL_ENV || '').trim().toLowerCase() === 'preview'
+    ? PREVIEW_ARBITRAGE_DATABASE_URL_ENV_KEY
+    : ARBITRAGE_DATABASE_URL_ENV_KEY;
+}
+
+export function arbitrageDatabaseConnectionString(env = process.env) {
+  const key = arbitrageDatabaseEnvironmentKey(env);
+  const value = String(env?.[key] || '').trim();
+  if (!value) return null;
+  if (value === databaseConnectionString(env)) {
+    throw new Error(`${key} must use a dedicated read-only login, not the writer/migration owner connection`);
+  }
+  return value;
+}
+
 export function databaseConfigured(env = process.env) {
   return databaseConnectionString(env) !== null;
 }
@@ -62,6 +81,10 @@ export function migrationDatabaseConfigured(env = process.env) {
 
 export function listingDatabaseConfigured(env = process.env) {
   return listingDatabaseConnectionString(env) !== null;
+}
+
+export function arbitrageDatabaseConfigured(env = process.env) {
+  return arbitrageDatabaseConnectionString(env) !== null;
 }
 
 export function getDatabaseSql() {
@@ -103,6 +126,19 @@ export function getListingDatabaseSql() {
   return listingDatabaseSql;
 }
 
+export function getArbitrageDatabaseSql() {
+  if (arbitrageDatabaseSql) return arbitrageDatabaseSql;
+
+  const connectionString = arbitrageDatabaseConnectionString();
+  if (!connectionString) {
+    const key = arbitrageDatabaseEnvironmentKey();
+    throw new Error(`${key} is required for the arbitrage durable reader`);
+  }
+
+  arbitrageDatabaseSql = neon(connectionString);
+  return arbitrageDatabaseSql;
+}
+
 async function runTransaction(sql, buildQueries, options = {}) {
   if (typeof buildQueries !== 'function') {
     throw new TypeError('buildQueries must be a synchronous function');
@@ -137,8 +173,13 @@ export async function runListingDatabaseTransaction(buildQueries, options = {}) 
   return runTransaction(getListingDatabaseSql(), buildQueries, { ...options, readOnly:true });
 }
 
+export async function runArbitrageDatabaseTransaction(buildQueries, options = {}) {
+  return runTransaction(getArbitrageDatabaseSql(), buildQueries, { ...options, readOnly:true });
+}
+
 export function resetDatabaseClientForTests() {
   databaseSql = null;
   migrationDatabaseSql = null;
   listingDatabaseSql = null;
+  arbitrageDatabaseSql = null;
 }

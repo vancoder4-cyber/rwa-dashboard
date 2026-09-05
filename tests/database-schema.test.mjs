@@ -5,16 +5,22 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import {
+  ARBITRAGE_DATABASE_URL_ENV_KEY,
   DATABASE_URL_ENV_KEY,
   DATABASE_URL_UNPOOLED_ENV_KEY,
   DATABASE_TRANSACTION_TIMEOUT_MS,
   LISTING_DATABASE_URL_ENV_KEY,
   PREVIEW_DATABASE_URL_ENV_KEY,
   PREVIEW_DATABASE_URL_UNPOOLED_ENV_KEY,
+  PREVIEW_ARBITRAGE_DATABASE_URL_ENV_KEY,
   PREVIEW_LISTING_DATABASE_URL_ENV_KEY,
+  arbitrageDatabaseConfigured,
+  arbitrageDatabaseConnectionString,
+  arbitrageDatabaseEnvironmentKey,
   databaseConnectionString,
   databaseConfigured,
   databaseEnvironmentKeys,
+  getArbitrageDatabaseSql,
   getDatabaseSql,
   getListingDatabaseSql,
   getMigrationDatabaseSql,
@@ -52,13 +58,17 @@ test('migration files are ordered, immutable-checksummed, and parse into stateme
     '0007_sk_hynix_etf_identity_correction.sql',
     '0008_sk_hynix_etf_display_names.sql',
     '0009_listing_identity_projection.sql',
+    '0010_arbitrage_opportunity_publication.sql',
   ]);
-  assert.deepEqual(migrations.map(row => row.version), ['0001', '0002', '0003', '0004', '0005', '0006', '0007', '0008', '0009']);
+  assert.deepEqual(migrations.map(row => row.version), [
+    '0001', '0002', '0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010',
+  ]);
   for (const migration of migrations) {
     assert.match(migration.filename, MIGRATION_FILE_PATTERN);
     assert.match(migration.checksum, /^[0-9a-f]{64}$/);
     assert.equal(migration.checksum, migrationChecksum(migration.sql));
-    const minimumStatements = ['0003', '0004', '0005', '0006', '0007', '0008', '0009'].includes(migration.version) ? 3 : 11;
+    const minimumStatements = ['0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010']
+      .includes(migration.version) ? 3 : 11;
     assert.ok(migration.statements.length >= minimumStatements);
     assert.ok(migration.statements.every(statement => statement.trim().length > 0));
   }
@@ -98,6 +108,22 @@ test('listing publication takes canonical name and category from the bound ident
   assert.match(sql, /REVOKE ALL ON publication\.listing_change_event_v1 FROM PUBLIC/);
   assert.match(sql, /GRANT SELECT ON publication\.listing_change_event_v1\s+TO rwa_listing_audit_reader/);
   assert.doesNotMatch(sql, /(?:INSERT INTO|UPDATE|DELETE FROM) analytics\.catalog_change_event/);
+});
+
+test('arbitrage publication is append-only, exact-identity keyed, and least-privilege readable', async () => {
+  const sql = await readFile(path.join(MIGRATION_DIRECTORY, '0010_arbitrage_opportunity_publication.sql'), 'utf8');
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS fact\.arbitrage_route_observation/);
+  assert.match(sql, /spot_instrument_version_id bigint NOT NULL REFERENCES identity\.instrument_version/);
+  assert.match(sql, /perp_instrument_version_id bigint NOT NULL REFERENCES identity\.instrument_version/);
+  assert.match(sql, /asset_version_id bigint NOT NULL REFERENCES identity\.asset_version/);
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS publication\.arbitrage_opportunity_snapshot/);
+  assert.match(sql, /CREATE OR REPLACE VIEW publication\.arbitrage_opportunity_v1/);
+  assert.match(sql, /CREATE ROLE rwa_arbitrage_writer NOLOGIN/);
+  assert.match(sql, /CREATE ROLE rwa_arbitrage_reader NOLOGIN/);
+  assert.match(sql, /GRANT SELECT ON publication\.arbitrage_opportunity_v1 TO rwa_arbitrage_reader/);
+  assert.match(sql, /REVOKE ALL ON fact\.arbitrage_route_observation FROM PUBLIC, rwa_arbitrage_reader/);
+  assert.doesNotMatch(sql, /GRANT (?:UPDATE|DELETE)[^;]*arbitrage_(?:route|opportunity)/);
+  assert.doesNotMatch(sql, /^\s*(ticker|symbol)\s+/gmi);
 });
 
 test('SQL splitter preserves comments, quoted semicolons, and dollar-quoted role blocks', () => {
@@ -317,6 +343,8 @@ test('Neon clients remain lazy and migrations prefer the unpooled URL', () => {
   const originalPreviewUnpooled = process.env[PREVIEW_DATABASE_URL_UNPOOLED_ENV_KEY];
   const originalListing = process.env[LISTING_DATABASE_URL_ENV_KEY];
   const originalPreviewListing = process.env[PREVIEW_LISTING_DATABASE_URL_ENV_KEY];
+  const originalArbitrage = process.env[ARBITRAGE_DATABASE_URL_ENV_KEY];
+  const originalPreviewArbitrage = process.env[PREVIEW_ARBITRAGE_DATABASE_URL_ENV_KEY];
   const originalVercelEnv = process.env.VERCEL_ENV;
   try {
     delete process.env.VERCEL_ENV;
@@ -326,24 +354,32 @@ test('Neon clients remain lazy and migrations prefer the unpooled URL', () => {
     delete process.env[PREVIEW_DATABASE_URL_UNPOOLED_ENV_KEY];
     delete process.env[LISTING_DATABASE_URL_ENV_KEY];
     delete process.env[PREVIEW_LISTING_DATABASE_URL_ENV_KEY];
+    delete process.env[ARBITRAGE_DATABASE_URL_ENV_KEY];
+    delete process.env[PREVIEW_ARBITRAGE_DATABASE_URL_ENV_KEY];
     resetDatabaseClientForTests();
     assert.equal(databaseConfigured(), false);
     assert.equal(migrationDatabaseConfigured(), false);
     assert.equal(listingDatabaseConfigured(), false);
+    assert.equal(arbitrageDatabaseConfigured(), false);
     assert.throws(() => getDatabaseSql(), /DATABASE_URL is required/);
     assert.throws(() => getMigrationDatabaseSql(), /DATABASE_URL_UNPOOLED or DATABASE_URL is required/);
     assert.throws(() => getListingDatabaseSql(), /LISTING_DATABASE_URL is required/);
+    assert.throws(() => getArbitrageDatabaseSql(), /ARBITRAGE_DATABASE_URL is required/);
 
     process.env[DATABASE_URL_ENV_KEY] = 'postgresql://user:password@ep-pooled.example.invalid/database?sslmode=require';
     process.env[DATABASE_URL_UNPOOLED_ENV_KEY] = 'postgresql://user:password@ep-direct.example.invalid/database?sslmode=require';
     process.env[LISTING_DATABASE_URL_ENV_KEY] = 'postgresql://listing-reader:password@ep-pooled.example.invalid/database?sslmode=require';
+    process.env[ARBITRAGE_DATABASE_URL_ENV_KEY] = 'postgresql://arbitrage-reader:password@ep-pooled.example.invalid/database?sslmode=require';
     assert.equal(databaseConfigured(), true);
     assert.equal(migrationDatabaseConfigured(), true);
     assert.equal(listingDatabaseConfigured(), true);
+    assert.equal(arbitrageDatabaseConfigured(), true);
     assert.equal(listingDatabaseConnectionString(), process.env[LISTING_DATABASE_URL_ENV_KEY]);
+    assert.equal(arbitrageDatabaseConnectionString(), process.env[ARBITRAGE_DATABASE_URL_ENV_KEY]);
     assert.equal(typeof getDatabaseSql(), 'function');
     assert.equal(typeof getMigrationDatabaseSql(), 'function');
     assert.equal(typeof getListingDatabaseSql(), 'function');
+    assert.equal(typeof getArbitrageDatabaseSql(), 'function');
 
     process.env.VERCEL_ENV = 'preview';
     resetDatabaseClientForTests();
@@ -352,30 +388,39 @@ test('Neon clients remain lazy and migrations prefer the unpooled URL', () => {
       unpooled: PREVIEW_DATABASE_URL_UNPOOLED_ENV_KEY,
     });
     assert.equal(listingDatabaseEnvironmentKey(), PREVIEW_LISTING_DATABASE_URL_ENV_KEY);
+    assert.equal(arbitrageDatabaseEnvironmentKey(), PREVIEW_ARBITRAGE_DATABASE_URL_ENV_KEY);
     assert.equal(databaseConnectionString(), null);
     assert.equal(migrationDatabaseConnectionString(), null);
     assert.equal(databaseConfigured(), false);
     assert.equal(migrationDatabaseConfigured(), false);
     assert.equal(listingDatabaseConfigured(), false);
+    assert.equal(arbitrageDatabaseConfigured(), false);
     assert.throws(() => getDatabaseSql(), /PREVIEW_NEON_DATABASE_URL is required/);
     assert.throws(() => getMigrationDatabaseSql(), /PREVIEW_NEON_DATABASE_URL_UNPOOLED or PREVIEW_NEON_DATABASE_URL is required/);
     assert.throws(() => getListingDatabaseSql(), /PREVIEW_NEON_LISTING_DATABASE_URL is required/);
+    assert.throws(() => getArbitrageDatabaseSql(), /PREVIEW_NEON_ARBITRAGE_DATABASE_URL is required/);
 
     process.env[PREVIEW_DATABASE_URL_ENV_KEY] = 'postgresql://preview:password@ep-preview-pooled.example.invalid/database?sslmode=require';
     process.env[PREVIEW_DATABASE_URL_UNPOOLED_ENV_KEY] = 'postgresql://preview:password@ep-preview-direct.example.invalid/database?sslmode=require';
     process.env[PREVIEW_LISTING_DATABASE_URL_ENV_KEY] = 'postgresql://preview-listing-reader:password@ep-preview-pooled.example.invalid/database?sslmode=require';
+    process.env[PREVIEW_ARBITRAGE_DATABASE_URL_ENV_KEY] = 'postgresql://preview-arbitrage-reader:password@ep-preview-pooled.example.invalid/database?sslmode=require';
     assert.equal(databaseConfigured(), true);
     assert.equal(migrationDatabaseConfigured(), true);
     assert.equal(listingDatabaseConfigured(), true);
+    assert.equal(arbitrageDatabaseConfigured(), true);
     assert.equal(databaseConnectionString(), process.env[PREVIEW_DATABASE_URL_ENV_KEY]);
     assert.equal(migrationDatabaseConnectionString(), process.env[PREVIEW_DATABASE_URL_UNPOOLED_ENV_KEY]);
     assert.equal(listingDatabaseConnectionString(), process.env[PREVIEW_LISTING_DATABASE_URL_ENV_KEY]);
+    assert.equal(arbitrageDatabaseConnectionString(), process.env[PREVIEW_ARBITRAGE_DATABASE_URL_ENV_KEY]);
     assert.equal(typeof getDatabaseSql(), 'function');
     assert.equal(typeof getMigrationDatabaseSql(), 'function');
     assert.equal(typeof getListingDatabaseSql(), 'function');
+    assert.equal(typeof getArbitrageDatabaseSql(), 'function');
 
     process.env[PREVIEW_LISTING_DATABASE_URL_ENV_KEY] = process.env[PREVIEW_DATABASE_URL_ENV_KEY];
     assert.throws(() => listingDatabaseConnectionString(), /dedicated read-only login/);
+    process.env[PREVIEW_ARBITRAGE_DATABASE_URL_ENV_KEY] = process.env[PREVIEW_DATABASE_URL_ENV_KEY];
+    assert.throws(() => arbitrageDatabaseConnectionString(), /dedicated read-only login/);
   } finally {
     if (originalPooled === undefined) delete process.env[DATABASE_URL_ENV_KEY];
     else process.env[DATABASE_URL_ENV_KEY] = originalPooled;
@@ -389,6 +434,10 @@ test('Neon clients remain lazy and migrations prefer the unpooled URL', () => {
     else process.env[LISTING_DATABASE_URL_ENV_KEY] = originalListing;
     if (originalPreviewListing === undefined) delete process.env[PREVIEW_LISTING_DATABASE_URL_ENV_KEY];
     else process.env[PREVIEW_LISTING_DATABASE_URL_ENV_KEY] = originalPreviewListing;
+    if (originalArbitrage === undefined) delete process.env[ARBITRAGE_DATABASE_URL_ENV_KEY];
+    else process.env[ARBITRAGE_DATABASE_URL_ENV_KEY] = originalArbitrage;
+    if (originalPreviewArbitrage === undefined) delete process.env[PREVIEW_ARBITRAGE_DATABASE_URL_ENV_KEY];
+    else process.env[PREVIEW_ARBITRAGE_DATABASE_URL_ENV_KEY] = originalPreviewArbitrage;
     if (originalVercelEnv === undefined) delete process.env.VERCEL_ENV;
     else process.env.VERCEL_ENV = originalVercelEnv;
     resetDatabaseClientForTests();
@@ -406,10 +455,13 @@ test('package exposes only an explicit migration command and safe example modes'
   assert.match(envExample, /^PREVIEW_NEON_DATABASE_URL_UNPOOLED=$/m);
   assert.match(envExample, /^LISTING_DATABASE_URL=$/m);
   assert.match(envExample, /^PREVIEW_NEON_LISTING_DATABASE_URL=$/m);
+  assert.match(envExample, /^ARBITRAGE_DATABASE_URL=$/m);
+  assert.match(envExample, /^PREVIEW_NEON_ARBITRAGE_DATABASE_URL=$/m);
   assert.match(envExample, /^BLOB_READ_WRITE_TOKEN=$/m);
   assert.match(envExample, /^PG_WRITE_MODE=off$/m);
   assert.match(envExample, /^RAW_ARCHIVE_MODE=off$/m);
   assert.match(envExample, /^LISTING_CHECKPOINT_WRITE_MODE=off$/m);
+  assert.match(envExample, /^ARBITRAGE_WRITE_MODE=off$/m);
   assert.match(envExample, /^LISTING_READ_MODE=runtime-cache$/m);
 });
 
@@ -430,4 +482,12 @@ test('database audit verifies Listing checkpoint roles without granting identity
   assert.match(audit, /listing_reader_delete/);
   assert.match(audit, /listing_writer_delete/);
   assert.match(audit, /listing_checkpoints/);
+  assert.match(audit, /'rwa_arbitrage_writer'/);
+  assert.match(audit, /'rwa_arbitrage_reader'/);
+  assert.match(audit, /arbitrage_writer_fact_insert/);
+  assert.match(audit, /arbitrage_writer_snapshot_insert/);
+  assert.match(audit, /arbitrage_reader_view_select/);
+  assert.match(audit, /arbitrage_reader_fact_select/);
+  assert.match(audit, /arbitrage_reader_snapshot_select/);
+  assert.match(audit, /arbitrage_reader_identity_select/);
 });

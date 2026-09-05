@@ -126,7 +126,13 @@ async function fetchSameOrigin(baseUrl, path, deadlineAt) {
   );
 }
 
-function marketFields(volume, volumeMethod, change, changeMethod, { estimatedVolume = false } = {}) {
+function marketFields(volume, volumeMethod, change, changeMethod, {
+  estimatedVolume = false,
+  lastPriceUsd = null,
+  bidPriceUsd = null,
+  askPriceUsd = null,
+  observedAt = null,
+} = {}) {
   const currentVolumeUsd = nonNegativeOrNull(volume);
   const priceChange24hPct = finiteOrNull(change);
   return {
@@ -136,6 +142,10 @@ function marketFields(volume, volumeMethod, change, changeMethod, { estimatedVol
     volumeStatus: currentVolumeUsd === null ? 'unavailable' : estimatedVolume ? 'estimated' : 'full',
     changeMethod: priceChange24hPct === null ? null : changeMethod,
     changeStatus: priceChange24hPct === null ? 'unavailable' : 'full',
+    lastPriceUsd:positiveOrNull(lastPriceUsd),
+    bidPriceUsd:positiveOrNull(bidPriceUsd),
+    askPriceUsd:positiveOrNull(askPriceUsd),
+    observedAt:Number.isFinite(Date.parse(observedAt)) ? new Date(observedAt).toISOString() : null,
   };
 }
 
@@ -150,6 +160,12 @@ async function gateMarket(baseUrl, catalog, deadlineAt) {
       'official-rolling24h-quote-turnover',
       ticker.change_percentage,
       'official-rolling24h-percent',
+      {
+        lastPriceUsd:ticker.last,
+        bidPriceUsd:ticker.highest_bid,
+        askPriceUsd:ticker.lowest_ask,
+        observedAt:payload?.generatedAt || new Date().toISOString(),
+      },
     )];
   }));
 }
@@ -168,6 +184,12 @@ async function binanceMarket(baseUrl, catalog, deadlineAt) {
       'official-rolling24h-quote-turnover',
       ticker.priceChangePercent,
       'official-rolling24h-percent',
+      {
+        lastPriceUsd:ticker.lastPrice,
+        bidPriceUsd:ticker.bidPrice,
+        askPriceUsd:ticker.askPrice,
+        observedAt:payload?.generatedAt,
+      },
     )];
   }));
 }
@@ -186,6 +208,12 @@ async function okxMarket(baseUrl, catalog, deadlineAt) {
       'official-rolling24h-quote-turnover',
       change,
       'official-rolling24h-open-to-last',
+      {
+        lastPriceUsd:ticker.last,
+        bidPriceUsd:ticker.bidPx,
+        askPriceUsd:ticker.askPx,
+        observedAt:Number.isFinite(Number(ticker.ts)) ? new Date(Number(ticker.ts)).toISOString() : payload?.generatedAt,
+      },
     )];
   }));
 }
@@ -231,6 +259,14 @@ async function bitgetMarket(_baseUrl, catalog, deadlineAt) {
       reality ? 'official-platform-rolling24h-turnover' : 'official-rolling24h-quote-turnover',
       rawChange === null ? null : rawChange * 100,
       'official-rolling24h-fraction',
+      {
+        lastPriceUsd:reality ? (ticker.lastPr ?? ticker.lastPrice) : (ticker.close ?? ticker.lastPr),
+        bidPriceUsd:ticker.bidPr ?? ticker.bidPrice,
+        askPriceUsd:ticker.askPr ?? ticker.askPrice,
+        observedAt:Number.isFinite(Number(ticker.ts ?? ticker.timestamp))
+          ? new Date(Number(ticker.ts ?? ticker.timestamp)).toISOString()
+          : new Date().toISOString(),
+      },
     )];
   }));
 }
@@ -246,7 +282,13 @@ function krakenTickerFields(ticker) {
     'official-rolling24h-base-volume-x-vwap',
     null,
     null,
-    { estimatedVolume: volume !== null },
+    {
+      estimatedVolume: volume !== null,
+      lastPriceUsd:ticker?.c?.[0],
+      bidPriceUsd:ticker?.b?.[0],
+      askPriceUsd:ticker?.a?.[0],
+      observedAt:new Date().toISOString(),
+    },
   );
 }
 
