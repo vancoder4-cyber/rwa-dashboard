@@ -242,11 +242,19 @@ test('collector joins only exact database identities and emits one policy-qualif
     priceUsd:101.2, bidPriceUsd:101.2, openInterestUsd:2_000_000,
     fundingRate:0.0002, fundingIntervalHours:8, observedAt:'2026-09-04T10:01:45.000Z',
   };
+  const normalizedTradeXyz = {
+    market:'perp', venue:'tradexyz', venueSymbol:'xyz:AAPL', symbol:'AAPL', category:'equity',
+    priceUsd:200, bidPriceUsd:200, openInterestUsd:0,
+    fundingRate:0.0001, fundingIntervalHours:1, observedAt:'2026-09-04T10:01:45.000Z',
+  };
   catalog.find(row => row.market === 'spot' && row.venue === 'kraken').listings = [{
     ...spot, canonicalSymbol:'NVDA', identityStatus:'verified',
   }];
   catalog.find(row => row.market === 'perp' && row.venue === 'binance').listings = [{
     ...perp, canonicalSymbol:'NVDA', identityStatus:'verified',
+  }];
+  catalog.find(row => row.market === 'perp' && row.venue === 'tradexyz').listings = [{
+    ...normalizedTradeXyz, venueSymbol:'XYZ:AAPL', canonicalSymbol:'AAPL', identityStatus:'verified',
   }];
   const identities = normalizeAuthoritativeArbitrageIdentityRows([
     {
@@ -258,6 +266,11 @@ test('collector joins only exact database identities and emits one policy-qualif
       source_key:'perp:binance', official_venue_symbol:'NVDAUSDT', normalized_venue_symbol:'NVDAUSDT',
       category:'equity', canonical_underlying:'NVDA', display_name:'NVIDIA',
       instrument_version_id:12, asset_version_id:1,
+    },
+    {
+      source_key:'perp:tradexyz', official_venue_symbol:'XYZ:AAPL', normalized_venue_symbol:'XYZ:AAPL',
+      category:'equity', canonical_underlying:'AAPL', display_name:'Apple',
+      instrument_version_id:13, asset_version_id:2,
     },
   ]);
   const emptyPerpCollector = async () => ({ listings:[], completeness:'full', warnings:[] });
@@ -276,7 +289,7 @@ test('collector joins only exact database identities and emits one policy-qualif
       gate:emptyPerpCollector,
       binance:async () => ({ listings:[perp], completeness:'full', warnings:[] }),
       bitget:emptyPerpCollector,
-      tradexyz:emptyPerpCollector,
+      tradexyz:async () => ({ listings:[normalizedTradeXyz], completeness:'full', warnings:[] }),
       okx:emptyPerpCollector,
     },
     fillBinanceOi:async () => 0,
@@ -314,7 +327,7 @@ test('collector joins only exact database identities and emits one policy-qualif
       gate:emptyPerpCollector,
       binance:async () => ({ listings:[{ ...perp, fundingRate:0.0001 }], completeness:'full', warnings:[] }),
       bitget:emptyPerpCollector,
-      tradexyz:emptyPerpCollector,
+      tradexyz:async () => ({ listings:[normalizedTradeXyz], completeness:'full', warnings:[] }),
       okx:emptyPerpCollector,
     },
     fillBinanceOi:async () => 0,

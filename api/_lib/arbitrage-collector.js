@@ -236,7 +236,13 @@ function reconcileMarketCatalogCoverage(catalogObservations, marketRows) {
 }
 
 function authoritativeListing(listing, identities) {
-  const identity = identities.get(identityKey(listing.market, listing.venue, listing.venueSymbol));
+  const exactKey = identityKey(listing.market, listing.venue, listing.venueSymbol);
+  const normalizedKey = identityKey(
+    listing.market,
+    listing.venue,
+    String(listing.venueSymbol || '').trim().toUpperCase(),
+  );
+  const identity = identities.get(exactKey) || identities.get(normalizedKey);
   if (!identity || identity.category !== listing.category || identity.canonicalSymbol !== listing.symbol) return null;
   return {
     ...listing,
