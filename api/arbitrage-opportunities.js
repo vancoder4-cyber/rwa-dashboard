@@ -24,6 +24,10 @@ export async function serveArbitrageOpportunities(req, res, options = {}) {
     result = { status:'unavailable', payload:null };
   }
   if (result?.status !== 'stored' || !result?.payload) {
+    console.error('[arbitrage-opportunities] authoritative snapshot unavailable', {
+      status:result?.status || 'unknown',
+      reason:String(result?.reason || 'unknown failure').slice(0, 300),
+    });
     setNoStore(res);
     return res.status(503).json(unavailableArbitragePayload('authoritative-snapshot-unavailable'));
   }
