@@ -6,6 +6,7 @@ import {
   executableBookSide,
   normalizeOrderBookPayload,
   requiresBinanceOpenInterestBackfill,
+  routeHasExecutableBooks,
 } from '../api/_lib/arbitrage-collector.js';
 import {
   arbitrageSnapshotFromAuthorityRows,
@@ -81,6 +82,17 @@ test('Bitget order books accept exact Spot and UTA futures response fields', () 
     code:'00000', data:{ a:[[101, 2]], b:[[100, 3]] },
   }, 'bitget'), { asks:[[101, 2]], bids:[[100, 3]] });
   assert.equal(normalizeOrderBookPayload({ code:'25100', data:null }, 'bitget'), null);
+});
+
+test('a successful empty required book side is non-executable, not a synthetic route', () => {
+  assert.equal(routeHasExecutableBooks(
+    { priceUsd:null, executableDepthUsd:0 },
+    { priceUsd:101, executableDepthUsd:20_000 },
+  ), false);
+  assert.equal(routeHasExecutableBooks(
+    { priceUsd:100, executableDepthUsd:10_000 },
+    { priceUsd:101, executableDepthUsd:20_000 },
+  ), true);
 });
 
 test('public API returns JSON full snapshot or explicit 503 unavailable, never synthetic empty', async () => {

@@ -139,8 +139,19 @@ async function fetchOrderBook(listing) {
   const side = listing.market === 'spot'
     ? executableBookSide(book.asks, 'buy', 1)
     : executableBookSide(book.bids, 'sell', multiplier);
-  if (!side) throw new TypeError(`Empty executable ${venue} order book for ${symbol}`);
+  if (!side) {
+    const requiredLevels = listing.market === 'spot' ? book.asks : book.bids;
+    if (requiredLevels.length === 0) {
+      return { priceUsd:null, executableDepthUsd:0, observedAt:new Date().toISOString() };
+    }
+    throw new TypeError(`Invalid executable ${venue} order book for ${symbol}`);
+  }
   return { ...side, observedAt:new Date().toISOString() };
+}
+
+export function routeHasExecutableBooks(spotBook, perpBook) {
+  return positive(spotBook?.priceUsd) !== null && positive(spotBook?.executableDepthUsd) !== null &&
+    positive(perpBook?.priceUsd) !== null && positive(perpBook?.executableDepthUsd) !== null;
 }
 
 async function fetchFundingHistories(baseUrl, perps) {
@@ -368,11 +379,15 @@ export async function collectArbitragePublication(req, options = {}) {
     `${listing.market}:${listing.venue}:${listing.venueSymbol}`,
     await readOrderBook(listing),
   ]));
-  const fundingByPerp = await readFundingHistories(baseUrl, candidates.map(row => row.perp));
+  const executableCandidates = candidates.filter(({ spot, perp }) => routeHasExecutableBooks(
+    books.get(`spot:${spot.venue}:${spot.venueSymbol}`),
+    books.get(`perp:${perp.venue}:${perp.venueSymbol}`),
+  ));
+  const fundingByPerp = await readFundingHistories(baseUrl, executableCandidates.map(row => row.perp));
   const generatedAtMs = fixedNowMs ?? Date.now();
 
   const routeFacts = [];
-  for (const { spot, perp } of candidates) {
+  for (const { spot, perp } of executableCandidates) {
     const spotBook = books.get(`spot:${spot.venue}:${spot.venueSymbol}`);
     const perpBook = books.get(`perp:${perp.venue}:${perp.venueSymbol}`);
     const fundingHistory = fundingByPerp.get(`${perp.venue}:${perp.venueSymbol}`);
@@ -452,6 +467,11 @@ export async function collectArbitragePublication(req, options = {}) {
       status:'full',
       listingCount:observationByKey.get(key).listings.length,
     })),
-    diagnostics:{ candidateRoutes:candidates.length, observedRoutes:routeFacts.length, publishedRoutes:publishedRoutes.length },
+    diagnostics:{
+      candidateRoutes:candidates.length,
+      executableRoutes:executableCandidates.length,
+      observedRoutes:routeFacts.length,
+      publishedRoutes:publishedRoutes.length,
+    },
   };
 }
