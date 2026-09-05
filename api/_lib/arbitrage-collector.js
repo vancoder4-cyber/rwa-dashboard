@@ -26,6 +26,7 @@ const KRAKEN = 'https://api.kraken.com/0/public';
 const OKX = 'https://www.okx.com/api/v5';
 const HYPERLIQUID = 'https://api.hyperliquid.xyz/info';
 const MAX_CANDIDATE_ROUTES = 1_500;
+const ORDER_BOOK_CONCURRENCY = 4;
 
 function finite(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -130,7 +131,12 @@ async function fetchOrderBook(listing) {
   } else {
     throw new TypeError(`Unsupported order-book venue ${venue}`);
   }
-  const payload = await fetchJsonWithPolicy(url, options, { timeoutMs:8_000, retries:1, baseDelayMs:200 });
+  let payload;
+  try {
+    payload = await fetchJsonWithPolicy(url, options, { timeoutMs:8_000, retries:3, baseDelayMs:500 });
+  } catch (error) {
+    throw new TypeError(`${venue} order book unavailable for ${symbol}: ${error?.message || 'unknown failure'}`);
+  }
   const book = normalizeOrderBookPayload(payload, venue);
   if (!book || !Array.isArray(book.bids) || !Array.isArray(book.asks)) {
     throw new TypeError(`Invalid ${venue} order book for ${symbol}`);
@@ -375,7 +381,7 @@ export async function collectArbitragePublication(req, options = {}) {
 
   const uniqueListings = [...new Map(candidates.flatMap(row => [row.spot, row.perp])
     .map(row => [`${row.market}:${row.venue}:${row.venueSymbol}`, row])).values()];
-  const books = new Map(await mapWithConcurrency(uniqueListings, 20, async listing => [
+  const books = new Map(await mapWithConcurrency(uniqueListings, ORDER_BOOK_CONCURRENCY, async listing => [
     `${listing.market}:${listing.venue}:${listing.venueSymbol}`,
     await readOrderBook(listing),
   ]));
