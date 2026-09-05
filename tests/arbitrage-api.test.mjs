@@ -208,6 +208,8 @@ test('authority and publication queries pin roles and append one exact ten-sourc
   const authority = buildArbitrageAuthorityQueries(sql);
   assert.equal(authority.length, 3);
   assert.match(calls[0].text, /SET LOCAL ROLE rwa_arbitrage_reader/);
+  assert.match(calls[1].text, /FROM pg_class AS relation/);
+  assert.doesNotMatch(calls[1].text, /has_table_privilege\(session_user,\s*'fact\./);
   assert.match(calls[2].text, /publication\.arbitrage_opportunity_v1/);
 
   calls.length = 0;

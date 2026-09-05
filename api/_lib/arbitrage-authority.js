@@ -25,9 +25,24 @@ export function buildArbitrageAuthorityQueries(sql) {
          ) AS is_not_database_owner,
          NOT COALESCE((SELECT rolsuper FROM pg_roles WHERE rolname = session_user), true) AS is_not_superuser,
          has_table_privilege(current_user, '${ARBITRAGE_PUBLICATION_VIEW}', 'SELECT') AS is_publication_reader,
-         NOT has_table_privilege(session_user, 'fact.arbitrage_route_observation', 'SELECT') AS cannot_read_route_facts,
-         NOT has_table_privilege(session_user, 'publication.arbitrage_opportunity_snapshot', 'SELECT') AS cannot_read_raw_snapshots,
-         NOT has_table_privilege(session_user, 'identity.instrument_version', 'SELECT') AS cannot_read_identity_tables`,
+         NOT has_table_privilege(session_user, (
+           SELECT relation.oid
+           FROM pg_class AS relation
+           JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+           WHERE namespace.nspname = 'fact' AND relation.relname = 'arbitrage_route_observation'
+         ), 'SELECT') AS cannot_read_route_facts,
+         NOT has_table_privilege(session_user, (
+           SELECT relation.oid
+           FROM pg_class AS relation
+           JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+           WHERE namespace.nspname = 'publication' AND relation.relname = 'arbitrage_opportunity_snapshot'
+         ), 'SELECT') AS cannot_read_raw_snapshots,
+         NOT has_table_privilege(session_user, (
+           SELECT relation.oid
+           FROM pg_class AS relation
+           JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+           WHERE namespace.nspname = 'identity' AND relation.relname = 'instrument_version'
+         ), 'SELECT') AS cannot_read_identity_tables`,
     ),
     sql.query(
       `SELECT snapshot_id, generated_at, valid_until, payload
