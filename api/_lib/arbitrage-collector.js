@@ -59,7 +59,7 @@ function deploymentBaseUrl(req) {
 
 function bookLevel(row) {
   const price = positive(Array.isArray(row) ? row[0] : row?.price ?? row?.px ?? row?.p);
-  const size = finite(Array.isArray(row) ? row[1] : row?.size ?? row?.sz ?? row?.q);
+  const size = finite(Array.isArray(row) ? row[1] : row?.size ?? row?.sz ?? row?.q ?? row?.s);
   return price !== null && size !== null && size >= 0 ? { price, size } : null;
 }
 

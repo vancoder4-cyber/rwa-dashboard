@@ -62,6 +62,16 @@ test('executable depth is side-specific and uses the producer tolerance', () => 
   assert.equal(bids.executableDepthUsd, 22_080);
 });
 
+test('Gate perpetual object levels preserve the official p and s fields', () => {
+  assert.deepEqual(executableBookSide([
+    { p:'100', s:'2' },
+    { p:'99', s:'3' },
+  ], 'sell', 1), {
+    priceUsd:100,
+    executableDepthUsd:497,
+  });
+});
+
 test('public API returns JSON full snapshot or explicit 503 unavailable, never synthetic empty', async () => {
   const snapshot = emptySnapshot();
   const ok = response();
