@@ -311,6 +311,21 @@ export async function collectArbitragePublication(req, options = {}) {
     0,
   );
   if (rejectedListings || quarantinedListings || spotSnapshot.conflicts.length) {
+    const rejectedSample = allRows
+      .filter((row, index) => authoritative[index] === null)
+      .slice(0, 10)
+      .map(row => ({
+        listingKey:identityKey(row.market, row.venue, row.venueSymbol),
+        canonicalSymbol:row.symbol,
+        category:row.category,
+      }));
+    console.error('[arbitrage-collector] authoritative identity coverage rejected', {
+      rejectedListings,
+      quarantinedListings,
+      identityConflicts:spotSnapshot.conflicts.length,
+      rejectedSample,
+      conflictSample:spotSnapshot.conflicts.slice(0, 10),
+    });
     throw new TypeError('Arbitrage identity coverage contains rejected, quarantined, or conflicting listings');
   }
   const spots = authoritative.filter(row => row.market === 'spot');
