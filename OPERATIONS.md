@@ -106,6 +106,13 @@ Run migrations with `DATABASE_URL_UNPOOLED` whenever it is available. `audit:db`
 6. Observe Preview across multiple scheduled five-minute buckets, including one injected source failure. Failure must leave the prior row immutable; after ten minutes the public reader must fail closed.
 7. Production migration, reader credential, `required` mode and merge/release each require their own reviewed authorization. Release only through GitHub `main` → Vercel Git integration; never local `vercel --prod`.
 
+#### Production arbitrage cutover record — 2026-09-05
+
+- The Production database fingerprint is `dad36a692c1f`. Migrations `0007` through `0010` were applied in order and the complete migration ledger was audited; migration `0010` has SHA-256 `e720b0235a051113fc97f9005d4c7e50a4303b39a54ae8785f57f7b3c660c2b7`.
+- The runtime reader uses a dedicated login that is only a member of `rwa_arbitrage_reader`. It can select `publication.arbitrage_opportunity_v1`, while direct analytics reads and all writes remain denied.
+- Production configuration requires server-only `ARBITRAGE_DATABASE_URL` and `ARBITRAGE_WRITE_MODE=required`. This record contains variable names only; credentials must never be committed or logged.
+- The release contract remains `rwa-arbitrage-opportunities/v1` with formula `rwa-arbitrage-opportunity-1.0`. After the Git-origin `main` rebuild, operators must verify exact source/ref/SHA provenance and static hashes before invoking the authenticated writer, then validate the published payload with the Push Bot's real consumer validator.
+
 ### Phase 1 — ten official catalogs, shadow-write only
 
 Phase 1 attaches an additive sink to the existing authenticated daily Listing Audit writer. Its scope is exactly the ten keys in `api/_lib/listing-audit.js`: five Perpetual catalogs (trade.xyz, Bitget, Gate, Binance, OKX) and five Spot catalogs (Bitget, Gate, Kraken, Binance, OKX).
