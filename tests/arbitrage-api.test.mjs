@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   collectArbitragePublication,
   executableBookSide,
+  normalizeOrderBookPayload,
   requiresBinanceOpenInterestBackfill,
 } from '../api/_lib/arbitrage-collector.js';
 import {
@@ -70,6 +71,16 @@ test('Gate perpetual object levels preserve the official p and s fields', () => 
     priceUsd:100,
     executableDepthUsd:497,
   });
+});
+
+test('Bitget order books accept exact Spot and UTA futures response fields', () => {
+  assert.deepEqual(normalizeOrderBookPayload({
+    code:'00000', data:{ asks:[[101, 2]], bids:[[100, 3]] },
+  }, 'bitget'), { asks:[[101, 2]], bids:[[100, 3]] });
+  assert.deepEqual(normalizeOrderBookPayload({
+    code:'00000', data:{ a:[[101, 2]], b:[[100, 3]] },
+  }, 'bitget'), { asks:[[101, 2]], bids:[[100, 3]] });
+  assert.equal(normalizeOrderBookPayload({ code:'25100', data:null }, 'bitget'), null);
 });
 
 test('public API returns JSON full snapshot or explicit 503 unavailable, never synthetic empty', async () => {

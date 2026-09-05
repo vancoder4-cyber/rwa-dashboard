@@ -79,7 +79,7 @@ export function executableBookSide(levels, side, sizeMultiplier = 1, tolerancePc
   return { priceUsd:topPrice, executableDepthUsd:depth };
 }
 
-function normalizeBook(payload, venue) {
+export function normalizeOrderBookPayload(payload, venue) {
   if (venue === 'okx') {
     const book = Array.isArray(payload?.data) ? payload.data[0] : null;
     return { bids:book?.bids, asks:book?.asks };
@@ -88,7 +88,10 @@ function normalizeBook(payload, venue) {
     if (Array.isArray(payload?.error) && payload.error.length) return null;
     return Object.values(payload?.result || {})[0] || null;
   }
-  if (venue === 'bitget') return payload?.code === '00000' ? payload.data : null;
+  if (venue === 'bitget') return payload?.code === '00000' ? {
+    bids:payload?.data?.bids ?? payload?.data?.b,
+    asks:payload?.data?.asks ?? payload?.data?.a,
+  } : null;
   if (venue === 'tradexyz') return {
     bids:Array.isArray(payload?.levels) ? payload.levels[0] : null,
     asks:Array.isArray(payload?.levels) ? payload.levels[1] : null,
@@ -106,7 +109,7 @@ async function fetchOrderBook(listing) {
   } else if (venue === 'bitget') {
     url = listing.market === 'spot'
       ? `${BITGET}/api/v2/spot/market/orderbook?symbol=${encodeURIComponent(symbol)}&type=step0&limit=150`
-      : `${BITGET}/api/v2/mix/market/depth?symbol=${encodeURIComponent(symbol)}&productType=USDT-FUTURES&limit=150`;
+      : `${BITGET}/api/v3/market/orderbook?category=USDT-FUTURES&symbol=${encodeURIComponent(symbol)}&limit=150`;
   } else if (venue === 'gate') {
     url = listing.market === 'spot'
       ? `${GATE_SPOT}/order_book?currency_pair=${encodeURIComponent(symbol)}&limit=100`
@@ -128,7 +131,7 @@ async function fetchOrderBook(listing) {
     throw new TypeError(`Unsupported order-book venue ${venue}`);
   }
   const payload = await fetchJsonWithPolicy(url, options, { timeoutMs:8_000, retries:1, baseDelayMs:200 });
-  const book = normalizeBook(payload, venue);
+  const book = normalizeOrderBookPayload(payload, venue);
   if (!book || !Array.isArray(book.bids) || !Array.isArray(book.asks)) {
     throw new TypeError(`Invalid ${venue} order book for ${symbol}`);
   }
