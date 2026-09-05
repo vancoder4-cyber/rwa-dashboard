@@ -176,8 +176,12 @@ async function fetchFundingHistories(baseUrl, perps) {
   return output;
 }
 
+export function requiresBinanceOpenInterestBackfill(row) {
+  return row?.venue === 'binance' && finite(row?.openInterestUsd) === null;
+}
+
 async function fillMissingBinanceOpenInterest(listings) {
-  const missing = listings.filter(row => row.venue === 'binance' && !(finite(row.openInterestUsd) >= 0));
+  const missing = listings.filter(requiresBinanceOpenInterestBackfill);
   const rows = await mapWithConcurrency(missing, 20, async row => {
     const payload = await fetchJsonWithPolicy(
       `${BINANCE_PERP}/openInterest?symbol=${encodeURIComponent(row.venueSymbol)}`,

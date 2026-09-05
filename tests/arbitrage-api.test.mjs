@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { collectArbitragePublication, executableBookSide } from '../api/_lib/arbitrage-collector.js';
+import {
+  collectArbitragePublication,
+  executableBookSide,
+  requiresBinanceOpenInterestBackfill,
+} from '../api/_lib/arbitrage-collector.js';
 import {
   arbitrageSnapshotFromAuthorityRows,
   buildArbitrageAuthorityQueries,
@@ -30,6 +34,13 @@ function response() {
     json(body) { this.body = body; return this; },
   };
 }
+
+test('Binance OI backfill distinguishes missing values from a real zero', () => {
+  assert.equal(requiresBinanceOpenInterestBackfill({ venue:'binance', openInterestUsd:null }), true);
+  assert.equal(requiresBinanceOpenInterestBackfill({ venue:'binance' }), true);
+  assert.equal(requiresBinanceOpenInterestBackfill({ venue:'binance', openInterestUsd:0 }), false);
+  assert.equal(requiresBinanceOpenInterestBackfill({ venue:'okx', openInterestUsd:null }), false);
+});
 
 function emptySnapshot() {
   return buildArbitrageSnapshot([], {
