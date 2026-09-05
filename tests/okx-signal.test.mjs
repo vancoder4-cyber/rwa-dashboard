@@ -185,7 +185,7 @@ test('OKX bond identity and five-source history comparability are explicit', () 
 });
 
 test('OKX broad Stocks metadata is refined only after official RWA admission', () => {
-  for (const symbol of ['SHLD', 'TMF', 'XBI']) {
+  for (const symbol of ['SHLD', 'TMF', 'XBI', 'SKDD', 'SKUU']) {
     assert.deepEqual(normalizeSignalIdentity(symbol, 'equity'), { symbol, category:'etf' });
   }
   assert.deepEqual(normalizeSignalIdentity('KR200', 'equity', { venue:'okx' }), { symbol:'KR200', category:'index' });

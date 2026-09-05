@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   isReviewedLifecycleCategoryCorrection,
+  REVIEWED_ETF_CATEGORY_CORRECTIONS,
   LISTING_SOURCE_KEYS,
   mergeListingAudit,
   normalizeListingObservation,
@@ -12,6 +13,7 @@ import listingChangesHandler, {
   compactListingAuditBundle,
   hydrateListingAuditSnapshot,
   hydrateListingAuditState,
+  listingSnapshotCanUseCdnCache,
   listingSnapshotIsCacheable,
 } from '../api/listing-changes.js';
 import { validateListingAuditSnapshot } from '../api/health.js';
@@ -195,6 +197,59 @@ test('lifecycle correction bypass is one-way and limited to dated reviewed publi
     { ...current, canonicalSymbol:'UNITREE' },
     { ...previous, canonicalSymbol:'UNITREE' },
   ), false, 'a public-to-Pre-IPO reversal must never bypass identity review');
+});
+
+test('reviewed SKDD ETF correction survives pending removal and does not synthesize a listing event', () => {
+  const xperp = {
+    ...row('perp:okx', 'SKDD'),
+    venueSymbol:'SKDD-USD_UM_XPERP-310829',
+    canonicalSymbol:'SKDD',
+    category:'equity',
+    venueCategory:'equity',
+    name:'SKDD',
+  };
+  const swap = {
+    ...xperp,
+    venueSymbol:'SKDD-USDT-SWAP',
+  };
+  const baseline = mergeListingAudit(null, fullObservations({
+    'perp:okx':{ market:'perp', venue:'okx', status:'full', listings:[xperp, swap] },
+  }), new Date('2026-09-02T00:45:00Z'));
+
+  // Simulate the persisted pre-correction Runtime Cache identity.
+  const legacy = structuredClone(baseline.state);
+  for (const listingKey of legacy.sources['perp:okx'].listingKeys) {
+    legacy.known[listingKey].category = 'equity';
+    legacy.known[listingKey].name = 'SKDD';
+  }
+
+  const missingXperp = fullObservations({
+    'perp:okx':{ market:'perp', venue:'okx', status:'full', listings:[swap] },
+  });
+  const pending = mergeListingAudit(legacy, missingXperp, new Date('2026-09-03T00:45:00Z'));
+  const listingKey = 'perp:okx:SKDD-USD_UM_XPERP-310829';
+  assert.deepEqual(pending.newEvents, []);
+  assert.equal(pending.state.known[listingKey].category, 'etf');
+  assert.equal(pending.state.known[listingKey].venueCategory, 'equity');
+  assert.equal(pending.state.known[listingKey].name, 'GraniteShares 2x Short SK Hynix Daily ETF');
+  assert.equal(pending.state.known[listingKey].active, true);
+
+  const removed = mergeListingAudit(pending.state, missingXperp, new Date('2026-09-04T00:45:00Z'));
+  assert.equal(removed.newEvents.length, 1);
+  assert.deepEqual({
+    listingKey:removed.newEvents[0].listingKey,
+    changeType:removed.newEvents[0].changeType,
+    category:removed.newEvents[0].category,
+    venueCategory:removed.newEvents[0].venueCategory,
+    name:removed.newEvents[0].name,
+  }, {
+    listingKey,
+    changeType:'delisted',
+    category:'etf',
+    venueCategory:'equity',
+    name:'GraniteShares 2x Short SK Hynix Daily ETF',
+  });
+  assert.deepEqual(REVIEWED_ETF_CATEGORY_CORRECTIONS, ['SKDD', 'SKUU']);
 });
 
 test('listing audit distinguishes delisting from a later relisting', () => {
@@ -472,6 +527,14 @@ test('listing public reader is GET-only and rejects query-based cache variation 
   assert.equal(listingSnapshotIsCacheable({ generatedAt:null }), false);
   assert.equal(listingSnapshotIsCacheable({ generatedAt:'not-a-date' }), false);
   assert.equal(listingSnapshotIsCacheable({ generatedAt:'2026-08-14T09:17:16.350Z' }), true);
+  assert.equal(listingSnapshotCanUseCdnCache({
+    generatedAt:'2026-08-14T09:17:16.350Z',
+    persistence:{ readPath:{ mode:'runtime-cache' } },
+  }), true);
+  assert.equal(listingSnapshotCanUseCdnCache({
+    generatedAt:'2026-08-14T09:17:16.350Z',
+    persistence:{ readPath:{ mode:'postgres-authoritative' } },
+  }), false, 'the authoritative API must not lag a successful database audit behind a CDN replica');
   const methodResponse = responseRecorder();
   await listingChangesHandler({ method:'POST', query:{}, headers:{} }, methodResponse);
   assert.equal(methodResponse.statusCode, 405);

@@ -1,7 +1,7 @@
 # RWA Asset Identity & Data Rules
 
 > 本文记录 RWA Dashboard 的资产准入、ticker 归一、类别/地区标签及上线校验规则。  
-> 最近审计：2026-08-25。生产站点：<https://avenir-rwa-analyst.vercel.app/>
+> 最近审计：2026-09-03。生产站点：<https://avenir-rwa-analyst.vercel.app/>
 
 ## 1. 核心原则
 
@@ -107,6 +107,7 @@ trade.xyz 当前专用 `xyz` DEX universe 有 5 个 `perpCategories` 空缺：`U
 - `OPENAI/ANTHROPIC/SHEIN/ANDURIL/KALSHI/KIMI/NEURALINK/POLYMARKET`：Pre-IPO；后五项由 Gate 官方 `stocks + is_pre_market=true` catalog 交叉审计纳入。
 - `UNITREE`：上海证券交易所公告确认 2026-08-19 起在科创板上市交易（证券代码 688836），因此为已上市 Equity / `public`；场所仍可使用 `UNITREE` 等产品代码，不能继续沿用 Pre-IPO 生命周期。
 - `EWH/DFEN`：全局 ETF 类别修正；Gate 的 `QQQX/SPYX/TQQQX/SLVON` 是仅在 Gate 官方 RWA catalog 门控后生效的 ETF wrapper，不能作为全局 ticker 类别修正。
+- `SKDD/SKUU`：GraniteShares 2x Short/Long SK Hynix Daily ETF。两者是 Nasdaq 上市的每日杠杆 ETF，参考标的是 SK Hynix ADR `SKHY`；它们不是 SK Hynix 普通股，也绝不能 alias 成 `SKHY/SKHYNIX`。只有场所先以官方 RWA/security catalog 准入后，才可把宽泛 Stock/Equity 类别细化为 ETF。
 - `H100`：计算资源类 Commodity，不是股票指数。
 - 已公开上市的公司不能因为场所残留 `is_pre_market` 就继续显示为 Pre-IPO。
 
@@ -120,7 +121,9 @@ trade.xyz 当前专用 `xyz` DEX universe 有 5 个 `perpCategories` 空缺：`U
 
 `UNITREE` 本次生命周期修正的官方依据是上海证券交易所 2026-08-18 发布的[上市交易公告](https://www.sse.com.cn/disclosure/announcement/listing/ipo/c/c_20260818_10829204.shtml)：股票自 2026-08-19 起上市交易。该修正更新既有精确产品的身份版本，不产生 New/Re-listed；某交易所后来新增一个精确 `venueSymbol` 时，仍由正常目录差分独立产生该场所的 listed 事件。
 
-Durable catalog 中的同一官方产品只有在 canonical underlying 完全不变、旧类别为 `pre-ipo`、新类别为 `equity`、新 `lifecycleStatus=public`，且 canonical 已进入 `REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS` 的有日期官方依据白名单时，才允许做版本化的单向公司生命周期分类纠正。这不是 New/Re-listed 事件。反向修正、非白名单标的，以及 ticker、canonical underlying、ETF、Commodity、Index、FX 或 Bond 的变化仍然是硬身份冲突，必须阻止发布并人工核对；新增白名单项必须同时补官方来源和防反向测试。
+Durable catalog 中的同一官方产品只有在 canonical underlying 完全不变、旧类别为 `pre-ipo`、新类别为 `equity`、新 `lifecycleStatus=public`，且 canonical 已进入 `REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS` 的有日期官方依据白名单时，才允许做版本化的单向公司生命周期分类纠正。这不是 New/Re-listed 事件。另一个同样狭窄的例外是：已经由场所官方 security catalog 准入、canonical 完全不变、原始 `venueCategory` 为宽泛 Equity/ETF，且 canonical 位于 `REVIEWED_ETF_CATEGORY_CORRECTIONS` 的标的，允许从旧 `equity` 身份单向纠正为 `etf`；截至 2026-09-03 该白名单仅有 `SKDD/SKUU`。反向修正、非白名单标的，以及 ticker、canonical underlying、Commodity、Index、FX 或 Bond 的变化仍然是硬身份冲突，必须阻止发布并人工核对；新增白名单项必须同时补官方来源、防反向测试和“不生成 New/Re-listed”测试。
+
+`SKDD/SKUU` 纠正依据为 GraniteShares 官方产品页与 Nasdaq Trader 2026-07-13 的 ETP 上市通知：两只 ETF 自 2026-07-14 开始交易。OKX 2026-09-02 的公告只证明精确产品 `SKDD-USD_UM_XPERP-310829` 于 2026-09-03 06:00 UTC 下架；它不能改变 `SKDD-USDT-SWAP` 的独立在架状态，也不能把身份纠正伪造成上架/重新上架事件。官方来源：<https://graniteshares.com/etfs/skdd/>、<https://graniteshares.com/etfs/skuu/>、<https://www.nasdaqtrader.com/TraderNews.aspx?id=ETP2026-113>、<https://www.okx.com/en-us/help/okx-to-delist-x-perp-for-skddusd>。
 
 官方类型只允许精确归一化映射，例如 `PRE-IPO/PRE_IPO/PREIPO -> PREIPO`、`PRE-MARKET -> PREMARKET`。禁止用 `includes('PRE')` 判断，否则 `PREFERRED_STOCK` 等无关类型也可能被误判为 Pre-IPO。布尔字段也必须显式解析，字符串 `"false"` 不能按 JavaScript truthy 值处理。
 
@@ -419,6 +422,7 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 - `pendingReviews` 是独立的活动复核队列，不受页面 7/45 天事件窗口截断；只要标的仍活跃且身份未解决，就必须持续显示。它不能因事件过期而自动放行；精确官方身份确认后可转为 `verified`，连续完整目录确认下架后才可移出活动队列。
 - 受 `CRON_SECRET` 保护的 `/api/listing-audit-cron` 是唯一 writer；公开 `/api/listing-changes` 是 GET-only、无 query 的 CDN 缓存 reader，浏览器不能触发目录采集、建立基线或写数据库。`analytics.catalog_change_event` 是唯一、持久的上架生命周期事件权威；可信 `collection_cycle` / `source_run` 决定最近一次成功审计时间和十源覆盖。`catalog_membership` 只能作为已验证的精确身份关联，严禁根据当前或历史 membership 的集合差补造事件。事件必须由 writer 在可信完整目录差分时写入，并携带稳定事件 ID、上一/当前 source run、身份状态及内部证据。`officialListedAt` 只能补充已由差分确认的事件，不能以 `onboardDate` 或相似日期字段单独制造事件。
 - `LISTING_READ_MODE=postgres-authoritative` 时，`/api/listing-changes` 只通过专用最小权限 reader 和 `publication.listing_*_v1` 安全视图恢复最近 45 日事件及最近可信 source-run 覆盖；不得回读 Runtime Cache 来决定历史是否存在。只有 `verified + eligible` 的 listed/relisted 事件可以进入页面与 Push Bot，listed 对外映射为 `changeType=new`，delisted 保留在审计历史但不进入日报。`generatedAt` 必须来自最近一次成功审计，不能使用请求时间。原始证据、连接串、run/cycle 内部 ID 和数据库权限信息不得返回前端。
+- 上架事实与发布身份必须分层：事件证据保持不可变，用于证明当时观察和目录差分；公开事件的 `name/category/canonicalSymbol` 必须来自该事件 instrument version 已绑定的 Dashboard identity version，`venueCategory/lifecycleStatus` 继续保持各自独立口径。旧 event evidence 或 membership 中的 ticker 名称不得覆盖后来经过审核的身份修正，也不得通过改写历史事件行来修正展示。
 - `rwa-listing-audit-v2` Runtime Cache 与 CDN 只作为可丢失的低延迟副本；清空、重新部署或区域逐出不能重置 PostgreSQL 事件历史或制造空基线。紧凑 checkpoint 仍可用于 writer 连续性和回滚期间的旧读取模式，但不再取得事件历史权威。事件以 45 天为默认查询窗口、2,000 条为上限；截断必须降为 Partial 并公开 `history`，不能静默宣称 Full 或“没有新资产”。数据库无可信 source run、迁移/权限失败或事件投影不合法时必须 fail closed 为 Warming/Unavailable，不能以空数组冒充“确认无事件”。
 - Nasdaq Trader 官方目录的 `etfs` 数组只用于在场所 RWA/security 门控之后细分宽泛 Stock/Equity 类别。当前 Kraken xStocks Listing Audit 依赖该官方 ETF 目录区分 Equity 与 ETF；目录不可用或契约不完整时，该 source 必须 Unavailable，不能把未知 ETF 猜成 Equity。官方 ETF 目录不是 RWA 准入白名单。
 - OKX 的 183 Perpetual（至少 149 SWAP + 34 X-Perp）和 51 Spot（至少 48 UTS + 精确 3 gold）是已审核下限，不是阻止官方新增的永久精确数量。低于任一分项、Crypto/category 泄漏、重复或 market-data join 不完整继续失败；合法增长由 Listing Audit 单独提醒。

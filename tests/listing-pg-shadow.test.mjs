@@ -217,6 +217,38 @@ test('first daily baseline creates ten exact source runs and memberships without
   assert.equal(createHash('sha256').update(kraken.artifact.body).digest('hex'), kraken.artifact.sha256);
 });
 
+test('reviewed SK Hynix ETFs persist exact registry names and stable matching fingerprints', () => {
+  const observations = fullObservations({
+    'perp:okx': targetObservation('perp:okx', [
+      listing('perp:okx', 'SKDD', { category:'equity', venueCategory:'equity', name:'SKDD' }),
+      listing('perp:okx', 'SKUU', { category:'equity', venueCategory:'equity', name:'SKUU' }),
+    ]),
+  });
+  const batch = buildListingAuditPgBatch(baselineInput(observations));
+  const memberships = sourceRun(batch, 'perp:okx').memberships;
+  const expectedNames = {
+    SKDD:'GraniteShares 2x Short SK Hynix Daily ETF',
+    SKUU:'GraniteShares 2x Long SK Hynix Daily ETF',
+  };
+
+  for (const membership of memberships) {
+    const expectedName = expectedNames[membership.canonicalUnderlying];
+    assert.equal(membership.category, 'etf');
+    assert.equal(membership.assetKey, `etf:${membership.canonicalUnderlying}`);
+    assert.equal(membership.displayName, expectedName);
+    assert.equal(membership.name, expectedName);
+    assert.equal(membership.assetFingerprint, createHash('sha256').update(JSON.stringify([
+      membership.assetKey,
+      'etf',
+      membership.canonicalUnderlying,
+      expectedName,
+      'unknown',
+      'verified',
+    ])).digest('hex'));
+  }
+  assert.equal(batch.events.length, 0);
+});
+
 test('same-day retry after a Runtime Cache baseline reset remains non-comparable for lifecycle events', () => {
   const first = baselineInput();
   const retryAt = '2026-08-15T01:45:00.000Z';
@@ -604,6 +636,10 @@ test('verified identity guard rejects category/canonical drift but permits non-i
   assert.match(metadataGuard.text, /incoming\.canonical_underlying = ANY\(\$2::text\[\]\)/);
   assert.match(metadataGuard.text, /current_asset_version\.category = 'pre-ipo'/);
   assert.ok(metadataGuard.params[1].includes('UNITREE'));
+  assert.match(metadataGuard.text, /incoming\.canonical_underlying = ANY\(\$3::text\[\]\)/);
+  assert.match(metadataGuard.text, /current_asset_version\.category = 'equity'/);
+  assert.match(metadataGuard.text, /incoming\.category = 'etf'/);
+  assert.deepEqual(metadataGuard.params[2], ['SKDD', 'SKUU']);
   assert.doesNotMatch(metadataGuard.text, /incoming\.(?:display_name|name|quote_currency|official_status|asset_fingerprint|instrument_fingerprint)/);
   const metadataPayload = JSON.parse(metadataGuard.params[0]);
   const metadataGuardRow = metadataPayload.find(row => row.official_product_key === 'AAPL-GATE-PERP');

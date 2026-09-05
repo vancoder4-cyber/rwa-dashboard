@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   LISTING_SOURCE_KEYS,
   normalizeListingObservation,
+  REVIEWED_ETF_CATEGORY_CORRECTIONS,
   REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS,
 } from './listing-audit.js';
 
@@ -29,6 +30,7 @@ const DATABASE_CATEGORY = Object.freeze({
   bond: 'bond',
   'pre-ipo': 'pre-ipo',
 });
+const REVIEWED_ETF_CATEGORY_CORRECTION_SET = new Set(REVIEWED_ETF_CATEGORY_CORRECTIONS);
 
 function normalized(value) {
   return String(value ?? '').trim();
@@ -240,9 +242,11 @@ function buildSourceRun(sourceKey, rawObservation, summary, mergedState, observe
     const reviewRequired = listing.identityStatus !== 'verified';
     const assetKey = `${category}:${listing.canonicalSymbol}`;
     // Keep the cross-venue asset-version identity stable even when venues use
-    // different display-name spellings. The exact event snapshots its own
-    // admitted venue name in evidence below.
-    const displayName = listing.canonicalSymbol;
+    // different display-name spellings. Only the dated ETF correction registry
+    // may replace the ticker fallback with an issuer-reviewed canonical name.
+    const displayName = REVIEWED_ETF_CATEGORY_CORRECTION_SET.has(listing.canonicalSymbol)
+      ? listing.name || listing.canonicalSymbol
+      : listing.canonicalSymbol;
     const assetFingerprint = sha256(JSON.stringify([
       assetKey,
       category,
@@ -862,8 +866,17 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
            AND incoming.venue_category IN ('equity', 'pre-ipo')
            AND incoming.lifecycle_status = 'public'
          )
+         AND NOT (
+           incoming.canonical_underlying = ANY($3::text[])
+           AND current_asset_version.canonical_underlying = incoming.canonical_underlying
+           AND current_asset_version.category = 'equity'
+           AND incoming.category = 'etf'
+           AND current_asset.asset_key = current_asset_version.category || ':' || current_asset_version.canonical_underlying
+           AND incoming.asset_key = incoming.category || ':' || incoming.canonical_underlying
+           AND incoming.venue_category IN ('equity', 'etf')
+         )
        ) THEN ingest.reject_verified_catalog_identity_conflict() ELSE 1 END AS verified_identity_guard`,
-      [json(memberships), REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS],
+      [json(memberships), REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS, REVIEWED_ETF_CATEGORY_CORRECTIONS],
     ),
     sql.query(
       `INSERT INTO ingest.collection_cycle
