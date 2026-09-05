@@ -204,7 +204,20 @@ spot deviation         = (spot last - reference price) / reference price
 
 When holding days is zero (“No Fees”), annualized cost is zero and the display is gross absolute funding. Direction is Long Spot / Short Perp for non-negative funding and the reverse for negative funding. Basis is shown separately and is not annualized into or added to Net Funding APR. Implementation: `index.html:12090-12105` and `index.html:12575`.
 
-All calculations are Browser-derived current comparisons with no durable persistence. Later target: exact listing facts plus a versioned derived route table/publication; not a Phase 0/1 write.
+The interactive Spot-page ranking remains a Browser-derived exploratory comparison and keeps its existing mark/last-price formula. It is not the Push Bot source and must not be relabelled executable.
+
+#### 4.2.1 Authoritative arbitrage consumer publication
+
+`GET /api/arbitrage-opportunities` is a separate PostgreSQL-backed, read-only contract for the Push Bot. Its schema/formula pair is `rwa-arbitrage-opportunities/v1` / `rwa-arbitrage-opportunity-1.0`. An authenticated five-minute Cron is the only writer. Migration `0010` stores exact asset/Spot/Perpetual version foreign keys and side-specific market facts, then publishes a validated JSON snapshot through a dedicated `rwa_arbitrage_reader` view.
+
+- Spot price is the executable best ask; Perpetual price is the executable best bid. `executableDepthUsd` sums only the required side within the fixed 2% execution tolerance and applies the official contract multiplier where required.
+- `basis.pct = (perp bid − spot ask) / spot ask × 100`.
+- Current and 24-hour rates are percentage points, not fractions. `currentAnnualizedPct = currentRatePct × (24 / intervalHours) × 365`.
+- The 24-hour average uses the exact Perpetual contract's settled observations and the existing `max(2, ceil(0.8 × expected))` completeness rule. A current observation alone is never a history substitute.
+- Both legs must be at most three minutes old and no more than 60 seconds apart. The public snapshot is valid for ten minutes and its bucket is UTC five-minute aligned.
+- Candidate discovery is category-qualified and exact-listing keyed. Only database-current `verified`/`online` instrument versions sharing the same `asset_version_id` may publish. Names and categories come from that versioned identity, never ticker parsing. Every fully evaluated route that clears the $1m Perpetual OI gate is appended as a fact even before it qualifies for publication, so basis persistence can progress through 0/5/10 minutes; the public snapshot remains limited to policy-qualified routes.
+- Only policy-qualified routes are published. An authoritative empty result is Full with `expectedRoutes=returnedRoutes=0`; collection or identity uncertainty is HTTP 503 `Unavailable`, never a synthetic empty result.
+- PostgreSQL is the publication authority. Runtime Cache is not used for this history or recovery path, and the Bot never receives a database credential.
 
 ### 4.3 Reference Price
 
@@ -457,7 +470,7 @@ Producer: `api/_lib/listing-audit.js`; public reader: `api/listing-changes.js`; 
 
 The durable event authority is `analytics.catalog_change_event`, with trusted `ingest.collection_cycle` / `ingest.source_run` coverage and versioned identity joins. Migration `0006` adds coherent official-time fields and three least-privilege, frontend-safe publication views. In `postgres-authoritative` mode, `/api/listing-changes` reads a fixed 45-day, maximum-2,000-row projection from those views and does not consult Runtime Cache. `generatedAt` is the latest successful audit time, not request time. Runtime Cache/CDN remain disposable low-latency replicas, and migration `0005`'s bounded checkpoint remains writer comparison continuity. Neither cache nor checkpoint becomes an independent event authority, and membership is never retrospectively diffed to synthesize events. Truncation is disclosed and cannot be Full or “no new assets.” Constants: `api/_lib/listing-audit.js:1-22`; authority reader: `api/_lib/listing-event-authority.js`.
 
-This remains the sole typed product-data family written to PostgreSQL in Phase 1; the four-row Signal checkpoint is a continuity payload, not typed catalog/fact ingestion. The writer stores source runs, deterministic `normalized-catalog-v1` manifests/checksums, accepted identity/instrument versions with official-catalog evidence, exact accepted catalog memberships and `analytics.catalog_change_event` lifecycle rows. Stored normalized artifacts are linked to their evidence rows. Confirmed verified delisting closes the current instrument version and a verified relisting opens a new version; Partial/Unavailable or review-required absence never does. `identity.alias_version` is schema-only and is not populated by this writer. An unresolved `review-required` candidate is stored only in `identity.review_case`; it creates no accepted identity/instrument/membership/event. A trusted same-day retry atomically replaces that source's logical membership/evidence set; an untrusted retry preserves PostgreSQL last-good, and a later verification is identity resolution rather than New. The artifact is derived from the verified/reviewed catalog observation and is not the upstream response body. Private object upload remains separately controlled by `RAW_ARCHIVE_MODE`. A fixed 180-second database lease serializes durable mutation and replica publication; four physical refreshes per UTC date remain one logical daily bucket and never accelerate the delisting confirmation clock.
+This remains the sole typed **catalog/lifecycle** product-data family written to PostgreSQL in Phase 1; migration `0010` adds only the separately isolated Phase 2 arbitrage route/publication slice. The four-row Signal checkpoint is a continuity payload, not typed catalog/fact ingestion. The Listing writer stores source runs, deterministic `normalized-catalog-v1` manifests/checksums, accepted identity/instrument versions with official-catalog evidence, exact accepted catalog memberships and `analytics.catalog_change_event` lifecycle rows. Stored normalized artifacts are linked to their evidence rows. Confirmed verified delisting closes the current instrument version and a verified relisting opens a new version; Partial/Unavailable or review-required absence never does. `identity.alias_version` is schema-only and is not populated by this writer. An unresolved `review-required` candidate is stored only in `identity.review_case`; it creates no accepted identity/instrument/membership/event. A trusted same-day retry atomically replaces that source's logical membership/evidence set; an untrusted retry preserves PostgreSQL last-good, and a later verification is identity resolution rather than New. The artifact is derived from the verified/reviewed catalog observation and is not the upstream response body. Private object upload remains separately controlled by `RAW_ARCHIVE_MODE`. A fixed 180-second database lease serializes durable mutation and replica publication; four physical refreshes per UTC date remain one logical daily bucket and never accelerate the delisting confirmation clock.
 
 ## 7. Asset Intelligence Drawer and browser alert panel
 
@@ -500,13 +513,14 @@ It is recomputed from fresh current Browser state, has no durable history and is
 | Spot Volume & Price Anomalies | Child of Radar public read | PostgreSQL checkpoint + Runtime Cache replica, 8 daily anchors | Continuity checkpoint |
 | OI Proxy | Child of Radar public read | PostgreSQL checkpoint + Runtime Cache replica, 96 hourly buckets | Continuity checkpoint |
 | Recent Listings | `/api/listing-changes` CDN read; Runtime Cache is disposable | `analytics.catalog_change_event` + trusted source runs, 45 days / 2,000 events | **Yes, PostgreSQL event authority through migration `0006` safe views** |
+| Arbitrage opportunities | `/api/arbitrage-opportunities` CDN read of a validated full snapshot | `fact.arbitrage_route_observation` + `publication.arbitrage_opportunity_snapshot`; append-only five-minute buckets | **Yes, isolated Phase 2 slice through migration `0010`; dedicated reader view** |
 | `/api/health` | Read-only live contract check; HTTP 503 by current severity policy | Function logs/GitHub Action record | No product data write |
 
 The four Signal histories are separate and the authenticated writer returns HTTP 200 only when all required stores report `stored`. Existing write/503 semantics must remain unchanged through Phase 0/1. Source health and database reconciliation records may be added as shadow operational telemetry, but they cannot change page status before a separately approved read cutover.
 
 ### 8.1 Product maturity and future revision collection by data family
 
-Current persistence does **not** provide a market-history revision ledger:
+Except for the isolated migration-`0010` arbitrage slice, current persistence does **not** provide a market-history revision ledger:
 
 | Current product | Retry/history behavior now | What cannot be claimed |
 |---|---|---|

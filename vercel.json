@@ -4,7 +4,8 @@
   "crons": [
     { "path": "/api/listing-audit-cron", "schedule": "45 0,6,12,18 * * *" },
     { "path": "/api/health", "schedule": "0 1 * * *" },
-    { "path": "/api/signal-snapshot-cron", "schedule": "7 * * * *" }
+    { "path": "/api/signal-snapshot-cron", "schedule": "7 * * * *" },
+    { "path": "/api/arbitrage-snapshot-cron", "schedule": "*/5 * * * *" }
   ],
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }

@@ -63,6 +63,15 @@ const REMEDIATIONS = Object.freeze({
       'Require all four history writers to report stored before treating the retry as recovered.',
     ]),
   }),
+  'arbitrage-opportunities': Object.freeze({
+    code: 'REBUILD_ARBITRAGE_SNAPSHOT',
+    summary: 'The authoritative five-minute arbitrage publication is stale, incomplete or unavailable.',
+    actions: Object.freeze([
+      'Inspect ten-source catalog, exact order-book, open-interest and settled funding coverage.',
+      'Run one authenticated arbitrage-snapshot Cron retry; never trigger publication from a browser.',
+      'Require a full PostgreSQL snapshot and a passing Push Bot contract before restoring consumption.',
+    ]),
+  }),
 });
 
 export function remediationForCheck(name, status, reason = null) {

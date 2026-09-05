@@ -41,6 +41,7 @@ import {
   oiSurgeContextEligible,
 } from './_lib/oi-liquidation-anomaly.js';
 import { fetchJsonWithPolicy, fetchWithPolicy, mapWithConcurrency } from './_lib/upstream.js';
+import { validateArbitrageSnapshot } from './_lib/arbitrage-analysis.js';
 
 export const config = { regions: ['sin1'], maxDuration: 60 };
 
@@ -1945,6 +1946,31 @@ async function probeFunding(baseUrl, venue, symbol) {
   }
 }
 
+export async function probeArbitrageOpportunities(baseUrl, nowMs = Date.now()) {
+  const startedAt = Date.now();
+  try {
+    const payload = await fetchJsonWithPolicy(
+      `${baseUrl}/api/arbitrage-opportunities`,
+      { headers:{ Accept:'application/json' } },
+      { timeoutMs:10_000, retries:0 },
+    );
+    const validation = validateArbitrageSnapshot(payload, { nowMs });
+    return checkResult('arbitrage-opportunities', validation.valid ? 'pass' : 'fail', {
+      latencyMs:Date.now() - startedAt,
+      schemaVersion:payload?.schemaVersion || null,
+      formulaVersion:payload?.formulaVersion || null,
+      generatedAt:payload?.generatedAt || null,
+      routeCount:Array.isArray(payload?.routes) ? payload.routes.length : null,
+      reason:validation.valid ? null : validation.reason,
+    });
+  } catch (error) {
+    return checkResult('arbitrage-opportunities', 'warn', {
+      latencyMs:Date.now() - startedAt,
+      reason:error.message,
+    });
+  }
+}
+
 function normalized(value) {
   return String(value ?? '').trim();
 }
@@ -2144,6 +2170,7 @@ export default async function handler(req, res) {
     () => probeUsMarketDirectory(baseUrl),
     () => probeListingAudit(baseUrl),
     () => probeSignalRadar(baseUrl),
+    () => probeArbitrageOpportunities(baseUrl),
     () => probeOkxMarkets(baseUrl),
     ...Object.entries(FUNDING_PROBES).map(([venue, symbol]) =>
       () => probeFunding(baseUrl, venue, symbol)),

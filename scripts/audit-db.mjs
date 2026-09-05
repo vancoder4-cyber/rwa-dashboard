@@ -13,6 +13,8 @@ const EXPECTED_ROLES = [
   'rwa_alert_dispatcher',
   'rwa_signal_history_writer',
   'rwa_listing_audit_reader',
+  'rwa_arbitrage_writer',
+  'rwa_arbitrage_reader',
 ];
 
 function fingerprintConnection() {
@@ -66,6 +68,15 @@ const [ledger, extensions, roles, privileges, counts, latestCycle] = await Promi
       ,has_table_privilege('rwa_catalog_shadow_writer', 'publication.listing_audit_checkpoint', 'INSERT') AS listing_writer_insert
       ,has_table_privilege('rwa_catalog_shadow_writer', 'publication.listing_audit_checkpoint', 'UPDATE') AS listing_writer_update
       ,has_table_privilege('rwa_catalog_shadow_writer', 'publication.listing_audit_checkpoint', 'DELETE') AS listing_writer_delete
+      ,has_table_privilege('rwa_arbitrage_writer', 'fact.arbitrage_route_observation', 'INSERT') AS arbitrage_writer_fact_insert
+      ,has_table_privilege('rwa_arbitrage_writer', 'publication.arbitrage_opportunity_snapshot', 'INSERT') AS arbitrage_writer_snapshot_insert
+      ,has_table_privilege('rwa_arbitrage_writer', 'fact.arbitrage_route_observation', 'UPDATE') AS arbitrage_writer_fact_update
+      ,has_table_privilege('rwa_arbitrage_writer', 'publication.arbitrage_opportunity_snapshot', 'DELETE') AS arbitrage_writer_snapshot_delete
+      ,has_schema_privilege('rwa_arbitrage_reader', 'publication', 'USAGE') AS arbitrage_reader_schema_usage
+      ,has_table_privilege('rwa_arbitrage_reader', 'publication.arbitrage_opportunity_v1', 'SELECT') AS arbitrage_reader_view_select
+      ,has_table_privilege('rwa_arbitrage_reader', 'fact.arbitrage_route_observation', 'SELECT') AS arbitrage_reader_fact_select
+      ,has_table_privilege('rwa_arbitrage_reader', 'publication.arbitrage_opportunity_snapshot', 'SELECT') AS arbitrage_reader_snapshot_select
+      ,has_table_privilege('rwa_arbitrage_reader', 'identity.instrument_version', 'SELECT') AS arbitrage_reader_identity_select
   `),
   sql.query(`
     SELECT
@@ -78,6 +89,8 @@ const [ledger, extensions, roles, privileges, counts, latestCycle] = await Promi
       (SELECT count(*)::int FROM ingest.raw_artifact) AS artifacts,
       (SELECT count(*)::int FROM analytics.catalog_change_event) AS listing_events,
       (SELECT count(*)::int FROM publication.listing_audit_checkpoint) AS listing_checkpoints,
+      (SELECT count(*)::int FROM fact.arbitrage_route_observation) AS arbitrage_route_observations,
+      (SELECT count(*)::int FROM publication.arbitrage_opportunity_snapshot) AS arbitrage_snapshots,
       (SELECT count(*)::int FROM identity.review_case WHERE status = 'open') AS open_reviews
   `),
   sql.query(`
@@ -129,6 +142,15 @@ if (!privilege.listing_reader_schema_usage || !privilege.listing_reader_select |
 if (!privilege.listing_writer_schema_usage || !privilege.listing_writer_select ||
     !privilege.listing_writer_insert || !privilege.listing_writer_update || privilege.listing_writer_delete) {
   fail('listing checkpoint writer grants are invalid');
+}
+if (!privilege.arbitrage_writer_fact_insert || !privilege.arbitrage_writer_snapshot_insert ||
+    privilege.arbitrage_writer_fact_update || privilege.arbitrage_writer_snapshot_delete) {
+  fail('arbitrage writer grants are invalid');
+}
+if (!privilege.arbitrage_reader_schema_usage || !privilege.arbitrage_reader_view_select ||
+    privilege.arbitrage_reader_fact_select || privilege.arbitrage_reader_snapshot_select ||
+    privilege.arbitrage_reader_identity_select) {
+  fail('arbitrage reader grants are invalid');
 }
 
 const result = {

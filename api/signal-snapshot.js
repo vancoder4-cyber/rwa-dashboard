@@ -255,6 +255,13 @@ export function normalizeOkxSignalSnapshot(payload) {
       venueSymbol,
       instrumentType: instType === 'SWAP' ? 'swap' : 'x-perp',
       priceUsd: price,
+      bidPriceUsd:finiteOrNull(ticker.bidPx),
+      observedAt:Number.isFinite(Number(ticker.ts))
+        ? new Date(Number(ticker.ts)).toISOString()
+        : payload?.generatedAt || new Date().toISOString(),
+      contractValue,
+      contractMultiplier,
+      contractValueCurrency:String(instrument.ctValCcy || '').toUpperCase() || null,
       ...reportedVolumeFields(
         directQuoteVolume ?? derivedQuoteVolume,
         directQuoteVolume !== null ? 'official-quote-volume' : `base-volume-x-${valuationPriceMethod}`,
@@ -447,6 +454,9 @@ function gateListings(payload) {
       venueSymbol,
       instrumentType: 'perpetual',
       priceUsd: price,
+      bidPriceUsd:finiteOrNull(ticker.highest_bid),
+      observedAt:new Date().toISOString(),
+      contractMultiplier:multiplier,
       ...reportedVolumeFields(quoteVolume, 'official-quote-volume'),
       ...reportedOpenInterestFields(
         quantity !== null && quantity >= 0 && multiplier > 0 && price > 0
@@ -576,6 +586,8 @@ async function collectBinance(baseUrl) {
       venueSymbol,
       instrumentType: 'perpetual',
       priceUsd:price,
+      bidPriceUsd:finiteOrNull(ticker.bidPrice),
+      observedAt:new Date().toISOString(),
       oiValuationPriceMethod:markPrice !== null ? 'mark-price' : 'last-price',
       ...reportedVolumeFields(quoteVolume, 'official-quote-volume'),
       ...reportedOpenInterestFields(null, 'open-interest-x-mark-price'),
@@ -672,6 +684,10 @@ async function collectBitget() {
       venueSymbol,
       instrumentType: 'perpetual',
       priceUsd: price,
+      bidPriceUsd:firstNumber(ticker.bidPr, ticker.bidPrice),
+      observedAt:Number.isFinite(Number(ticker.ts ?? ticker.timestamp))
+        ? new Date(Number(ticker.ts ?? ticker.timestamp)).toISOString()
+        : new Date().toISOString(),
       ...reportedVolumeFields(quoteVolume, 'official-quote-volume'),
       ...reportedOpenInterestFields(
         holdingAmount !== null && holdingAmount >= 0 && price > 0 ? holdingAmount * price : null,
@@ -739,6 +755,8 @@ async function collectTradeXyz(baseUrl) {
       venueSymbol,
       instrumentType: 'perpetual',
       priceUsd: price,
+      bidPriceUsd:null,
+      observedAt:new Date().toISOString(),
       ...reportedVolumeFields(dayNotionalVolume, 'official-day-notional'),
       ...reportedOpenInterestFields(
         openInterest !== null && openInterest >= 0 && price > 0 ? openInterest * price : null,
@@ -1548,6 +1566,8 @@ export async function serveSignalSnapshot(req, res, {
     assets,
   });
 }
+
+export { collectGate, collectBinance, collectBitget, collectTradeXyz, collectOkx };
 
 export default function handler(req, res) {
   return serveSignalSnapshot(req, res, { publicCache:true, writeHistory:false });
