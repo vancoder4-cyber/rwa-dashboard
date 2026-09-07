@@ -65,15 +65,16 @@ test('migration files are ordered, immutable-checksummed, and parse into stateme
     '0014_live_instrument_binding_repair.sql',
     '0015_okx_ko_soxs_identity_and_listing_time.sql',
     '0016_okx_ko_event_lifecycle.sql',
+    '0017_binance_lenovo_event_identity.sql',
   ]);
   assert.deepEqual(migrations.map(row => row.version), [
-    '0001', '0002', '0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013', '0014', '0015', '0016',
+    '0001', '0002', '0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013', '0014', '0015', '0016', '0017',
   ]);
   for (const migration of migrations) {
     assert.match(migration.filename, MIGRATION_FILE_PATTERN);
     assert.match(migration.checksum, /^[0-9a-f]{64}$/);
     assert.equal(migration.checksum, migrationChecksum(migration.sql));
-    const minimumStatements = ['0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013', '0014', '0015', '0016']
+    const minimumStatements = ['0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013', '0014', '0015', '0016', '0017']
       .includes(migration.version) ? 3 : 11;
     assert.ok(migration.statements.length >= minimumStatements);
     assert.ok(migration.statements.every(statement => statement.trim().length > 0));
@@ -214,6 +215,22 @@ test('OKX KO lifecycle repair updates only exact existing event evidence and pre
   assert.match(sql, /published\.category IS DISTINCT FROM 'etf'/);
   assert.match(sql, /published\.venue_category IS DISTINCT FROM 'equity'/);
   assert.match(sql, /published\.lifecycle_status IS NOT NULL/);
+  assert.doesNotMatch(sql, /INSERT INTO analytics\.catalog_change_event/);
+  assert.doesNotMatch(sql, /DELETE FROM analytics\.catalog_change_event/);
+  assert.doesNotMatch(sql, /\b(?:LIKE|ILIKE)\b|\bsimilarity\s*\(/i);
+});
+
+test('Binance Lenovo event repair supplements only the exact existing lifecycle fact', async () => {
+  const sql = await readFile(path.join(MIGRATION_DIRECTORY, '0017_binance_lenovo_event_identity.sql'), 'utf8');
+  assert.match(sql, /source\.source_key = 'perp:binance'/);
+  assert.match(sql, /normalized_venue_symbol = 'HK0992USDT'/);
+  assert.match(sql, /asset\.asset_key = 'equity:LENOVO'/);
+  assert.match(sql, /'canonicalUnderlying', 'LENOVO'/);
+  assert.match(sql, /'name', 'Lenovo Group Limited'/);
+  assert.match(sql, /'venueCategory', 'equity'/);
+  assert.match(sql, /'lifecycleStatus', 'public'/);
+  assert.match(sql, /published\.event_type IN \('listed', 'relisted'\)/);
+  assert.match(sql, /event\.evidence->>'listingKey' = 'perp:binance:HK0992USDT'/);
   assert.doesNotMatch(sql, /INSERT INTO analytics\.catalog_change_event/);
   assert.doesNotMatch(sql, /DELETE FROM analytics\.catalog_change_event/);
   assert.doesNotMatch(sql, /\b(?:LIKE|ILIKE)\b|\bsimilarity\s*\(/i);
