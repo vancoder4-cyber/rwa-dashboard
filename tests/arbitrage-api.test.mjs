@@ -5,6 +5,7 @@ import test from 'node:test';
 import {
   collectArbitragePublication,
   executableBookSide,
+  isExecutableCatalogListing,
   normalizeOrderBookPayload,
   requiresBinanceOpenInterestBackfill,
   routeHasExecutableBooks,
@@ -16,6 +17,7 @@ import {
 import {
   ARBITRAGE_SOURCE_KEYS,
   arbitrageWriteMode,
+  buildAuthoritativeArbitrageIdentityQueries,
   buildArbitragePublicationQueries,
   normalizeStoredArbitragePublication,
   normalizeAuthoritativeArbitrageIdentityRows,
@@ -99,6 +101,12 @@ test('a successful empty required book side is non-executable, not a synthetic r
     { priceUsd:100, executableDepthUsd:10_000 },
     { priceUsd:101, executableDepthUsd:20_000 },
   ), true);
+});
+
+test('temporary venue modes remain catalog members but cannot enter executable arbitrage routes', () => {
+  assert.equal(isExecutableCatalogListing({ officialStatus:'online' }), true);
+  assert.equal(isExecutableCatalogListing({}), true);
+  assert.equal(isExecutableCatalogListing({ officialStatus:'suspended' }), false);
 });
 
 test('public API returns JSON full snapshot or explicit 503 unavailable, never synthetic empty', async () => {
@@ -219,6 +227,10 @@ test('authority and publication queries pin roles and append one exact ten-sourc
   assert.match(calls[1].text, /arbitrage_basis_observation/);
   assert.doesNotMatch(calls[1].text, /has_table_privilege\(session_user,\s*'fact\./);
   assert.match(calls[2].text, /publication\.arbitrage_opportunity_v1/);
+
+  calls.length = 0;
+  buildAuthoritativeArbitrageIdentityQueries(sql);
+  assert.match(calls[2].text, /instrument_version\.official_status = 'online'/);
 
   calls.length = 0;
   const snapshot = emptySnapshot();

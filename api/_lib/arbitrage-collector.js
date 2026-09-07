@@ -245,6 +245,10 @@ function catalogMarketFingerprint(row, catalogRow = false) {
   return `${market}:${venue}:${venueSymbol}:${category}:${symbol}`;
 }
 
+export function isExecutableCatalogListing(row) {
+  return String(row?.officialStatus || 'online').trim().toLowerCase() === 'online';
+}
+
 function reconcileMarketCatalogCoverage(catalogObservations, marketRows) {
   const expected = (Array.isArray(catalogObservations) ? catalogObservations : [])
     .flatMap(observation => observation.listings
@@ -334,14 +338,18 @@ export async function collectArbitragePublication(req, options = {}) {
   const rawSpots = spotSnapshot.listings.map(row => ({ ...row, market:'spot' }));
   const allRows = [...rawSpots, ...rawPerps];
   reconcileMarketCatalogCoverage(catalogObservations, allRows);
-  const authoritative = allRows.map(row => authoritativeListing(row, authority.identities));
+  // A venue trading mode is not a catalog lifecycle event. Keep temporarily
+  // suspended products in exact catalog reconciliation, but never treat their
+  // stale book as an executable route or require an online database identity.
+  const executableRows = allRows.filter(isExecutableCatalogListing);
+  const authoritative = executableRows.map(row => authoritativeListing(row, authority.identities));
   const rejectedListings = authoritative.filter(row => row === null).length;
   const quarantinedListings = spotSnapshot.quarantinedListings + perpResults.reduce(
     (sum, [, result]) => sum + (Number(result.quarantinedListings) || 0),
     0,
   );
   if (rejectedListings || quarantinedListings || spotSnapshot.conflicts.length) {
-    const rejectedSample = allRows
+    const rejectedSample = executableRows
       .filter((row, index) => authoritative[index] === null)
       .slice(0, 10)
       .map(row => ({

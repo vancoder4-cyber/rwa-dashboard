@@ -259,13 +259,14 @@ function buildSourceRun(sourceKey, rawObservation, summary, mergedState, observe
       'verified',
     ]));
     const instrumentType = market === 'perp' ? 'perpetual' : 'spot';
+    const officialStatus = listing.officialStatus || 'online';
     const instrumentFingerprint = sha256(JSON.stringify([
       sourceKeyForDatabase(sourceKey),
       officialProductKey,
       listing.venueSymbol,
       instrumentType,
       assetFingerprint,
-      'online',
+      officialStatus,
       'verified',
     ]));
     normalizedRows.push({
@@ -284,7 +285,7 @@ function buildSourceRun(sourceKey, rawObservation, summary, mergedState, observe
       assetFingerprint,
       instrumentType,
       quoteCurrency: null,
-      officialStatus: 'online',
+      officialStatus,
       instrumentFingerprint,
       identityStatus: reviewRequired ? 'review-required' : 'verified',
       name: listing.name || null,
@@ -688,6 +689,7 @@ function membershipRows(batch) {
       identityStatus: row.identityStatus,
       venueCategory: row.venueCategory,
       lifecycleStatus: row.lifecycleStatus,
+      officialStatus: row.officialStatus,
       artifactFormat: LISTING_NORMALIZED_ARTIFACT_FORMAT,
     },
   })));

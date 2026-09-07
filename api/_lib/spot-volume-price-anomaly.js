@@ -402,6 +402,7 @@ function normalizeCatalogListing(row) {
     marketDataProfile: row?.marketDataProfile || null,
     marketQuerySymbol: String(row?.marketQuerySymbol || '').trim() || null,
     marketAliases: Array.isArray(row?.marketAliases) ? row.marketAliases : [],
+    officialStatus: normalizedLower(row?.officialStatus || 'online'),
   };
 }
 

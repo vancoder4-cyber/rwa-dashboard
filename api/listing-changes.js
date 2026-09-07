@@ -95,6 +95,7 @@ export function compactListingAuditState(state) {
     row?.venueCategory || row?.category || null,
     row?.lifecycleStatus || null,
     row?.officialListedAt || null,
+    row?.officialStatus || 'online',
   ]]));
   const events = (Array.isArray(state?.events) ? state.events : []).map(event => [
     event?.eventId || null,
@@ -139,6 +140,7 @@ export function hydrateListingAuditState(state) {
         venueCategory:compact[9] || compact[1],
         lifecycleStatus:compact[10] || null,
         officialListedAt:compact[11] || null,
+        officialStatus:compact[12] || 'online',
         name:compact[2],
         identityStatus,
         identityEvidence:compact[4],

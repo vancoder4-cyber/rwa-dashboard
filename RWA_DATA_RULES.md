@@ -418,6 +418,7 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 
 - 检测频率与展示周期分离：服务端每天读取一次官方目录并做 diff；RWA Signal Radar 默认展示滚动 7 天，允许切换滚动 30 天。不得为了“周视图”把检测降低为每周一次。
 - 覆盖必须恰好对应当前产品范围的十个独立 source：Perpetual 的 trade.xyz、Bitget、Gate、Binance、OKX，以及 Spot 的 Bitget、Gate、Kraken、Binance、OKX。主键是 `market:venue:venueSymbol`；不能以裸 canonical ticker 合并不同交易标的。
+- 交易场所的临时交易模式不是 listing lifecycle。Kraken 官方目录中处于 `post_only`、`limit_only` 或 `cancel_only` 的精确 pair 仍保留 catalog membership，并映射为 instrument `official_status=suspended`，不得据此生成 `delisted`；只有 `online` instrument 可以进入可执行套利 route，因此临时模式对目录/身份对账可见，但对下游执行必须 fail closed。
 - 每个 source 的首次成功读取只建立基线，不生成 New。只有完整、无重复且通过类别漂移检查的官方 catalog 才能替换该 source 的 last-good 基线；Unavailable/Partial 不得清空基线，也不得制造假下架。单次缺失先记为 pending removal，至少跨两个不同 UTC 日的完整观测仍缺失后才记下架，同日重试不算第二次观测。通过官方身份门控的合理纯新增必须生成提醒，不能被普通 10% 缩表保护吞掉；包含删除的显著漂移及同时超过 50 个、50% 的极端纯增长继续隔离复核。新增、下架、重新上线必须分别记录，页面“竞品新上线资产”只显示新增和重新上线。
 - 身份门控继续遵循本文件总规则。明确官方 RWA 类型且通过现有通用 admission gate 的标的可标 `verified`；普通 Crypto 类型直接拒绝。Gate Spot 不提供资产类别，只有 2026-08-14 已逐 pair 审计且仍在官方 live catalog 的 `PAXG_USDT`、`XAUT_USDT` 两个 legacy commodity pair 与精确 wrapper 可以直接验证；不得扩成其他 quote 或相似贵金属 ticker。其他新 suffix 即使与另一官方 RWA 目录同 canonical，也只能标 `review-required`，在精确 wrapper 身份确认前不得自动加入行情数据。
 - Listing Audit 只观察和报告，不能写 allowlist、类别、生命周期、baseline 常量或客户端资产表。页面的 `Included` 必须同时匹配当前 Spot/Perpetual 数据中同一 venue 的精确 `venueSymbol` 与 `category:canonical` 身份；仅有相同 canonical underlying 不足以宣称该新 listing 已收录。

@@ -217,6 +217,20 @@ test('first daily baseline creates ten exact source runs and memberships without
   assert.equal(createHash('sha256').update(kraken.artifact.body).digest('hex'), kraken.artifact.sha256);
 });
 
+test('temporary Kraken trading modes persist as suspended membership without lifecycle events', () => {
+  const observations = fullObservations({
+    'spot:kraken':targetObservation('spot:kraken', [
+      listing('spot:kraken', 'AAPL', { officialStatus:'suspended' }),
+    ]),
+  });
+  const batch = buildListingAuditPgBatch(baselineInput(observations));
+  const kraken = sourceRun(batch, 'spot:kraken');
+  assert.equal(kraken.memberships.length, 1);
+  assert.equal(kraken.memberships[0].officialStatus, 'suspended');
+  assert.equal(kraken.events?.length || 0, 0);
+  assert.equal(batch.events.length, 0);
+});
+
 test('reviewed SK Hynix ETFs persist exact registry names and stable matching fingerprints', () => {
   const observations = fullObservations({
     'perp:okx': targetObservation('perp:okx', [

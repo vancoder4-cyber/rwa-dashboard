@@ -53,6 +53,7 @@ const EXACT_LEGACY_SPOT_RWA = Object.freeze({
   XPTX: Object.freeze({ underlying:'XPTX', category:'commodity' }),
 });
 const KRAKEN_EXACT_LEGACY_RWA = EXACT_LEGACY_SPOT_RWA;
+const KRAKEN_LISTED_TRADING_MODES = new Set(['online', 'post_only', 'limit_only', 'cancel_only']);
 
 const SOURCE_BOUNDS = Object.freeze({
   'perp:tradexyz': [20, 500],
@@ -95,7 +96,9 @@ export function isDedicatedTradeXyzSource(value) {
 }
 
 export function krakenListingCandidate(pairName, pair, officialEtfSet = ETF_UNDERLYING_SET) {
-  if (normalized(pair?.status).toLowerCase() !== 'online') return null;
+  const venueTradingMode = normalized(pair?.status).toLowerCase();
+  if (!KRAKEN_LISTED_TRADING_MODES.has(venueTradingMode)) return null;
+  const officialStatus = venueTradingMode === 'online' ? 'online' : 'suspended';
   const wsParts = normalized(pair?.wsname).split('/');
   const quote = normalizedUpper(wsParts[1] || pair?.quote).replace(/^[XZ](?=USD|USDT)/, '');
   if (!['USD', 'USDT'].includes(quote)) return null;
@@ -118,10 +121,12 @@ export function krakenListingCandidate(pairName, pair, officialEtfSet = ETF_UNDE
       marketQuerySymbol,
       underlying,
       category:officialEtfSet.has(underlying) || ETF_UNDERLYING_SET.has(underlying) ? 'etf' : 'equity',
+      officialStatus,
+      venueTradingMode,
     };
   }
   const legacy = KRAKEN_EXACT_LEGACY_RWA[normalizedUpper(rawBase)];
-  return legacy ? { venueSymbol, marketQuerySymbol, ...legacy } : null;
+  return legacy ? { venueSymbol, marketQuerySymbol, ...legacy, officialStatus, venueTradingMode } : null;
 }
 
 export function mergeKrakenOfficialPairEntries(pairEntries, officialEtfSet = ETF_UNDERLYING_SET) {
@@ -200,6 +205,7 @@ function listing(market, venue, venueSymbol, canonicalSymbol, category, extras =
   // above.
   if (extras.marketDataProfile) row.marketDataProfile = normalized(extras.marketDataProfile);
   if (extras.marketQuerySymbol) row.marketQuerySymbol = normalized(extras.marketQuerySymbol);
+  if (extras.officialStatus) row.officialStatus = normalized(extras.officialStatus).toLowerCase();
   if (Array.isArray(extras.marketAliases)) {
     row.marketAliases = [...new Set(extras.marketAliases.map(normalizedUpper).filter(Boolean))];
   }
@@ -503,6 +509,7 @@ async function collectKrakenSpot(baseUrl, deadlineAt = null) {
       marketDataProfile: entry.marketDataProfile,
       marketQuerySymbol: entry.marketQuerySymbol,
       marketAliases: entry.marketAliases,
+      officialStatus: entry.officialStatus,
       identityEvidence: entry.category === 'commodity'
         ? 'exact audited Kraken RWA asset in the live official AssetPairs catalog'
         : 'Kraken official tokenized_asset AssetPairs catalog',
