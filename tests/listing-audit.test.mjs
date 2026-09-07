@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  isReviewedExactCanonicalCorrection,
   isReviewedLifecycleCategoryCorrection,
+  REVIEWED_EXACT_CANONICAL_CORRECTIONS,
   REVIEWED_ETF_CATEGORY_CORRECTIONS,
   LISTING_SOURCE_KEYS,
   mergeListingAudit,
@@ -234,6 +236,69 @@ test('lifecycle correction bypass is one-way and limited to dated reviewed publi
     { ...current, canonicalSymbol:'UNITREE' },
     { ...previous, canonicalSymbol:'UNITREE' },
   ), false, 'a public-to-Pre-IPO reversal must never bypass identity review');
+});
+
+test('reviewed Binance exact alias correction updates the same contract without a listing event', () => {
+  const legacyLenovo = {
+    ...row('perp:binance', 'HK0992'),
+    venueSymbol:'HK0992USDT',
+    canonicalSymbol:'HK0992',
+    venueCategory:'equity',
+    lifecycleStatus:'public',
+    name:'HK0992',
+  };
+  const baseline = mergeListingAudit(null, fullObservations({
+    'perp:binance':{
+      market:'perp', venue:'binance', status:'full', listings:[legacyLenovo],
+    },
+  }), new Date('2026-09-06T00:45:00Z'));
+  const reviewedLenovo = {
+    ...legacyLenovo,
+    canonicalSymbol:'LENOVO',
+    name:'Lenovo Group Limited',
+  };
+  const corrected = mergeListingAudit(baseline.state, fullObservations({
+    'perp:binance':{
+      market:'perp', venue:'binance', status:'full', listings:[reviewedLenovo],
+    },
+  }), new Date('2026-09-07T00:45:00Z'));
+  const listingKey = 'perp:binance:HK0992USDT';
+  assert.equal(corrected.snapshot.sources.find(source => source.sourceKey === 'perp:binance').status, 'full');
+  assert.deepEqual(corrected.newEvents, []);
+  assert.equal(corrected.state.known[listingKey].canonicalSymbol, 'LENOVO');
+  assert.equal(corrected.state.known[listingKey].name, 'Lenovo Group Limited');
+  assert.deepEqual(REVIEWED_EXACT_CANONICAL_CORRECTIONS, [{
+    sourceKey:'perp:binance',
+    venueSymbol:'HK0992USDT',
+    previousCanonicalSymbol:'HK0992',
+    canonicalSymbol:'LENOVO',
+    category:'equity',
+    venueCategory:'equity',
+    lifecycleStatus:'public',
+  }]);
+});
+
+test('exact canonical correction bypass rejects reverse, cross-venue and widened variants', () => {
+  const previous = normalizeListingObservation({
+    market:'perp', venue:'binance', venueSymbol:'HK0992USDT',
+    canonicalSymbol:'HK0992', category:'equity', venueCategory:'equity',
+    lifecycleStatus:'public', identityStatus:'verified',
+  });
+  const current = normalizeListingObservation({
+    market:'perp', venue:'binance', venueSymbol:'HK0992USDT',
+    canonicalSymbol:'LENOVO', category:'equity', venueCategory:'equity',
+    lifecycleStatus:'public', identityStatus:'verified',
+  });
+  assert.equal(isReviewedExactCanonicalCorrection(previous, current), true);
+  assert.equal(isReviewedExactCanonicalCorrection(current, previous), false, 'reverse correction must fail closed');
+  assert.equal(isReviewedExactCanonicalCorrection(previous, { ...current, sourceKey:'spot:binance' }), false);
+  assert.equal(isReviewedExactCanonicalCorrection(previous, { ...current, venueSymbol:'HK0992B' }), false);
+  assert.equal(isReviewedExactCanonicalCorrection(previous, { ...current, category:'etf' }), false);
+  assert.equal(isReviewedExactCanonicalCorrection({ ...previous, venueCategory:'pre-ipo' }, current), false);
+  assert.equal(isReviewedExactCanonicalCorrection(previous, { ...current, venueCategory:'pre-ipo' }), false);
+  assert.equal(isReviewedExactCanonicalCorrection({ ...previous, lifecycleStatus:'pre-ipo' }, current), false);
+  assert.equal(isReviewedExactCanonicalCorrection(previous, { ...current, lifecycleStatus:'pre-ipo' }), false);
+  assert.equal(isReviewedExactCanonicalCorrection({ ...previous, canonicalSymbol:'HK1211' }, current), false);
 });
 
 test('reviewed SKDD ETF correction survives pending removal and does not synthesize a listing event', () => {

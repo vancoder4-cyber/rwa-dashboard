@@ -35,6 +35,21 @@ export const REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS = Object.freeze([
   'UNITREE',
 ]);
 export const REVIEWED_ETF_CATEGORY_CORRECTIONS = Object.freeze(Object.keys(REVIEWED_ETF_IDENTITIES));
+// Exact venue-product aliases whose official security identity was corrected
+// after an earlier Runtime Cache baseline had already been established. These
+// entries are deliberately one-way and product-scoped: they update identity
+// metadata for the unchanged listing key and never create a listing event.
+export const REVIEWED_EXACT_CANONICAL_CORRECTIONS = Object.freeze([
+  Object.freeze({
+    sourceKey: 'perp:binance',
+    venueSymbol: 'HK0992USDT',
+    previousCanonicalSymbol: 'HK0992',
+    canonicalSymbol: 'LENOVO',
+    category: 'equity',
+    venueCategory: 'equity',
+    lifecycleStatus: 'public',
+  }),
+]);
 
 const MARKETS = new Set(['perp', 'spot']);
 const VENUES = new Set(['tradexyz', 'bitget', 'gate', 'kraken', 'binance', 'okx']);
@@ -243,6 +258,40 @@ export function isReviewedLifecycleCategoryCorrection(previousRow, currentRow) {
     currentLifecycle === 'public';
 }
 
+export function isReviewedExactCanonicalCorrection(previousRow, currentRow) {
+  const previousSourceKey = normalized(previousRow?.sourceKey).toLowerCase();
+  const currentSourceKey = normalized(currentRow?.sourceKey).toLowerCase();
+  const previousVenueSymbol = normalizedUpper(previousRow?.venueSymbol);
+  const currentVenueSymbol = normalizedUpper(currentRow?.venueSymbol);
+  const previousCanonicalSymbol = normalizedUpper(previousRow?.canonicalSymbol);
+  const canonicalSymbol = normalizedUpper(currentRow?.canonicalSymbol);
+  const previousCategory = normalized(previousRow?.category).toLowerCase();
+  const category = normalized(currentRow?.category).toLowerCase();
+  const previousVenueCategory = normalized(previousRow?.venueCategory).toLowerCase();
+  const venueCategory = normalized(currentRow?.venueCategory).toLowerCase();
+  const previousLifecycleStatus = normalized(previousRow?.lifecycleStatus).toLowerCase();
+  const lifecycleStatus = normalized(currentRow?.lifecycleStatus).toLowerCase();
+  return REVIEWED_EXACT_CANONICAL_CORRECTIONS.some(correction =>
+    previousSourceKey === correction.sourceKey &&
+    currentSourceKey === correction.sourceKey &&
+    previousVenueSymbol === correction.venueSymbol &&
+    currentVenueSymbol === correction.venueSymbol &&
+    previousCanonicalSymbol === correction.previousCanonicalSymbol &&
+    canonicalSymbol === correction.canonicalSymbol &&
+    previousCategory === correction.category &&
+    category === correction.category &&
+    previousVenueCategory === correction.venueCategory &&
+    venueCategory === correction.venueCategory &&
+    previousLifecycleStatus === correction.lifecycleStatus &&
+    lifecycleStatus === correction.lifecycleStatus
+  );
+}
+
+function isReviewedIdentityCorrection(previousRow, currentRow) {
+  return isReviewedLifecycleCategoryCorrection(previousRow, currentRow) ||
+    isReviewedExactCanonicalCorrection(previousRow, currentRow);
+}
+
 function dailyEventTimestamp(value) {
   const detectedAt = isoTimestamp(value, new Date().toISOString());
   return { detectedAt, eventBucket:detectedAt.slice(0, 10) };
@@ -315,7 +364,7 @@ export function mergeListingAudit(previousState, rawObservations, now = new Date
       const previousRow = previousByKey.get(row.key);
       return previousRow && (
         (identityFingerprint(previousRow) !== identityFingerprint(row) &&
-          !isReviewedLifecycleCategoryCorrection(previousRow, row)) ||
+          !isReviewedIdentityCorrection(previousRow, row)) ||
         (previousRow.identityStatus === 'verified' && row.identityStatus !== 'verified')
       );
     });
@@ -325,7 +374,7 @@ export function mergeListingAudit(previousState, rawObservations, now = new Date
       const known = previous.known?.[row.key];
       return known?.everSeen && known.active === false && (
         (identityFingerprint(known) !== identityFingerprint(row) &&
-          !isReviewedLifecycleCategoryCorrection(known, row)) ||
+          !isReviewedIdentityCorrection(known, row)) ||
         (known.identityStatus === 'verified' && row.identityStatus !== 'verified')
       );
     });
