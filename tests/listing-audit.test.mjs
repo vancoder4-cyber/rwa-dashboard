@@ -20,6 +20,7 @@ import listingChangesHandler, {
 } from '../api/listing-changes.js';
 import { validateListingAuditSnapshot } from '../api/health.js';
 import {
+  bitgetPerpListingFromOfficial,
   gateExactLegacySpotListing,
   isDedicatedTradeXyzSource,
   krakenListingCandidate,
@@ -104,6 +105,33 @@ test('OKX X-Perp listing keeps official list time and Dashboard identity without
   assert.equal(soxs.category, 'etf');
   assert.equal(soxs.name, 'Direxion Daily Semiconductor Bear 3X ETF');
   assert.equal(soxs.officialListedAt, '2026-09-07T08:30:00.170Z');
+});
+
+test('Bitget SOFTBANK exact official product resolves to the reviewed public identity', () => {
+  assert.deepEqual(bitgetPerpListingFromOfficial({
+    symbol:'SOFTBANKUSDT',
+    baseCoin:'SOFTBANK',
+    symbolName:'SOFTBANKUSDT',
+    isRwa:'YES',
+    symbolType:'stock',
+    status:'online',
+    launchTime:'1788763902180',
+  }), {
+    market:'perp',
+    venue:'bitget',
+    venueSymbol:'SOFTBANKUSDT',
+    canonicalSymbol:'SOFTBANK',
+    category:'equity',
+    venueCategory:'equity',
+    lifecycleStatus:'public',
+    name:'SoftBank Group Corp.',
+    identityStatus:'verified',
+    identityEvidence:'Bitget isRwa=yes; symbolType=stock',
+    officialListedAt:'2026-09-07T06:51:42.180Z',
+  });
+  assert.equal(bitgetPerpListingFromOfficial({
+    symbol:'QNTUSDT', baseCoin:'QNT', isRwa:'NO', symbolType:'crypto', status:'online',
+  }), null);
 });
 
 test('listing audit emits Spot and Perp additions once and leaves an unavailable source baseline untouched', () => {

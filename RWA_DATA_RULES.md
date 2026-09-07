@@ -1,7 +1,7 @@
 # RWA Asset Identity & Data Rules
 
 > 本文记录 RWA Dashboard 的资产准入、ticker 归一、类别/地区标签及上线校验规则。  
-> 最近审计：2026-09-03。生产站点：<https://avenir-rwa-analyst.vercel.app/>
+> 最近审计：2026-09-07。生产站点：<https://avenir-rwa-analyst.vercel.app/>
 
 ## 1. 核心原则
 
@@ -109,6 +109,7 @@ trade.xyz 当前专用 `xyz` DEX universe 有 5 个 `perpCategories` 空缺：`U
 - `EWH/DFEN`：全局 ETF 类别修正；Gate 的 `QQQX/SPYX/TQQQX/SLVON` 是仅在 Gate 官方 RWA catalog 门控后生效的 ETF wrapper，不能作为全局 ticker 类别修正。
 - `SKDD/SKUU`：GraniteShares 2x Short/Long SK Hynix Daily ETF。两者是 Nasdaq 上市的每日杠杆 ETF，参考标的是 SK Hynix ADR `SKHY`；它们不是 SK Hynix 普通股，也绝不能 alias 成 `SKHY/SKHYNIX`。只有场所先以官方 RWA/security catalog 准入后，才可把宽泛 Stock/Equity 类别细化为 ETF。
 - `BYDUSDT/HK0992USDT`：Binance 2026-09-07 官方上线公告分别确认标的是 BYD Company Limited H 股（HKEX 1211）与 Lenovo Group Limited（HKEX 0992）。前者 canonical 为 `BYD`；后者只有在场所已确认 `HK_EQUITY`/TradFi security 后才把精确 venue code `HK0992` 归一为 `LENOVO`，名称固定为 `Lenovo Group Limited`。这条 exact alias 不得扩展成通用 `HKdddd` 解析。
+- `SOFTBANKUSDT`：Bitget 2026-09-07 官方 live catalog 将精确产品标为 `isRwa=YES + symbolType=stock + status=online`，因此在该场所门控后 canonical 为 `SOFTBANK`、名称固定为 `SoftBank Group Corp.`、类别为 Equity、公司阶段为 `public`。标的是东京证券交易所代码 9984 的 SoftBank Group Corp.，不是代码 9434 的 SoftBank Corp.；裸 `SOFTBANK` 名称或其他场所同名 ticker 不能独立放行。
 - `KO-USD_UM_XPERP-310912/SOXS-USD_UM_XPERP-310912`：OKX 2026-09-07 官方 live `FUTURES + ruleType=xperp + instCategory=3` 目录及上线公告分别确认 `KO` 为 The Coca-Cola Company Equity、`SOXS` 为 Direxion Daily Semiconductor Bear 3X ETF；官方 `listTime` 分别为 08:45/08:30 UTC。名称只在场所 security 门控后由 Dashboard 身份系统细化，不能按裸 ticker 放行；`listTime` 只能补充目录差分已经确认的事件，不能单独制造 New。
 - `H100`：计算资源类 Commodity，不是股票指数。
 - 已公开上市的公司不能因为场所残留 `is_pre_market` 就继续显示为 Pre-IPO。
@@ -322,6 +323,7 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 
 - Hyperliquid/trade.xyz market identity：`https://api.hyperliquid.xyz/info` 的 `perpCategories` 与 `metaAndAssetCtxs`。
 - Bitget perpetual/Reality catalogs：`/api/v3/market/instruments`。
+- Bitget SOFTBANK 精确合约身份：2026-09-07 `USDT-FUTURES` 官方 live catalog 中的 `SOFTBANKUSDT + baseCoin=SOFTBANK + isRwa=YES + symbolType=stock + status=online`；公司法律名称和东京代码 9984：[SoftBank Group 官方股票资料](https://group.softbank/en/ir/stock/info) 与 [JPX 2026 行业指数成分资料](https://www.jpx.co.jp/english/markets/indices/factsheets/files/e_003_1_25_fac2_33sector_Information%20and%20Communication.pdf)；首次公开交易日 1994-07-22 另由受监管券商的上市资料复核。不得与东京代码 9434 的 SoftBank Corp. 混淆。
 - Gate futures/spot catalogs：`/api/v4/futures/usdt/contracts` 与 `/api/v4/spot/currency_pairs`。
 - Binance futures/spot catalogs：`/fapi/v1/exchangeInfo` 与 `/api/v3/exchangeInfo`。
 - Binance BYD/Lenovo TradFi perpetual 身份与上线时间：[2026-09-07 官方公告](https://www.binance.com/en/support/announcement/detail/89a035c3ee0e4b7782bf0089323d8e78)；BYD H 股法律名称/1211/2002-07-31 上市日：[BYD 官方投资者资料](https://www.bydglobal.com/en/BasicInformation.html)；Lenovo 法律名称/0992/1994-02-14 上市日：[Lenovo 官方股票资料](https://investor.lenovo.com/en/ir/stockinfo.php)。
