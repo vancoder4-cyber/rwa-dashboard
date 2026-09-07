@@ -6,6 +6,7 @@ import {
   REVIEWED_ETF_CATEGORY_CORRECTIONS,
   REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS,
 } from './listing-audit.js';
+import { securityDisplayName } from './security-identity.js';
 
 export const LISTING_PG_JOB_NAME = 'rwa-listing-audit';
 export const LISTING_PG_PIPELINE_VERSION = 'rwa-listing-catalog-pg-shadow/v1';
@@ -242,11 +243,13 @@ function buildSourceRun(sourceKey, rawObservation, summary, mergedState, observe
     const reviewRequired = listing.identityStatus !== 'verified';
     const assetKey = `${category}:${listing.canonicalSymbol}`;
     // Keep the cross-venue asset-version identity stable even when venues use
-    // different display-name spellings. Only the dated ETF correction registry
-    // may replace the ticker fallback with an issuer-reviewed canonical name.
-    const displayName = REVIEWED_ETF_CATEGORY_CORRECTION_SET.has(listing.canonicalSymbol)
-      ? listing.name || listing.canonicalSymbol
-      : listing.canonicalSymbol;
+    // different display-name spellings. Only the dated issuer/ETF registry may
+    // replace the ticker fallback; an arbitrary venue label is never identity
+    // authority by itself.
+    const displayName = securityDisplayName(listing.canonicalSymbol) ||
+      (REVIEWED_ETF_CATEGORY_CORRECTION_SET.has(listing.canonicalSymbol)
+        ? listing.name || listing.canonicalSymbol
+        : listing.canonicalSymbol);
     const assetFingerprint = sha256(JSON.stringify([
       assetKey,
       category,

@@ -72,6 +72,15 @@ const REMEDIATIONS = Object.freeze({
       'Require a full PostgreSQL snapshot and a passing Push Bot contract before restoring consumption.',
     ]),
   }),
+  'database-capacity': Object.freeze({
+    code: 'DRAIN_ARBITRAGE_RETENTION_BACKLOG',
+    summary: 'Database growth or the arbitrage retention backlog exceeded its operating budget.',
+    actions: Object.freeze([
+      'Confirm the bounded arbitrage retention migration and writer are active on the reviewed deployment.',
+      'Inspect live and stale route/basis row counts; do not infer recovery only from a larger provider plan.',
+      'Drain stale rows with the fixed-scope server retention function, then verify growth is bounded across two Cron cycles.',
+    ]),
+  }),
 });
 
 export function remediationForCheck(name, status, reason = null) {

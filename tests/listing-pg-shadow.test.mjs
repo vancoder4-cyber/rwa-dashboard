@@ -249,6 +249,26 @@ test('reviewed SK Hynix ETFs persist exact registry names and stable matching fi
   assert.equal(batch.events.length, 0);
 });
 
+test('reviewed BYD and Lenovo identities persist issuer names rather than venue codes', () => {
+  const observations = fullObservations({
+    'perp:binance': targetObservation('perp:binance', [
+      listing('perp:binance', 'BYD', {
+        venueSymbol:'BYDUSDT', canonicalSymbol:'BYD', name:'BYD', lifecycleStatus:'public',
+      }),
+      listing('perp:binance', 'LENOVO', {
+        venueSymbol:'HK0992USDT', canonicalSymbol:'LENOVO', name:'HK0992', lifecycleStatus:'public',
+      }),
+    ]),
+  });
+  const batch = buildListingAuditPgBatch(baselineInput(observations));
+  const memberships = sourceRun(batch, 'perp:binance').memberships;
+  const byCanonical = new Map(memberships.map(row => [row.canonicalUnderlying, row]));
+  assert.equal(byCanonical.get('BYD').displayName, 'BYD Company Limited');
+  assert.equal(byCanonical.get('LENOVO').displayName, 'Lenovo Group Limited');
+  assert.equal(byCanonical.get('LENOVO').officialProductKey, 'HK0992USDT');
+  assert.equal(batch.events.length, 0);
+});
+
 test('same-day retry after a Runtime Cache baseline reset remains non-comparable for lifecycle events', () => {
   const first = baselineInput();
   const retryAt = '2026-08-15T01:45:00.000Z';

@@ -108,6 +108,7 @@ trade.xyz 当前专用 `xyz` DEX universe 有 5 个 `perpCategories` 空缺：`U
 - `UNITREE`：上海证券交易所公告确认 2026-08-19 起在科创板上市交易（证券代码 688836），因此为已上市 Equity / `public`；场所仍可使用 `UNITREE` 等产品代码，不能继续沿用 Pre-IPO 生命周期。
 - `EWH/DFEN`：全局 ETF 类别修正；Gate 的 `QQQX/SPYX/TQQQX/SLVON` 是仅在 Gate 官方 RWA catalog 门控后生效的 ETF wrapper，不能作为全局 ticker 类别修正。
 - `SKDD/SKUU`：GraniteShares 2x Short/Long SK Hynix Daily ETF。两者是 Nasdaq 上市的每日杠杆 ETF，参考标的是 SK Hynix ADR `SKHY`；它们不是 SK Hynix 普通股，也绝不能 alias 成 `SKHY/SKHYNIX`。只有场所先以官方 RWA/security catalog 准入后，才可把宽泛 Stock/Equity 类别细化为 ETF。
+- `BYDUSDT/HK0992USDT`：Binance 2026-09-07 官方上线公告分别确认标的是 BYD Company Limited H 股（HKEX 1211）与 Lenovo Group Limited（HKEX 0992）。前者 canonical 为 `BYD`；后者只有在场所已确认 `HK_EQUITY`/TradFi security 后才把精确 venue code `HK0992` 归一为 `LENOVO`，名称固定为 `Lenovo Group Limited`。这条 exact alias 不得扩展成通用 `HKdddd` 解析。
 - `H100`：计算资源类 Commodity，不是股票指数。
 - 已公开上市的公司不能因为场所残留 `is_pre_market` 就继续显示为 Pre-IPO。
 
@@ -322,6 +323,7 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 - Bitget perpetual/Reality catalogs：`/api/v3/market/instruments`。
 - Gate futures/spot catalogs：`/api/v4/futures/usdt/contracts` 与 `/api/v4/spot/currency_pairs`。
 - Binance futures/spot catalogs：`/fapi/v1/exchangeInfo` 与 `/api/v3/exchangeInfo`。
+- Binance BYD/Lenovo TradFi perpetual 身份与上线时间：[2026-09-07 官方公告](https://www.binance.com/en/support/announcement/detail/89a035c3ee0e4b7782bf0089323d8e78)；BYD H 股法律名称/1211/2002-07-31 上市日：[BYD 官方投资者资料](https://www.bydglobal.com/en/BasicInformation.html)；Lenovo 法律名称/0992/1994-02-14 上市日：[Lenovo 官方股票资料](https://investor.lenovo.com/en/ir/stockinfo.php)。
 - OKX official catalogs/market data：`/api/v5/public/instruments`、`/api/v5/market/tickers`、`/api/v5/public/mark-price`、`/api/v5/public/open-interest` 与 `funding-rate-history`；产品身份以 `state`、`instType`、`ruleType`、`instCategory` 为准，参考 [OKX API Guide](https://app.okx.com/docs-v5/en/)、[Stock Perpetuals](https://www.okx.com/en-us/help/stock-perpetuals) 与 [Unified Tokenized Stock terms](https://www.okx.com/en-us/help/unified-tokenized-stock-trading-terms-and-conditions)。
 - Nasdaq Market Activity（股票/ETF Share Volume、Average Volume）：<https://www.nasdaq.com/market-activity>。
 - OCC Volume Query / batch processing（期权成交量）：<https://www.theocc.com/market-data/market-data-reports/volume-and-open-interest/volume-query>。
@@ -448,6 +450,7 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 - Spot 买腿只能使用可执行 best ask，Perpetual 空腿只能使用可执行 best bid。两侧 `executableDepthUsd` 分别只累加 best price 向外 2% 容忍区间内的对应方向盘口，并按官方 contract multiplier 换算；不得把 bid+ask 总深度、mark、last 或 midpoint 冒充可执行腿。
 - `basis.pct = (perp bid - spot ask) / spot ask × 100`。所有 rate 字段都是百分点；当前年化为 `currentRatePct × (24 / intervalHours) × 365`。24 小时平均只能来自同一精确 Perpetual contract 的已结算 observations，并满足既有 80% coverage 规则；当前 rate 单点年化不能替代。
 - route 必须同时绑定 current verified `asset_version_id`、Spot `instrument_version_id` 与 Perpetual `instrument_version_id`，且两条 instrument 指向同一 asset version。`routeId` 包含两边 venue 和精确 venueSymbol；名称、category 只取 Dashboard 身份版本。任何缺名、category 冲突、review-required、quarantined 或 rejected identity 都 fail closed。
-- migration `0010` 的 route fact 与 publication snapshot 只允许 append/insert；所有已完成精确盘口和 funding 检验且达到 $1m Perpetual OI 的候选 route 先记录事实，使 basis persistence 可以按 0/5/10 分钟连续推进，公开 snapshot 仍只包含满足通知策略的 route。同一五分钟桶第一次成功结果即 final，相同 checksum 重跑幂等，不同 checksum 重跑拒绝，不能 UPDATE/DELETE 覆盖。Runtime Cache 不参与权威恢复。
+- migration `0010` 的 publication snapshot 只允许 append/insert；migration `0011` 把所有已完成精确盘口和 funding 检验且达到 $1m Perpetual OI 的候选 route 写入两小时 compact basis 工作集，使 persistence 可以按 0/5/10 分钟连续推进，只有进入公开 snapshot 的 route 才写六小时宽事实。同一五分钟桶第一次成功结果即 final，相同 checksum 重跑幂等，不同 checksum 重跑拒绝，不能 UPDATE 覆盖。清理只能调用无参数、固定窗口、固定批量的 `ops.prune_arbitrage_observation_history()`；浏览器、Bot 和任意 query 参数不得选择删除范围。数据库套餐扩容只能解除容量阻断，绝不能代替 retention、增长监控或两轮 Cron 稳态验证。Runtime Cache 不参与权威恢复。
+- 新产品先进入交易所 live catalog、但尚未进入 Dashboard 最近可信 Listing Audit 身份版本时，套利必须保持 HTTP 503，不能把 live ticker 临时写入权威身份或从其他 Bot 补全。恢复顺序固定为：认证 Listing Audit 提交 exact verified identity → 数据库/目录一致性验证 → 下一次认证套利 Cron。计划任务与操作手册必须把这类“新目录领先身份库”标为可操作的身份刷新缺口，不能误报成权威空结果。
 - 公开 reader 只能通过 `rwa_arbitrage_reader` 读取 `publication.arbitrage_opportunity_v1`，不得读取 identity、fact 或 raw snapshot 表。没有权威 snapshot、snapshot 过期、writer 关闭或数据库不可用时返回 HTTP 503 `Unavailable`；只有十源与 route coverage 完整时，`expectedRoutes=returnedRoutes=0` 才是可接受的权威空结果。
 - `ARBITRAGE_WRITE_MODE` 默认 `off`。只有 `CRON_SECRET` 认证且 no-store 的 `/api/arbitrage-snapshot-cron` 可以采集和写入；浏览器、公开 API 与 Health 都是只读。Preview 必须使用隔离数据库和 `PREVIEW_NEON_ARBITRAGE_DATABASE_URL`，不得回退 Production owner/writer 连接。

@@ -24,6 +24,7 @@ import {
   TOKENIZED_ETF_WRAPPERS,
   categoryFromOfficialSignalType,
   normalizeSignalIdentity,
+  securityDisplayName,
 } from '../api/_lib/security-identity.js';
 import gateBulkHandler from '../api/gate-bulk.js';
 import signalSnapshotHandler, {
@@ -186,6 +187,10 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
   assert.deepEqual(normalizeSignalIdentity('SPCXB', 'pre-ipo'), { symbol:'SPCX', category:'equity' });
   assert.deepEqual(normalizeSignalIdentity('CBRSON', 'pre-ipo'), { symbol:'CBRS', category:'equity' });
   assert.deepEqual(normalizeSignalIdentity('QNTB', 'equity'), { symbol:'QNT', category:'equity' });
+  assert.deepEqual(normalizeSignalIdentity('BYD', 'equity', { venue:'binance' }), { symbol:'BYD', category:'equity' });
+  assert.deepEqual(normalizeSignalIdentity('HK0992', 'equity', { venue:'binance' }), { symbol:'LENOVO', category:'equity' });
+  assert.equal(securityDisplayName('BYD'), 'BYD Company Limited');
+  assert.equal(securityDisplayName('HK0992'), 'Lenovo Group Limited');
   assert.deepEqual(normalizeSignalIdentity('OPENAI', 'equity'), { symbol:'OPENAI', category:'pre-ipo' });
   assert.deepEqual(normalizeSignalIdentity('ANTHROPIC', 'equity'), { symbol:'ANTHROPIC', category:'pre-ipo' });
   assert.deepEqual(normalizeSignalIdentity('SHEIN', 'equity', { venue:'bitget' }), { symbol:'SHEIN', category:'pre-ipo' });

@@ -45,6 +45,11 @@ export const SECURITY_LISTING_REGISTRY = Object.freeze({
   ZHIPU: Object.freeze({ category:'equity', status:'public', name:'Z.AI (Zhipu AI)', listedOn:'2026-01-08', aliases:Object.freeze([]) }),
   CXMT: Object.freeze({ category:'equity', status:'public', name:'ChangXin Memory Technologies', listedOn:'2026-07-27', aliases:Object.freeze([]) }),
   QNT: Object.freeze({ category:'equity', status:'public', name:'Quantinuum Inc.', listedOn:'2026-06-04', aliases:Object.freeze(['QNTX', 'QNTSTOCK', 'QNTB']) }),
+  // Reviewed 2026-09-07 against Binance's launch notice and each issuer's
+  // official investor-relations listing record. `HK0992` is Binance's exact
+  // venue code for Lenovo (HKEX 0992), not a second company identity.
+  BYD: Object.freeze({ category:'equity', status:'public', name:'BYD Company Limited', listedOn:'2002-07-31', aliases:Object.freeze([]) }),
+  LENOVO: Object.freeze({ category:'equity', status:'public', name:'Lenovo Group Limited', listedOn:'1994-02-14', aliases:Object.freeze(['HK0992']) }),
   OPENAI: Object.freeze({ category:'pre-ipo', status:'pre-ipo', name:'OpenAI (Pre-IPO)', listedOn:null, aliases:Object.freeze([]) }),
   ANTHROPIC: Object.freeze({ category:'pre-ipo', status:'pre-ipo', name:'Anthropic (Pre-IPO)', listedOn:null, aliases:Object.freeze([]) }),
   SHEIN: Object.freeze({ category:'pre-ipo', status:'pre-ipo', name:'SHEIN (Pre-IPO)', listedOn:null, aliases:Object.freeze([]) }),

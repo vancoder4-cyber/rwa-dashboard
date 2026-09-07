@@ -75,7 +75,7 @@ export function buildAuthoritativeArbitrageIdentityQueries(sql) {
     ),
     sql.query(
       `SELECT route_fingerprint, bucket_at, basis_pct
-       FROM fact.arbitrage_route_observation
+       FROM fact.arbitrage_basis_observation
        WHERE bucket_at >= clock_timestamp() - interval '30 minutes'
        ORDER BY route_fingerprint, bucket_at DESC`,
     ),
@@ -211,6 +211,11 @@ export function buildArbitragePublicationQueries(sql, publication) {
   if (factRouteIds.size !== facts.length || snapshot.routes.some(route => !factRouteIds.has(route.routeId))) {
     throw new TypeError('Every public arbitrage route must have one authoritative fact row');
   }
+  const publishedRouteIds = new Set(snapshot.routes.map(route => route.routeId));
+  const publishedFacts = facts.filter(fact => publishedRouteIds.has(fact.route_id));
+  if (publishedFacts.length !== snapshot.routes.length) {
+    throw new TypeError('Public arbitrage route facts are not one-to-one with the snapshot');
+  }
   const checksum = sha256(json(snapshot));
   const common = [ARBITRAGE_JOB_NAME, ARBITRAGE_PIPELINE_VERSION, snapshot.bucket];
   const cycleLookup = `SELECT cycle_id FROM ingest.collection_cycle
@@ -257,6 +262,24 @@ export function buildArbitragePublicationQueries(sql, publication) {
       })))],
     ),
     sql.query(
+      `INSERT INTO fact.arbitrage_basis_observation
+         (cycle_id, asset_version_id, spot_instrument_version_id, perp_instrument_version_id,
+          route_id, route_fingerprint, formula_version, bucket_at, generated_at,
+          basis_pct, input_sha256)
+       SELECT (${cycleLookup}), incoming.asset_version_id, incoming.spot_instrument_version_id,
+         incoming.perp_instrument_version_id, incoming.route_id, incoming.route_fingerprint,
+         $4::text, $3::timestamptz, $5::timestamptz, incoming.basis_pct, incoming.input_sha256
+       FROM jsonb_to_recordset($6::jsonb) AS incoming(
+         asset_version_id bigint, spot_instrument_version_id bigint, perp_instrument_version_id bigint,
+         route_id text, route_fingerprint char(64), basis_pct numeric, input_sha256 char(64))
+       WHERE NOT EXISTS (
+         SELECT 1 FROM publication.arbitrage_opportunity_snapshot
+         WHERE cycle_id = (${cycleLookup})
+       )
+       ON CONFLICT (cycle_id, route_id) DO NOTHING`,
+      [...common, ARBITRAGE_FORMULA_VERSION, snapshot.generatedAt, json(facts)],
+    ),
+    sql.query(
       `INSERT INTO fact.arbitrage_route_observation
          (cycle_id, asset_version_id, spot_instrument_version_id, perp_instrument_version_id,
           route_id, route_fingerprint, formula_version, bucket_at, generated_at,
@@ -292,7 +315,7 @@ export function buildArbitragePublicationQueries(sql, publication) {
          WHERE cycle_id = (${cycleLookup})
        )
        ON CONFLICT (cycle_id, route_id) DO NOTHING`,
-      [...common, ARBITRAGE_FORMULA_VERSION, snapshot.generatedAt, json(facts)],
+      [...common, ARBITRAGE_FORMULA_VERSION, snapshot.generatedAt, json(publishedFacts)],
     ),
     sql.query(
       `INSERT INTO publication.arbitrage_opportunity_snapshot
@@ -308,7 +331,11 @@ export function buildArbitragePublicationQueries(sql, publication) {
       `INSERT INTO ingest.sink_commit (attempt_id, sink_name, status, row_count, checksum, committed_at)
        VALUES ((${attemptLookup}), 'postgres-arbitrage-publication', 'stored', $4, $5, $6::timestamptz)
        ON CONFLICT (attempt_id, sink_name) DO NOTHING`,
-      [...common, facts.length, checksum, snapshot.generatedAt],
+      [...common, publishedFacts.length, checksum, snapshot.generatedAt],
+    ),
+    sql.query(
+      `SELECT basis_rows_deleted, route_rows_deleted
+       FROM ops.prune_arbitrage_observation_history()`,
     ),
     sql.query(
       `SELECT snapshot_id::text, payload_sha256, route_count, generated_at, bucket_at

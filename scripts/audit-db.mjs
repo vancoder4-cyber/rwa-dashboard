@@ -33,7 +33,7 @@ function fail(message) {
 
 const sql = getMigrationDatabaseSql();
 const localMigrations = await loadMigrations(MIGRATION_DIRECTORY);
-const [ledger, extensions, roles, privileges, counts, latestCycle] = await Promise.all([
+const [ledger, extensions, roles, privileges, counts, latestCycle, storage] = await Promise.all([
   sql.query('SELECT version, name, checksum, statement_count FROM ops.schema_migration ORDER BY version'),
   sql.query("SELECT extname FROM pg_extension WHERE extname IN ('pgcrypto', 'btree_gist') ORDER BY extname"),
   sql.query('SELECT rolname, rolcanlogin FROM pg_roles WHERE rolname = ANY($1::text[]) ORDER BY rolname', [EXPECTED_ROLES]),
@@ -69,12 +69,16 @@ const [ledger, extensions, roles, privileges, counts, latestCycle] = await Promi
       ,has_table_privilege('rwa_catalog_shadow_writer', 'publication.listing_audit_checkpoint', 'UPDATE') AS listing_writer_update
       ,has_table_privilege('rwa_catalog_shadow_writer', 'publication.listing_audit_checkpoint', 'DELETE') AS listing_writer_delete
       ,has_table_privilege('rwa_arbitrage_writer', 'fact.arbitrage_route_observation', 'INSERT') AS arbitrage_writer_fact_insert
+      ,has_table_privilege('rwa_arbitrage_writer', 'fact.arbitrage_basis_observation', 'INSERT') AS arbitrage_writer_basis_insert
       ,has_table_privilege('rwa_arbitrage_writer', 'publication.arbitrage_opportunity_snapshot', 'INSERT') AS arbitrage_writer_snapshot_insert
       ,has_table_privilege('rwa_arbitrage_writer', 'fact.arbitrage_route_observation', 'UPDATE') AS arbitrage_writer_fact_update
+      ,has_table_privilege('rwa_arbitrage_writer', 'fact.arbitrage_route_observation', 'DELETE') AS arbitrage_writer_fact_delete
       ,has_table_privilege('rwa_arbitrage_writer', 'publication.arbitrage_opportunity_snapshot', 'DELETE') AS arbitrage_writer_snapshot_delete
+      ,has_function_privilege('rwa_arbitrage_writer', 'ops.prune_arbitrage_observation_history()', 'EXECUTE') AS arbitrage_writer_retention_execute
       ,has_schema_privilege('rwa_arbitrage_reader', 'publication', 'USAGE') AS arbitrage_reader_schema_usage
       ,has_table_privilege('rwa_arbitrage_reader', 'publication.arbitrage_opportunity_v1', 'SELECT') AS arbitrage_reader_view_select
       ,has_table_privilege('rwa_arbitrage_reader', 'fact.arbitrage_route_observation', 'SELECT') AS arbitrage_reader_fact_select
+      ,has_table_privilege('rwa_arbitrage_reader', 'fact.arbitrage_basis_observation', 'SELECT') AS arbitrage_reader_basis_select
       ,has_table_privilege('rwa_arbitrage_reader', 'publication.arbitrage_opportunity_snapshot', 'SELECT') AS arbitrage_reader_snapshot_select
       ,has_table_privilege('rwa_arbitrage_reader', 'identity.instrument_version', 'SELECT') AS arbitrage_reader_identity_select
   `),
@@ -90,6 +94,7 @@ const [ledger, extensions, roles, privileges, counts, latestCycle] = await Promi
       (SELECT count(*)::int FROM analytics.catalog_change_event) AS listing_events,
       (SELECT count(*)::int FROM publication.listing_audit_checkpoint) AS listing_checkpoints,
       (SELECT count(*)::int FROM fact.arbitrage_route_observation) AS arbitrage_route_observations,
+      (SELECT count(*)::int FROM fact.arbitrage_basis_observation) AS arbitrage_basis_observations,
       (SELECT count(*)::int FROM publication.arbitrage_opportunity_snapshot) AS arbitrage_snapshots,
       (SELECT count(*)::int FROM identity.review_case WHERE status = 'open') AS open_reviews
   `),
@@ -110,6 +115,17 @@ const [ledger, extensions, roles, privileges, counts, latestCycle] = await Promi
     GROUP BY cycle.cycle_id
     ORDER BY cycle.bucket_at DESC
     LIMIT 1
+  `),
+  sql.query(`
+    SELECT pg_database_size(current_database())::bigint::text AS database_bytes,
+      pg_total_relation_size('fact.arbitrage_route_observation'::regclass)::bigint::text AS route_fact_bytes,
+      pg_total_relation_size('fact.arbitrage_basis_observation'::regclass)::bigint::text AS basis_fact_bytes,
+      (SELECT count(*)::bigint::text
+       FROM fact.arbitrage_route_observation
+       WHERE bucket_at < clock_timestamp() - interval '6 hours') AS stale_route_fact_rows,
+      (SELECT count(*)::bigint::text
+       FROM fact.arbitrage_basis_observation
+       WHERE bucket_at < clock_timestamp() - interval '2 hours') AS stale_basis_fact_rows
   `),
 ]);
 
@@ -143,12 +159,15 @@ if (!privilege.listing_writer_schema_usage || !privilege.listing_writer_select |
     !privilege.listing_writer_insert || !privilege.listing_writer_update || privilege.listing_writer_delete) {
   fail('listing checkpoint writer grants are invalid');
 }
-if (!privilege.arbitrage_writer_fact_insert || !privilege.arbitrage_writer_snapshot_insert ||
-    privilege.arbitrage_writer_fact_update || privilege.arbitrage_writer_snapshot_delete) {
+if (!privilege.arbitrage_writer_fact_insert || !privilege.arbitrage_writer_basis_insert ||
+    !privilege.arbitrage_writer_snapshot_insert || !privilege.arbitrage_writer_retention_execute ||
+    privilege.arbitrage_writer_fact_update || privilege.arbitrage_writer_fact_delete ||
+    privilege.arbitrage_writer_snapshot_delete) {
   fail('arbitrage writer grants are invalid');
 }
 if (!privilege.arbitrage_reader_schema_usage || !privilege.arbitrage_reader_view_select ||
-    privilege.arbitrage_reader_fact_select || privilege.arbitrage_reader_snapshot_select ||
+    privilege.arbitrage_reader_fact_select || privilege.arbitrage_reader_basis_select ||
+    privilege.arbitrage_reader_snapshot_select ||
     privilege.arbitrage_reader_identity_select) {
   fail('arbitrage reader grants are invalid');
 }
@@ -160,6 +179,7 @@ const result = {
   extensions: extensions.map(row => row.extname),
   roles: roles.map(row => ({ name: row.rolname, canLogin: row.rolcanlogin })),
   counts: counts[0],
+  storage:storage[0],
   latestListingCycle: latestCycle[0] || null,
 };
 

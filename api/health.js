@@ -42,6 +42,7 @@ import {
 } from './_lib/oi-liquidation-anomaly.js';
 import { fetchJsonWithPolicy, fetchWithPolicy, mapWithConcurrency } from './_lib/upstream.js';
 import { validateArbitrageSnapshot } from './_lib/arbitrage-analysis.js';
+import { databaseConfigured, runDatabaseTransaction } from './_lib/database.js';
 
 export const config = { regions: ['sin1'], maxDuration: 60 };
 
@@ -1971,6 +1972,100 @@ export async function probeArbitrageOpportunities(baseUrl, nowMs = Date.now()) {
   }
 }
 
+const DATABASE_STORAGE_WARN_BYTES = 4 * 1024 * 1024 * 1024;
+const DATABASE_STORAGE_FAIL_BYTES = 8 * 1024 * 1024 * 1024;
+const ARBITRAGE_WIDE_FACT_WARN_ROWS = 100_000;
+const ARBITRAGE_WIDE_FACT_FAIL_ROWS = 500_000;
+const ARBITRAGE_RETENTION_BACKLOG_FAIL_ROWS = 100_000;
+
+function nonNegativeSafeInteger(value) {
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number >= 0 ? number : null;
+}
+
+export function assessDatabaseCapacity(row) {
+  const databaseBytes = nonNegativeSafeInteger(row?.database_bytes ?? row?.databaseBytes);
+  const routeFactBytes = nonNegativeSafeInteger(row?.route_fact_bytes ?? row?.routeFactBytes);
+  const basisFactBytes = nonNegativeSafeInteger(row?.basis_fact_bytes ?? row?.basisFactBytes);
+  const routeFactRows = nonNegativeSafeInteger(row?.route_fact_rows ?? row?.routeFactRows);
+  const basisFactRows = nonNegativeSafeInteger(row?.basis_fact_rows ?? row?.basisFactRows);
+  const staleRouteFactRows = nonNegativeSafeInteger(row?.stale_route_fact_rows ?? row?.staleRouteFactRows);
+  const staleBasisFactRows = nonNegativeSafeInteger(row?.stale_basis_fact_rows ?? row?.staleBasisFactRows);
+  const retentionFunctionReady = (row?.retention_function_ready ?? row?.retentionFunctionReady) === true;
+  const valid = [databaseBytes, routeFactBytes, basisFactBytes, routeFactRows, basisFactRows,
+    staleRouteFactRows, staleBasisFactRows].every(value => value !== null) && retentionFunctionReady;
+  const failed = !valid || databaseBytes >= DATABASE_STORAGE_FAIL_BYTES ||
+    routeFactRows >= ARBITRAGE_WIDE_FACT_FAIL_ROWS ||
+    staleRouteFactRows >= ARBITRAGE_RETENTION_BACKLOG_FAIL_ROWS ||
+    staleBasisFactRows >= ARBITRAGE_RETENTION_BACKLOG_FAIL_ROWS;
+  const warned = !failed && (databaseBytes >= DATABASE_STORAGE_WARN_BYTES ||
+    routeFactRows >= ARBITRAGE_WIDE_FACT_WARN_ROWS || staleRouteFactRows > 0 || staleBasisFactRows > 0);
+  const status = failed ? 'fail' : warned ? 'warn' : 'pass';
+  return {
+    status,
+    databaseBytes,
+    routeFactBytes,
+    basisFactBytes,
+    routeFactRows,
+    basisFactRows,
+    staleRouteFactRows,
+    staleBasisFactRows,
+    retentionFunctionReady,
+    reason:!valid
+      ? 'Arbitrage retention schema or capacity metrics are unavailable'
+      : failed ? 'Database or arbitrage retention backlog exceeded the hard operating budget'
+        : warned ? 'Arbitrage retention cleanup or database capacity needs attention'
+          : null,
+  };
+}
+
+export function buildDatabaseCapacityQueries(sql) {
+  if (!sql || typeof sql.query !== 'function') throw new TypeError('A database capacity query builder is required');
+  return [
+    sql.query(`SET LOCAL statement_timeout = '8s'`),
+    sql.query(
+      `SELECT pg_database_size(current_database())::bigint::text AS database_bytes,
+         pg_total_relation_size('fact.arbitrage_route_observation'::regclass)::bigint::text AS route_fact_bytes,
+         pg_total_relation_size('fact.arbitrage_basis_observation'::regclass)::bigint::text AS basis_fact_bytes,
+         (SELECT count(*)::bigint::text FROM fact.arbitrage_route_observation) AS route_fact_rows,
+         (SELECT count(*)::bigint::text FROM fact.arbitrage_basis_observation) AS basis_fact_rows,
+         (SELECT count(*)::bigint::text
+            FROM fact.arbitrage_route_observation
+           WHERE bucket_at < clock_timestamp() - interval '6 hours') AS stale_route_fact_rows,
+         (SELECT count(*)::bigint::text
+            FROM fact.arbitrage_basis_observation
+           WHERE bucket_at < clock_timestamp() - interval '2 hours') AS stale_basis_fact_rows,
+         to_regprocedure('ops.prune_arbitrage_observation_history()') IS NOT NULL AS retention_function_ready`,
+    ),
+  ];
+}
+
+export async function probeDatabaseCapacity() {
+  const startedAt = Date.now();
+  if (!databaseConfigured()) {
+    return checkResult('database-capacity', 'warn', {
+      latencyMs:Date.now() - startedAt,
+      reason:'Database capacity probe is not configured',
+    });
+  }
+  try {
+    const results = await runDatabaseTransaction(
+      transactionSql => buildDatabaseCapacityQueries(transactionSql),
+      { readOnly:true, timeoutMs:10_000 },
+    );
+    const assessment = assessDatabaseCapacity(results?.[1]?.[0]);
+    return checkResult('database-capacity', assessment.status, {
+      latencyMs:Date.now() - startedAt,
+      ...assessment,
+    }, { critical:assessment.status === 'fail' });
+  } catch (error) {
+    return checkResult('database-capacity', 'warn', {
+      latencyMs:Date.now() - startedAt,
+      reason:String(error?.message || 'Database capacity probe failed').slice(0, 240),
+    });
+  }
+}
+
 function normalized(value) {
   return String(value ?? '').trim();
 }
@@ -2171,6 +2266,7 @@ export default async function handler(req, res) {
     () => probeListingAudit(baseUrl),
     () => probeSignalRadar(baseUrl),
     () => probeArbitrageOpportunities(baseUrl),
+    () => probeDatabaseCapacity(),
     () => probeOkxMarkets(baseUrl),
     ...Object.entries(FUNDING_PROBES).map(([venue, symbol]) =>
       () => probeFunding(baseUrl, venue, symbol)),

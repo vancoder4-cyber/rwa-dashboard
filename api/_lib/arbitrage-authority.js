@@ -35,6 +35,12 @@ export function buildArbitrageAuthorityQueries(sql) {
            SELECT relation.oid
            FROM pg_class AS relation
            JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+           WHERE namespace.nspname = 'fact' AND relation.relname = 'arbitrage_basis_observation'
+         ), 'SELECT') AS cannot_read_basis_history,
+         NOT has_table_privilege(session_user, (
+           SELECT relation.oid
+           FROM pg_class AS relation
+           JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
            WHERE namespace.nspname = 'publication' AND relation.relname = 'arbitrage_opportunity_snapshot'
          ), 'SELECT') AS cannot_read_raw_snapshots,
          NOT has_table_privilege(session_user, (
@@ -60,6 +66,7 @@ function readerRoleValid(row) {
     rowValue(row, 'is_not_superuser', 'isNotSuperuser') === true &&
     rowValue(row, 'is_publication_reader', 'isPublicationReader') === true &&
     rowValue(row, 'cannot_read_route_facts', 'cannotReadRouteFacts') === true &&
+    rowValue(row, 'cannot_read_basis_history', 'cannotReadBasisHistory') === true &&
     rowValue(row, 'cannot_read_raw_snapshots', 'cannotReadRawSnapshots') === true &&
     rowValue(row, 'cannot_read_identity_tables', 'cannotReadIdentityTables') === true;
 }
