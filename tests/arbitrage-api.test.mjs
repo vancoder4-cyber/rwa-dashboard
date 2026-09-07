@@ -5,6 +5,7 @@ import test from 'node:test';
 import {
   collectArbitragePublication,
   executableBookSide,
+  isExecutableCatalogListing,
   normalizeOrderBookPayload,
   requiresBinanceOpenInterestBackfill,
   routeHasExecutableBooks,
@@ -16,6 +17,7 @@ import {
 import {
   ARBITRAGE_SOURCE_KEYS,
   arbitrageWriteMode,
+  buildAuthoritativeArbitrageIdentityQueries,
   buildArbitragePublicationQueries,
   normalizeStoredArbitragePublication,
   normalizeAuthoritativeArbitrageIdentityRows,
@@ -24,7 +26,11 @@ import {
 import { buildArbitrageSnapshot } from '../api/_lib/arbitrage-analysis.js';
 import { serveArbitrageOpportunities } from '../api/arbitrage-opportunities.js';
 import { serveArbitrageSnapshotCron } from '../api/arbitrage-snapshot-cron.js';
-import { probeArbitrageOpportunities } from '../api/health.js';
+import {
+  assessDatabaseCapacity,
+  buildDatabaseCapacityQueries,
+  probeArbitrageOpportunities,
+} from '../api/health.js';
 
 const NOW = Date.parse('2026-09-04T10:02:00.000Z');
 
@@ -95,6 +101,12 @@ test('a successful empty required book side is non-executable, not a synthetic r
     { priceUsd:100, executableDepthUsd:10_000 },
     { priceUsd:101, executableDepthUsd:20_000 },
   ), true);
+});
+
+test('temporary venue modes remain catalog members but cannot enter executable arbitrage routes', () => {
+  assert.equal(isExecutableCatalogListing({ officialStatus:'online' }), true);
+  assert.equal(isExecutableCatalogListing({}), true);
+  assert.equal(isExecutableCatalogListing({ officialStatus:'suspended' }), false);
 });
 
 test('public API returns JSON full snapshot or explicit 503 unavailable, never synthetic empty', async () => {
@@ -188,6 +200,7 @@ test('dedicated authority reader verifies role isolation and freshness', () => {
     is_not_superuser:true,
     is_publication_reader:true,
     cannot_read_route_facts:true,
+    cannot_read_basis_history:true,
     cannot_read_raw_snapshots:true,
     cannot_read_identity_tables:true,
   }];
@@ -211,8 +224,13 @@ test('authority and publication queries pin roles and append one exact ten-sourc
   assert.equal(authority.length, 3);
   assert.match(calls[0].text, /SET LOCAL ROLE rwa_arbitrage_reader/);
   assert.match(calls[1].text, /FROM pg_class AS relation/);
+  assert.match(calls[1].text, /arbitrage_basis_observation/);
   assert.doesNotMatch(calls[1].text, /has_table_privilege\(session_user,\s*'fact\./);
   assert.match(calls[2].text, /publication\.arbitrage_opportunity_v1/);
+
+  calls.length = 0;
+  buildAuthoritativeArbitrageIdentityQueries(sql);
+  assert.match(calls[2].text, /instrument_version\.official_status = 'online'/);
 
   calls.length = 0;
   const snapshot = emptySnapshot();
@@ -224,8 +242,70 @@ test('authority and publication queries pin roles and append one exact ten-sourc
   assert.ok(publication.length >= 10);
   assert.match(calls[0].text, /SET LOCAL ROLE rwa_arbitrage_writer/);
   assert.ok(calls.some(call => /INSERT INTO fact\.arbitrage_route_observation/.test(call.text)));
+  assert.ok(calls.some(call => /INSERT INTO fact\.arbitrage_basis_observation/.test(call.text)));
   assert.ok(calls.some(call => /INSERT INTO publication\.arbitrage_opportunity_snapshot/.test(call.text)));
+  assert.ok(calls.some(call => /ops\.prune_arbitrage_observation_history\(\)/.test(call.text)));
   assert.ok(calls.every(call => !/UPDATE publication\.arbitrage_opportunity_snapshot/.test(call.text)));
+});
+
+test('database capacity guard distinguishes bounded cleanup from runaway growth', () => {
+  assert.equal(assessDatabaseCapacity({
+    database_bytes:String(512 * 1024 * 1024),
+    route_fact_bytes:String(420 * 1024 * 1024),
+    basis_fact_bytes:String(8 * 1024 * 1024),
+    route_fact_rows:'90000',
+    basis_fact_rows:'25000',
+    stale_route_fact_rows:'0',
+    stale_basis_fact_rows:'0',
+    current_identity_binding_gaps:'0',
+    retention_function_ready:true,
+  }).status, 'pass');
+  assert.equal(assessDatabaseCapacity({
+    databaseBytes:String(512 * 1024 * 1024),
+    routeFactBytes:String(420 * 1024 * 1024),
+    basisFactBytes:String(8 * 1024 * 1024),
+    routeFactRows:'120000',
+    basisFactRows:'25000',
+    staleRouteFactRows:'20000',
+    staleBasisFactRows:'0',
+    currentIdentityBindingGaps:'0',
+    retentionFunctionReady:true,
+  }).status, 'warn');
+  assert.equal(assessDatabaseCapacity({
+    database_bytes:String(512 * 1024 * 1024),
+    route_fact_bytes:String(420 * 1024 * 1024),
+    basis_fact_bytes:String(8 * 1024 * 1024),
+    route_fact_rows:'500000',
+    basis_fact_rows:'25000',
+    stale_route_fact_rows:'100000',
+    stale_basis_fact_rows:'0',
+    current_identity_binding_gaps:'0',
+    retention_function_ready:true,
+  }).status, 'fail');
+  const identityGap = assessDatabaseCapacity({
+    database_bytes:String(512 * 1024 * 1024),
+    route_fact_bytes:String(420 * 1024 * 1024),
+    basis_fact_bytes:String(8 * 1024 * 1024),
+    route_fact_rows:'90000',
+    basis_fact_rows:'25000',
+    stale_route_fact_rows:'0',
+    stale_basis_fact_rows:'0',
+    current_identity_binding_gaps:'1',
+    retention_function_ready:true,
+  });
+  assert.equal(identityGap.status, 'fail');
+  assert.match(identityGap.reason, /not bound to current asset identity versions/);
+  assert.equal(assessDatabaseCapacity({}).status, 'fail');
+
+  const calls = [];
+  const sql = { query:(text, values = []) => { calls.push({ text, values }); return { text, values }; } };
+  assert.equal(buildDatabaseCapacityQueries(sql).length, 2);
+  assert.match(calls[1].text, /pg_database_size/);
+  assert.match(calls[1].text, /stale_route_fact_rows/);
+  assert.match(calls[1].text, /current_identity_binding_gaps/);
+  assert.match(calls[1].text, /instrument_version\.valid_to IS NULL/);
+  assert.match(calls[1].text, /prune_arbitrage_observation_history/);
+  assert.doesNotMatch(calls[1].text, /DELETE|UPDATE|INSERT/);
 });
 
 test('authoritative identities accept an unambiguous normalized lookup but preserve the official symbol', () => {
@@ -438,4 +518,15 @@ test('collector joins only exact database identities and emits one policy-qualif
   assert.equal(observedOnly.routeFacts.length, 1);
   assert.equal(observedOnly.snapshot.routes.length, 0);
   assert.equal(observedOnly.diagnostics.observedRoutes, 1);
+
+  const calls = [];
+  buildArbitragePublicationQueries({
+    query(text, values = []) { calls.push({ text, values }); return { text, values }; },
+  }, observedOnly);
+  const basisInsert = calls.find(call => /INSERT INTO fact\.arbitrage_basis_observation/.test(call.text));
+  const wideInsert = calls.find(call => /INSERT INTO fact\.arbitrage_route_observation/.test(call.text));
+  assert.equal(JSON.parse(basisInsert.values[5]).length, 1,
+    'every executable route must retain compact persistence history');
+  assert.equal(JSON.parse(wideInsert.values[5]).length, 0,
+    'candidate-only routes must not grow the wide published-fact table');
 });

@@ -59,15 +59,21 @@ test('migration files are ordered, immutable-checksummed, and parse into stateme
     '0008_sk_hynix_etf_display_names.sql',
     '0009_listing_identity_projection.sql',
     '0010_arbitrage_opportunity_publication.sql',
+    '0011_arbitrage_bounded_history.sql',
+    '0012_binance_hk_equity_identity.sql',
+    '0013_current_instrument_asset_binding.sql',
+    '0014_live_instrument_binding_repair.sql',
+    '0015_okx_ko_soxs_identity_and_listing_time.sql',
+    '0016_okx_ko_event_lifecycle.sql',
   ]);
   assert.deepEqual(migrations.map(row => row.version), [
-    '0001', '0002', '0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010',
+    '0001', '0002', '0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013', '0014', '0015', '0016',
   ]);
   for (const migration of migrations) {
     assert.match(migration.filename, MIGRATION_FILE_PATTERN);
     assert.match(migration.checksum, /^[0-9a-f]{64}$/);
     assert.equal(migration.checksum, migrationChecksum(migration.sql));
-    const minimumStatements = ['0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010']
+    const minimumStatements = ['0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013', '0014', '0015', '0016']
       .includes(migration.version) ? 3 : 11;
     assert.ok(migration.statements.length >= minimumStatements);
     assert.ok(migration.statements.every(statement => statement.trim().length > 0));
@@ -124,6 +130,93 @@ test('arbitrage publication is append-only, exact-identity keyed, and least-priv
   assert.match(sql, /REVOKE ALL ON fact\.arbitrage_route_observation FROM PUBLIC, rwa_arbitrage_reader/);
   assert.doesNotMatch(sql, /GRANT (?:UPDATE|DELETE)[^;]*arbitrage_(?:route|opportunity)/);
   assert.doesNotMatch(sql, /^\s*(ticker|symbol)\s+/gmi);
+});
+
+test('arbitrage retention isolates compact persistence history and exposes only fixed-scope cleanup', async () => {
+  const sql = await readFile(path.join(MIGRATION_DIRECTORY, '0011_arbitrage_bounded_history.sql'), 'utf8');
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS fact\.arbitrage_basis_observation/);
+  assert.match(sql, /arbitrage_basis_retention_idx[\s\S]*fact\.arbitrage_basis_observation\(bucket_at\)/);
+  assert.match(sql, /arbitrage_route_retention_idx[\s\S]*fact\.arbitrage_route_observation\(bucket_at\)/);
+  assert.match(sql, /asset_version_id bigint NOT NULL REFERENCES identity\.asset_version/);
+  assert.match(sql, /spot_instrument_version_id bigint NOT NULL REFERENCES identity\.instrument_version/);
+  assert.match(sql, /perp_instrument_version_id bigint NOT NULL REFERENCES identity\.instrument_version/);
+  assert.match(sql, /clock_timestamp\(\) - interval '2 hours'/);
+  assert.match(sql, /clock_timestamp\(\) - interval '6 hours'/);
+  assert.match(sql, /LIMIT 10000/);
+  assert.match(sql, /LIMIT 5000/);
+  assert.match(sql, /CREATE OR REPLACE FUNCTION ops\.prune_arbitrage_observation_history\(\)/);
+  assert.match(sql, /SECURITY DEFINER/);
+  assert.match(sql, /REVOKE ALL ON FUNCTION ops\.prune_arbitrage_observation_history\(\) FROM PUBLIC/);
+  assert.match(sql, /GRANT EXECUTE ON FUNCTION ops\.prune_arbitrage_observation_history\(\) TO rwa_arbitrage_writer/);
+  assert.match(sql, /REVOKE ALL ON fact\.arbitrage_basis_observation FROM PUBLIC, rwa_arbitrage_reader/);
+  assert.doesNotMatch(sql, /TRUNCATE|DROP TABLE|VACUUM FULL/i);
+});
+
+test('reviewed Binance HK-equity migration repairs exact identity without lifecycle events', async () => {
+  const sql = await readFile(path.join(MIGRATION_DIRECTORY, '0012_binance_hk_equity_identity.sql'), 'utf8');
+  assert.match(sql, /'equity:BYD', 'BYD', 'BYD Company Limited'/);
+  assert.match(sql, /'equity:LENOVO', 'LENOVO', 'Lenovo Group Limited'/);
+  assert.match(sql, /source\.source_key = 'perp:binance'/);
+  assert.match(sql, /instrument\.official_product_key = 'HK0992USDT'/);
+  assert.match(sql, /old_asset_version\.canonical_underlying = 'HK0992'/);
+  assert.match(sql, /corrected_asset_version\.canonical_underlying = 'LENOVO'/);
+  assert.doesNotMatch(sql, /(?:INSERT INTO|UPDATE|DELETE FROM) analytics\.catalog_change_event/);
+  assert.doesNotMatch(sql, /\b(?:LIKE|ILIKE)\b|\bsimilarity\s*\(/i);
+});
+
+test('forward identity-binding migration carries exact instruments onto the current asset version', async () => {
+  const sql = await readFile(path.join(MIGRATION_DIRECTORY, '0013_current_instrument_asset_binding.sql'), 'utf8');
+  assert.match(sql, /WITH repair_time AS/);
+  assert.match(sql, /prior_asset_version\.valid_to IS NOT NULL/);
+  assert.match(sql, /current_asset_version\.valid_to IS NULL/);
+  assert.match(sql, /INSERT INTO identity\.instrument_version/);
+  assert.match(sql, /current\.official_venue_symbol/);
+  assert.match(sql, /current\.normalized_venue_symbol/);
+  assert.match(sql, /current\.contract_multiplier/);
+  assert.match(sql, /current verified instrument versions are not bound to current verified asset versions/);
+  assert.doesNotMatch(sql, /(?:INSERT INTO|UPDATE|DELETE FROM) analytics\.catalog_change_event/);
+  assert.doesNotMatch(sql, /\b(?:LIKE|ILIKE)\b|\bsimilarity\s*\(/i);
+});
+
+test('forward live-binding repair restores only trusted present instruments without lifecycle events', async () => {
+  const sql = await readFile(path.join(MIGRATION_DIRECTORY, '0014_live_instrument_binding_repair.sql'), 'utf8');
+  assert.match(sql, /DISTINCT ON \(instrument_version\.instrument_id\)/);
+  assert.match(sql, /membership\.presence_status = 'present'/);
+  assert.match(sql, /delisting\.event_type = 'delisted'/);
+  assert.match(sql, /current_asset_version\.valid_to IS NULL/);
+  assert.match(sql, /INSERT INTO identity\.instrument_version/);
+  assert.match(sql, /trusted present instrument identity is missing its current asset binding/);
+  assert.doesNotMatch(sql, /(?:INSERT INTO|UPDATE|DELETE FROM) analytics\.catalog_change_event/);
+  assert.doesNotMatch(sql, /\b(?:LIKE|ILIKE)\b|\bsimilarity\s*\(/i);
+});
+
+test('OKX KO/SOXS forward repair supplements exact identity and official time without creating events', async () => {
+  const sql = await readFile(path.join(MIGRATION_DIRECTORY, '0015_okx_ko_soxs_identity_and_listing_time.sql'), 'utf8');
+  assert.match(sql, /'equity:KO', 'KO', 'equity', 'The Coca-Cola Company'/);
+  assert.match(sql, /'etf:SOXS', 'SOXS', 'etf', 'Direxion Daily Semiconductor Bear 3X ETF'/);
+  assert.match(sql, /source\.source_key = 'perp:okx'/);
+  assert.match(sql, /'KO-USD_UM_XPERP-310912', '2026-09-07 08:45:00\.112\+00'/);
+  assert.match(sql, /'SOXS-USD_UM_XPERP-310912', '2026-09-07 08:30:00\.170\+00'/);
+  assert.match(sql, /official_listed_at = correction\.official_listed_at/);
+  assert.match(sql, /time_basis = 'official'/);
+  assert.doesNotMatch(sql, /INSERT INTO analytics\.catalog_change_event/);
+  assert.doesNotMatch(sql, /DELETE FROM analytics\.catalog_change_event/);
+  assert.doesNotMatch(sql, /\b(?:LIKE|ILIKE)\b|\bsimilarity\s*\(/i);
+});
+
+test('OKX KO lifecycle repair updates only exact existing event evidence and preserves SOXS separation', async () => {
+  const sql = await readFile(path.join(MIGRATION_DIRECTORY, '0016_okx_ko_event_lifecycle.sql'), 'utf8');
+  assert.match(sql, /source\.source_key = 'perp:okx'/);
+  assert.match(sql, /normalized_venue_symbol = 'KO-USD_UM_XPERP-310912'/);
+  assert.match(sql, /asset\.asset_key = 'equity:KO'/);
+  assert.match(sql, /jsonb_build_object\('lifecycleStatus', 'public'\)/);
+  assert.match(sql, /published\.venue_symbol = 'SOXS-USD_UM_XPERP-310912'/);
+  assert.match(sql, /published\.category IS DISTINCT FROM 'etf'/);
+  assert.match(sql, /published\.venue_category IS DISTINCT FROM 'equity'/);
+  assert.match(sql, /published\.lifecycle_status IS NOT NULL/);
+  assert.doesNotMatch(sql, /INSERT INTO analytics\.catalog_change_event/);
+  assert.doesNotMatch(sql, /DELETE FROM analytics\.catalog_change_event/);
+  assert.doesNotMatch(sql, /\b(?:LIKE|ILIKE)\b|\bsimilarity\s*\(/i);
 });
 
 test('SQL splitter preserves comments, quoted semicolons, and dollar-quoted role blocks', () => {

@@ -22,6 +22,7 @@ import {
   isDedicatedTradeXyzSource,
   krakenListingCandidate,
   mergeKrakenOfficialPairEntries,
+  okxPerpListingFromOfficial,
   tradeXyzListingFromOfficial,
 } from '../api/_lib/listing-sources.js';
 
@@ -65,6 +66,42 @@ test('listing audit first successful pass establishes ten independent baselines 
   assert.equal(first.snapshot.events.length, 0);
   assert.equal(first.snapshot.counts.activeListings, 10);
   assert.deepEqual(Object.keys(first.state.sources).sort(), [...LISTING_SOURCE_KEYS].sort());
+});
+
+test('OKX X-Perp listing keeps official list time and Dashboard identity without inventing an event', () => {
+  assert.deepEqual(okxPerpListingFromOfficial({
+    instId:'KO-USD_UM_XPERP-310912',
+    instType:'FUTURES',
+    ruleType:'xperp',
+    instCategory:'3',
+    state:'live',
+    uly:'KO-USD',
+    listTime:'1788770700112',
+  }), {
+    market:'perp',
+    venue:'okx',
+    venueSymbol:'KO-USD_UM_XPERP-310912',
+    canonicalSymbol:'KO',
+    category:'equity',
+    venueCategory:'equity',
+    lifecycleStatus:'public',
+    name:'The Coca-Cola Company',
+    identityStatus:'verified',
+    identityEvidence:'OKX instCategory=3; FUTURES/xperp',
+    officialListedAt:'2026-09-07T08:45:00.112Z',
+  });
+  const soxs = okxPerpListingFromOfficial({
+    instId:'SOXS-USD_UM_XPERP-310912',
+    instType:'FUTURES',
+    ruleType:'xperp',
+    instCategory:'3',
+    state:'live',
+    uly:'SOXS-USD',
+    listTime:'1788769800170',
+  });
+  assert.equal(soxs.category, 'etf');
+  assert.equal(soxs.name, 'Direxion Daily Semiconductor Bear 3X ETF');
+  assert.equal(soxs.officialListedAt, '2026-09-07T08:30:00.170Z');
 });
 
 test('listing audit emits Spot and Perp additions once and leaves an unavailable source baseline untouched', () => {
@@ -415,22 +452,42 @@ test('listing collectors reject global trade.xyz fallback and Kraken same-suffix
     altname:'SNXUSD', wsname:'SNX/USD', base:'SNX', quote:'ZUSD',
     aclass_base:'currency', status:'online',
   }), null);
-  assert.equal(krakenListingCandidate('AAPLSPVUSD', {
+  assert.deepEqual(krakenListingCandidate('AAPLSPVUSD', {
     altname:'AAPLxUSD', wsname:'AAPLx/USD', base:'AAPLx', quote:'ZUSD',
     aclass_base:'tokenized_asset', status:'post_only',
-  }), null);
+  }), {
+    venueSymbol:'AAPLXUSD', marketQuerySymbol:'AAPLxUSD', underlying:'AAPL', category:'equity',
+    officialStatus:'suspended', venueTradingMode:'post_only',
+  });
   assert.deepEqual(krakenListingCandidate('AAPLSPVUSD', {
     altname:'AAPLxUSD', wsname:'AAPLx/USD', base:'AAPLx', quote:'ZUSD',
     aclass_base:'tokenized_asset', status:'online',
-  }), { venueSymbol:'AAPLXUSD', marketQuerySymbol:'AAPLxUSD', underlying:'AAPL', category:'equity' });
+  }), {
+    venueSymbol:'AAPLXUSD', marketQuerySymbol:'AAPLxUSD', underlying:'AAPL', category:'equity',
+    officialStatus:'online', venueTradingMode:'online',
+  });
   assert.deepEqual(krakenListingCandidate('NEWETFSPVUSD', {
     altname:'NEWETFxUSD', wsname:'NEWETFx/USD', base:'NEWETFx', quote:'ZUSD',
     aclass_base:'tokenized_asset', status:'online',
-  }, new Set(['NEWETF'])), { venueSymbol:'NEWETFXUSD', marketQuerySymbol:'NEWETFxUSD', underlying:'NEWETF', category:'etf' });
+  }, new Set(['NEWETF'])), {
+    venueSymbol:'NEWETFXUSD', marketQuerySymbol:'NEWETFxUSD', underlying:'NEWETF', category:'etf',
+    officialStatus:'online', venueTradingMode:'online',
+  });
   assert.deepEqual(krakenListingCandidate('PAXGUSD', {
     altname:'PAXGUSD', wsname:'PAXG/USD', base:'PAXG', quote:'ZUSD',
     aclass_base:'currency', status:'online',
-  }), { venueSymbol:'PAXGUSD', marketQuerySymbol:'PAXGUSD', underlying:'PAXG', category:'commodity' });
+  }), {
+    venueSymbol:'PAXGUSD', marketQuerySymbol:'PAXGUSD', underlying:'PAXG', category:'commodity',
+    officialStatus:'online', venueTradingMode:'online',
+  });
+  assert.equal(normalizeListingObservation({
+    market:'spot', venue:'kraken', venueSymbol:'AAPLXUSD', canonicalSymbol:'AAPL', category:'equity',
+    officialStatus:'suspended',
+  }).officialStatus, 'suspended');
+  assert.equal(normalizeListingObservation({
+    market:'spot', venue:'kraken', venueSymbol:'AAPLXUSD', canonicalSymbol:'AAPL', category:'equity',
+    officialStatus:'post_only',
+  }), null, 'raw venue trading modes must be mapped before the canonical identity layer');
 });
 
 test('Kraken official pair variants merge deterministically without admitting internal SPV or Crypto aliases', () => {
@@ -455,6 +512,7 @@ test('Kraken official pair variants merge deterministically without admitting in
   const tokenized = merged.find(row => row.venueSymbol === 'AAPLXUSD');
   assert.equal(tokenized.marketQuerySymbol, 'AAPLxUSD');
   assert.equal(tokenized.marketDataProfile, 'kraken-tokenized');
+  assert.equal(tokenized.officialStatus, 'online');
   assert.deepEqual(new Set(tokenized.marketAliases), new Set(['AAPLxUSD', 'AAPLx/USD']));
   assert.equal(tokenized.marketAliases.includes('AAPLSPVUSD'), false,
     'the internal SPV object key is not the tradable xStock ticker identity');

@@ -6,6 +6,7 @@ import {
   REVIEWED_ETF_CATEGORY_CORRECTIONS,
   REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS,
 } from './listing-audit.js';
+import { securityDisplayName } from './security-identity.js';
 
 export const LISTING_PG_JOB_NAME = 'rwa-listing-audit';
 export const LISTING_PG_PIPELINE_VERSION = 'rwa-listing-catalog-pg-shadow/v1';
@@ -242,11 +243,13 @@ function buildSourceRun(sourceKey, rawObservation, summary, mergedState, observe
     const reviewRequired = listing.identityStatus !== 'verified';
     const assetKey = `${category}:${listing.canonicalSymbol}`;
     // Keep the cross-venue asset-version identity stable even when venues use
-    // different display-name spellings. Only the dated ETF correction registry
-    // may replace the ticker fallback with an issuer-reviewed canonical name.
-    const displayName = REVIEWED_ETF_CATEGORY_CORRECTION_SET.has(listing.canonicalSymbol)
-      ? listing.name || listing.canonicalSymbol
-      : listing.canonicalSymbol;
+    // different display-name spellings. Only the dated issuer/ETF registry may
+    // replace the ticker fallback; an arbitrary venue label is never identity
+    // authority by itself.
+    const displayName = securityDisplayName(listing.canonicalSymbol) ||
+      (REVIEWED_ETF_CATEGORY_CORRECTION_SET.has(listing.canonicalSymbol)
+        ? listing.name || listing.canonicalSymbol
+        : listing.canonicalSymbol);
     const assetFingerprint = sha256(JSON.stringify([
       assetKey,
       category,
@@ -256,13 +259,14 @@ function buildSourceRun(sourceKey, rawObservation, summary, mergedState, observe
       'verified',
     ]));
     const instrumentType = market === 'perp' ? 'perpetual' : 'spot';
+    const officialStatus = listing.officialStatus || 'online';
     const instrumentFingerprint = sha256(JSON.stringify([
       sourceKeyForDatabase(sourceKey),
       officialProductKey,
       listing.venueSymbol,
       instrumentType,
       assetFingerprint,
-      'online',
+      officialStatus,
       'verified',
     ]));
     normalizedRows.push({
@@ -281,7 +285,7 @@ function buildSourceRun(sourceKey, rawObservation, summary, mergedState, observe
       assetFingerprint,
       instrumentType,
       quoteCurrency: null,
-      officialStatus: 'online',
+      officialStatus,
       instrumentFingerprint,
       identityStatus: reviewRequired ? 'review-required' : 'verified',
       name: listing.name || null,
@@ -685,6 +689,7 @@ function membershipRows(batch) {
       identityStatus: row.identityStatus,
       venueCategory: row.venueCategory,
       lifecycleStatus: row.lifecycleStatus,
+      officialStatus: row.officialStatus,
       artifactFormat: LISTING_NORMALIZED_ARTIFACT_FORMAT,
     },
   })));
@@ -1073,6 +1078,66 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
          SELECT 1 FROM identity.asset_version AS current
          WHERE current.asset_id = asset.asset_id AND current.valid_to IS NULL
        )`,
+      [json(memberships), batch.observedAt],
+    ),
+    sql.query(
+      `WITH carried_instrument_versions AS (
+         UPDATE identity.instrument_version AS current
+         SET valid_to = $2::timestamptz
+         FROM identity.asset_version AS prior_asset_version,
+           identity.asset_version AS current_asset_version,
+           identity.instrument AS instrument,
+           identity.source AS source
+         WHERE prior_asset_version.asset_version_id = current.asset_version_id
+           AND prior_asset_version.valid_to IS NOT NULL
+           AND current_asset_version.asset_id = prior_asset_version.asset_id
+           AND current_asset_version.valid_to IS NULL
+           AND current_asset_version.identity_status = 'verified'
+           AND instrument.instrument_id = current.instrument_id
+           AND instrument.source_id = current.source_id
+           AND source.source_id = current.source_id
+           AND current.valid_to IS NULL
+           AND current.identity_status = 'verified'
+           AND current.valid_from < $2::timestamptz
+           AND NOT EXISTS (
+             SELECT 1
+             FROM jsonb_to_recordset($1::jsonb) AS incoming(
+               source_key text, official_product_key text
+             )
+             WHERE incoming.source_key = source.source_key
+               AND incoming.official_product_key = instrument.official_product_key
+           )
+         RETURNING current.instrument_id, current.source_id,
+           current.official_venue_symbol, current.normalized_venue_symbol,
+           current.instrument_type, current.quote_currency,
+           current.contract_multiplier, current.official_status,
+           current.identity_status, current_asset_version.asset_version_id,
+           current_asset_version.identity_fingerprint AS asset_fingerprint,
+           source.source_key, instrument.official_product_key
+       )
+       INSERT INTO identity.instrument_version
+         (instrument_id, source_id, asset_version_id, official_venue_symbol,
+          normalized_venue_symbol, instrument_type, quote_currency,
+          contract_multiplier, official_status, identity_status,
+          identity_fingerprint, valid_from)
+       SELECT carried.instrument_id, carried.source_id,
+         carried.asset_version_id, carried.official_venue_symbol,
+         carried.normalized_venue_symbol, carried.instrument_type,
+         carried.quote_currency, carried.contract_multiplier,
+         carried.official_status, carried.identity_status,
+         encode(digest(convert_to(concat(
+           '[',
+           to_json(carried.source_key)::text, ',',
+           to_json(carried.official_product_key)::text, ',',
+           to_json(carried.official_venue_symbol)::text, ',',
+           to_json(carried.instrument_type)::text, ',',
+           to_json(btrim(carried.asset_fingerprint::text))::text, ',',
+           to_json(carried.official_status)::text, ',',
+           to_json(carried.identity_status)::text,
+           ']'
+         ), 'UTF8'), 'sha256'), 'hex'),
+         $2::timestamptz
+       FROM carried_instrument_versions AS carried`,
       [json(memberships), batch.observedAt],
     ),
     sql.query(

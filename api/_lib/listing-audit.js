@@ -41,6 +41,7 @@ const VENUES = new Set(['tradexyz', 'bitget', 'gate', 'kraken', 'binance', 'okx'
 const CATEGORIES = new Set(['equity', 'etf', 'commodity', 'index', 'fx', 'bond', 'pre-ipo']);
 const LIFECYCLE_STATUSES = new Set(['public', 'pre-ipo', 'ipo-registered']);
 const IDENTITY_STATUSES = new Set(['verified', 'review-required']);
+const OFFICIAL_STATUSES = new Set(['online', 'prelaunch', 'suspended', 'delisted', 'unknown']);
 const LISTING_KEY_PATTERN = /^[A-Z0-9._:-]{1,90}$/;
 const CANONICAL_PATTERN = /^[A-Z0-9.-]{1,40}$/;
 
@@ -75,6 +76,7 @@ export function normalizeListingObservation(input) {
   const lifecycleStatus = rawLifecycleStatus || null;
   const officialListedAt = isoTimestamp(input?.officialListedAt);
   const identityStatus = normalized(input?.identityStatus || 'verified').toLowerCase();
+  const officialStatus = normalized(input?.officialStatus || 'online').toLowerCase();
   const reviewedEtf = REVIEWED_ETF_IDENTITIES[canonicalSymbol];
   const category = reviewedEtf && identityStatus === 'verified' &&
     ['equity', 'etf'].includes(rawCategory) && ['equity', 'etf'].includes(venueCategory)
@@ -86,7 +88,8 @@ export function normalizeListingObservation(input) {
     !CATEGORIES.has(category) ||
     !CATEGORIES.has(venueCategory) ||
     (lifecycleStatus !== null && !LIFECYCLE_STATUSES.has(lifecycleStatus)) ||
-    !IDENTITY_STATUSES.has(identityStatus)
+    !IDENTITY_STATUSES.has(identityStatus) ||
+    !OFFICIAL_STATUSES.has(officialStatus)
   ) return null;
   const sourceKey = listingSourceKey(market, venue);
   return Object.freeze({
@@ -102,6 +105,7 @@ export function normalizeListingObservation(input) {
     officialListedAt,
     name: reviewedEtf && category === 'etf' ? reviewedEtf.name : normalized(input?.name) || null,
     identityStatus,
+    officialStatus,
     identityEvidence: normalized(input?.identityEvidence) || null,
     inclusionStatus: identityStatus === 'verified' ? 'eligible' : 'review-required',
   });

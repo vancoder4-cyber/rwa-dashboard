@@ -53,6 +53,7 @@ const EXACT_LEGACY_SPOT_RWA = Object.freeze({
   XPTX: Object.freeze({ underlying:'XPTX', category:'commodity' }),
 });
 const KRAKEN_EXACT_LEGACY_RWA = EXACT_LEGACY_SPOT_RWA;
+const KRAKEN_LISTED_TRADING_MODES = new Set(['online', 'post_only', 'limit_only', 'cancel_only']);
 
 const SOURCE_BOUNDS = Object.freeze({
   'perp:tradexyz': [20, 500],
@@ -95,7 +96,9 @@ export function isDedicatedTradeXyzSource(value) {
 }
 
 export function krakenListingCandidate(pairName, pair, officialEtfSet = ETF_UNDERLYING_SET) {
-  if (normalized(pair?.status).toLowerCase() !== 'online') return null;
+  const venueTradingMode = normalized(pair?.status).toLowerCase();
+  if (!KRAKEN_LISTED_TRADING_MODES.has(venueTradingMode)) return null;
+  const officialStatus = venueTradingMode === 'online' ? 'online' : 'suspended';
   const wsParts = normalized(pair?.wsname).split('/');
   const quote = normalizedUpper(wsParts[1] || pair?.quote).replace(/^[XZ](?=USD|USDT)/, '');
   if (!['USD', 'USDT'].includes(quote)) return null;
@@ -118,10 +121,12 @@ export function krakenListingCandidate(pairName, pair, officialEtfSet = ETF_UNDE
       marketQuerySymbol,
       underlying,
       category:officialEtfSet.has(underlying) || ETF_UNDERLYING_SET.has(underlying) ? 'etf' : 'equity',
+      officialStatus,
+      venueTradingMode,
     };
   }
   const legacy = KRAKEN_EXACT_LEGACY_RWA[normalizedUpper(rawBase)];
-  return legacy ? { venueSymbol, marketQuerySymbol, ...legacy } : null;
+  return legacy ? { venueSymbol, marketQuerySymbol, ...legacy, officialStatus, venueTradingMode } : null;
 }
 
 export function mergeKrakenOfficialPairEntries(pairEntries, officialEtfSet = ETF_UNDERLYING_SET) {
@@ -200,6 +205,7 @@ function listing(market, venue, venueSymbol, canonicalSymbol, category, extras =
   // above.
   if (extras.marketDataProfile) row.marketDataProfile = normalized(extras.marketDataProfile);
   if (extras.marketQuerySymbol) row.marketQuerySymbol = normalized(extras.marketQuerySymbol);
+  if (extras.officialStatus) row.officialStatus = normalized(extras.officialStatus).toLowerCase();
   if (Array.isArray(extras.marketAliases)) {
     row.marketAliases = [...new Set(extras.marketAliases.map(normalizedUpper).filter(Boolean))];
   }
@@ -381,18 +387,26 @@ async function collectBinancePerp(baseUrl) {
   return assertCatalogBounds('perp', 'binance', rows);
 }
 
+export function okxPerpListingFromOfficial(instrument) {
+  const canonical = canonicalOkxPerpSymbol(instrument);
+  const category = OKX_CATEGORIES[String(instrument?.instCategory || '')] || null;
+  const identity = normalizeSignalIdentity(canonical, category, { venue:'okx' });
+  if (!identity) return null;
+  return listing('perp', 'okx', instrument.instId, identity.symbol, identity.category, {
+    venueCategory:category,
+    // OKX listTime is copied only onto an independently diff-detected event;
+    // it never creates a lifecycle transition by itself.
+    officialListedAt:officialEpochTimestamp(instrument?.listTime),
+    identityEvidence:`OKX instCategory=${instrument.instCategory}; ${instrument.instType}/${instrument.ruleType || 'standard'}`,
+  });
+}
+
 async function collectOkxPerp(baseUrl) {
   const payload = await fetchSameOrigin(baseUrl, '/api/okx-market?type=perp-snapshot');
   const rows = [];
   for (const instrument of assertFullDeclaredCatalog(payload, 'OKX Perpetual')) {
-    const canonical = canonicalOkxPerpSymbol(instrument);
-    const category = OKX_CATEGORIES[String(instrument?.instCategory || '')] || null;
-    const identity = normalizeSignalIdentity(canonical, category, { venue: 'okx' });
-    if (!identity) continue;
-    rows.push(listing('perp', 'okx', instrument.instId, identity.symbol, identity.category, {
-      venueCategory:category,
-      identityEvidence: `OKX instCategory=${instrument.instCategory}; ${instrument.instType}/${instrument.ruleType || 'standard'}`,
-    }));
+    const row = okxPerpListingFromOfficial(instrument);
+    if (row) rows.push(row);
   }
   return assertCatalogBounds('perp', 'okx', rows);
 }
@@ -503,6 +517,7 @@ async function collectKrakenSpot(baseUrl, deadlineAt = null) {
       marketDataProfile: entry.marketDataProfile,
       marketQuerySymbol: entry.marketQuerySymbol,
       marketAliases: entry.marketAliases,
+      officialStatus: entry.officialStatus,
       identityEvidence: entry.category === 'commodity'
         ? 'exact audited Kraken RWA asset in the live official AssetPairs catalog'
         : 'Kraken official tokenized_asset AssetPairs catalog',
@@ -542,6 +557,7 @@ async function collectOkxSpot(baseUrl, deadlineAt = null) {
     if (!identity) continue;
     rows.push(listing('spot', 'okx', instrument.instId, identity.symbol, identity.category, {
       venueCategory:category,
+      officialListedAt:officialEpochTimestamp(instrument?.listTime),
       identityEvidence: String(instrument?.instCategory) === '3'
         ? 'OKX official Unified Tokenized Stocks category'
         : 'audited exact OKX tokenized-gold pair',

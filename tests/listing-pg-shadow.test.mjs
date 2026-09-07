@@ -217,6 +217,20 @@ test('first daily baseline creates ten exact source runs and memberships without
   assert.equal(createHash('sha256').update(kraken.artifact.body).digest('hex'), kraken.artifact.sha256);
 });
 
+test('temporary Kraken trading modes persist as suspended membership without lifecycle events', () => {
+  const observations = fullObservations({
+    'spot:kraken':targetObservation('spot:kraken', [
+      listing('spot:kraken', 'AAPL', { officialStatus:'suspended' }),
+    ]),
+  });
+  const batch = buildListingAuditPgBatch(baselineInput(observations));
+  const kraken = sourceRun(batch, 'spot:kraken');
+  assert.equal(kraken.memberships.length, 1);
+  assert.equal(kraken.memberships[0].officialStatus, 'suspended');
+  assert.equal(kraken.events?.length || 0, 0);
+  assert.equal(batch.events.length, 0);
+});
+
 test('reviewed SK Hynix ETFs persist exact registry names and stable matching fingerprints', () => {
   const observations = fullObservations({
     'perp:okx': targetObservation('perp:okx', [
@@ -246,6 +260,26 @@ test('reviewed SK Hynix ETFs persist exact registry names and stable matching fi
       'verified',
     ])).digest('hex'));
   }
+  assert.equal(batch.events.length, 0);
+});
+
+test('reviewed BYD and Lenovo identities persist issuer names rather than venue codes', () => {
+  const observations = fullObservations({
+    'perp:binance': targetObservation('perp:binance', [
+      listing('perp:binance', 'BYD', {
+        venueSymbol:'BYDUSDT', canonicalSymbol:'BYD', name:'BYD', lifecycleStatus:'public',
+      }),
+      listing('perp:binance', 'LENOVO', {
+        venueSymbol:'HK0992USDT', canonicalSymbol:'LENOVO', name:'HK0992', lifecycleStatus:'public',
+      }),
+    ]),
+  });
+  const batch = buildListingAuditPgBatch(baselineInput(observations));
+  const memberships = sourceRun(batch, 'perp:binance').memberships;
+  const byCanonical = new Map(memberships.map(row => [row.canonicalUnderlying, row]));
+  assert.equal(byCanonical.get('BYD').displayName, 'BYD Company Limited');
+  assert.equal(byCanonical.get('LENOVO').displayName, 'Lenovo Group Limited');
+  assert.equal(byCanonical.get('LENOVO').officialProductKey, 'HK0992USDT');
   assert.equal(batch.events.length, 0);
 });
 
@@ -371,6 +405,22 @@ test('Unavailable and invalid Crypto observations fail closed without identity o
   assert.equal(gate.memberships.length, 0);
   assert.equal(gate.reviewCases.length, 0);
   assert.equal(gate.rejectedRows[0].reasonCode, 'IDENTITY_NORMALIZATION_REJECTED');
+
+  const calls = pgCalls(unavailableBatch);
+  const carryForward = calls.find(call => call.text.includes('WITH carried_instrument_versions AS'));
+  assert.ok(carryForward, 'preserved sources must retain exact instrument identity when a shared asset version advances');
+  assert.match(carryForward.text, /prior_asset_version\.valid_to IS NOT NULL/);
+  assert.match(carryForward.text, /current_asset_version\.valid_to IS NULL/);
+  assert.match(carryForward.text, /incoming\.source_key = source\.source_key/);
+  assert.match(carryForward.text, /incoming\.official_product_key = instrument\.official_product_key/);
+  assert.match(carryForward.text, /current\.official_venue_symbol/);
+  assert.match(carryForward.text, /current\.normalized_venue_symbol/);
+  assert.match(carryForward.text, /current\.contract_multiplier/);
+  assert.doesNotMatch(carryForward.text, /FROM carried_instrument_versions AS carried\s+WHERE NOT EXISTS/,
+    'the replacement insert must consume the UPDATE RETURNING rows instead of re-reading the old MVCC snapshot');
+  const replacementKeys = new Set(JSON.parse(carryForward.params[0]).map(row => row.source_key));
+  assert.equal(replacementKeys.has('spot:okx'), false,
+    'an unavailable source must be carried from its exact last-good identity, not treated as refreshed');
 });
 
 test('same-day write policy accepts only exact trusted Full, pending, review, and pending-review snapshots', () => {
@@ -1168,7 +1218,9 @@ test('confirmed delisting closes the exact current instrument version after even
   );
   const relistCalls = [];
   buildListingAuditPgQueries({ query(text, params = []) { relistCalls.push({ text, params }); return { text, params }; } }, relistedBatch, []);
-  const instrumentVersionInsert = relistCalls.find(call => call.text.includes('INSERT INTO identity.instrument_version'));
+  const instrumentVersionInsert = relistCalls.find(call =>
+    call.text.includes('INSERT INTO identity.instrument_version') &&
+    !call.text.includes('WITH carried_instrument_versions AS'));
   assert.match(instrumentVersionInsert.text, /WHERE NOT EXISTS/);
   assert.match(instrumentVersionInsert.text, /current\.valid_to IS NULL/);
 });
