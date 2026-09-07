@@ -64,15 +64,16 @@ test('migration files are ordered, immutable-checksummed, and parse into stateme
     '0013_current_instrument_asset_binding.sql',
     '0014_live_instrument_binding_repair.sql',
     '0015_okx_ko_soxs_identity_and_listing_time.sql',
+    '0016_okx_ko_event_lifecycle.sql',
   ]);
   assert.deepEqual(migrations.map(row => row.version), [
-    '0001', '0002', '0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013', '0014', '0015',
+    '0001', '0002', '0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013', '0014', '0015', '0016',
   ]);
   for (const migration of migrations) {
     assert.match(migration.filename, MIGRATION_FILE_PATTERN);
     assert.match(migration.checksum, /^[0-9a-f]{64}$/);
     assert.equal(migration.checksum, migrationChecksum(migration.sql));
-    const minimumStatements = ['0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013', '0014', '0015']
+    const minimumStatements = ['0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013', '0014', '0015', '0016']
       .includes(migration.version) ? 3 : 11;
     assert.ok(migration.statements.length >= minimumStatements);
     assert.ok(migration.statements.every(statement => statement.trim().length > 0));
@@ -198,6 +199,21 @@ test('OKX KO/SOXS forward repair supplements exact identity and official time wi
   assert.match(sql, /'SOXS-USD_UM_XPERP-310912', '2026-09-07 08:30:00\.170\+00'/);
   assert.match(sql, /official_listed_at = correction\.official_listed_at/);
   assert.match(sql, /time_basis = 'official'/);
+  assert.doesNotMatch(sql, /INSERT INTO analytics\.catalog_change_event/);
+  assert.doesNotMatch(sql, /DELETE FROM analytics\.catalog_change_event/);
+  assert.doesNotMatch(sql, /\b(?:LIKE|ILIKE)\b|\bsimilarity\s*\(/i);
+});
+
+test('OKX KO lifecycle repair updates only exact existing event evidence and preserves SOXS separation', async () => {
+  const sql = await readFile(path.join(MIGRATION_DIRECTORY, '0016_okx_ko_event_lifecycle.sql'), 'utf8');
+  assert.match(sql, /source\.source_key = 'perp:okx'/);
+  assert.match(sql, /normalized_venue_symbol = 'KO-USD_UM_XPERP-310912'/);
+  assert.match(sql, /asset\.asset_key = 'equity:KO'/);
+  assert.match(sql, /jsonb_build_object\('lifecycleStatus', 'public'\)/);
+  assert.match(sql, /published\.venue_symbol = 'SOXS-USD_UM_XPERP-310912'/);
+  assert.match(sql, /published\.category IS DISTINCT FROM 'etf'/);
+  assert.match(sql, /published\.venue_category IS DISTINCT FROM 'equity'/);
+  assert.match(sql, /published\.lifecycle_status IS NOT NULL/);
   assert.doesNotMatch(sql, /INSERT INTO analytics\.catalog_change_event/);
   assert.doesNotMatch(sql, /DELETE FROM analytics\.catalog_change_event/);
   assert.doesNotMatch(sql, /\b(?:LIKE|ILIKE)\b|\bsimilarity\s*\(/i);
