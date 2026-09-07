@@ -245,6 +245,7 @@ test('database capacity guard distinguishes bounded cleanup from runaway growth'
     basis_fact_rows:'25000',
     stale_route_fact_rows:'0',
     stale_basis_fact_rows:'0',
+    current_identity_binding_gaps:'0',
     retention_function_ready:true,
   }).status, 'pass');
   assert.equal(assessDatabaseCapacity({
@@ -255,6 +256,7 @@ test('database capacity guard distinguishes bounded cleanup from runaway growth'
     basisFactRows:'25000',
     staleRouteFactRows:'20000',
     staleBasisFactRows:'0',
+    currentIdentityBindingGaps:'0',
     retentionFunctionReady:true,
   }).status, 'warn');
   assert.equal(assessDatabaseCapacity({
@@ -265,8 +267,22 @@ test('database capacity guard distinguishes bounded cleanup from runaway growth'
     basis_fact_rows:'25000',
     stale_route_fact_rows:'100000',
     stale_basis_fact_rows:'0',
+    current_identity_binding_gaps:'0',
     retention_function_ready:true,
   }).status, 'fail');
+  const identityGap = assessDatabaseCapacity({
+    database_bytes:String(512 * 1024 * 1024),
+    route_fact_bytes:String(420 * 1024 * 1024),
+    basis_fact_bytes:String(8 * 1024 * 1024),
+    route_fact_rows:'90000',
+    basis_fact_rows:'25000',
+    stale_route_fact_rows:'0',
+    stale_basis_fact_rows:'0',
+    current_identity_binding_gaps:'1',
+    retention_function_ready:true,
+  });
+  assert.equal(identityGap.status, 'fail');
+  assert.match(identityGap.reason, /not bound to current asset identity versions/);
   assert.equal(assessDatabaseCapacity({}).status, 'fail');
 
   const calls = [];
@@ -274,6 +290,8 @@ test('database capacity guard distinguishes bounded cleanup from runaway growth'
   assert.equal(buildDatabaseCapacityQueries(sql).length, 2);
   assert.match(calls[1].text, /pg_database_size/);
   assert.match(calls[1].text, /stale_route_fact_rows/);
+  assert.match(calls[1].text, /current_identity_binding_gaps/);
+  assert.match(calls[1].text, /instrument_version\.valid_to IS NULL/);
   assert.match(calls[1].text, /prune_arbitrage_observation_history/);
   assert.doesNotMatch(calls[1].text, /DELETE|UPDATE|INSERT/);
 });

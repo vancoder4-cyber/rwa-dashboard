@@ -98,7 +98,7 @@ Run migrations with `DATABASE_URL_UNPOOLED` whenever it is available. `audit:db`
 
 #### Arbitrage publication rollout
 
-1. Start from an isolated current-`main` Preview database branch. Apply all reviewed migrations through `0012` twice and require the second run to report only skips.
+1. Start from an isolated current-`main` Preview database branch. Apply all reviewed migrations through `0014` twice and require the second run to report only skips.
 2. Create a dedicated login, grant only `rwa_arbitrage_reader`, configure `PREVIEW_NEON_ARBITRAGE_DATABASE_URL`, and prove it can select `publication.arbitrage_opportunity_v1` but cannot select identity, fact or raw snapshot tables.
 3. Keep `ARBITRAGE_WRITE_MODE=off` and verify the public endpoint returns JSON HTTP 503 `Unavailable`, never the SPA shell and never a Full empty result.
 4. Set Preview to `shadow`, rebuild, and run one authenticated `/api/arbitrage-snapshot-cron`. Require all ten official catalogs, exact database identity joins, executable order books, OI and settled 24-hour funding to be Full before one snapshot is committed.
@@ -118,6 +118,8 @@ Run migrations with `DATABASE_URL_UNPOOLED` whenever it is available. `audit:db`
 - The original five-minute writer persisted roughly 1,086 executable candidate routes per bucket into the wide fact, about 300,000 rows per day. The relation reached roughly 403 MiB / 381,286 rows and exhausted the former 512 MiB Neon Free project limit. Moving to Launch removed that provider ceiling but did not by itself repair the growth path.
 - Migration `0011` is the forward repair: all candidates enter a compact two-hour persistence table, only published routes enter the wide table, and the writer invokes fixed-window batched cleanup. `/api/health` adds a read-only `database-capacity` check based on aggregate bytes and live/stale counts; it never returns credentials or internal evidence.
 - Migration `0012` records the reviewed Binance 2026-09-07 BYD/Lenovo identity correction. `BYDUSDT` remains canonical `BYD`; exact `HK0992USDT` resolves to canonical `LENOVO`. The migration can repair a prematurely persisted literal `HK0992` identity without creating a New/Re-listed event.
+- Migration `0013` repairs current verified instruments that still point to an expired shared asset version. This can occur when one venue preserves its last-good catalog while another trusted venue advances the shared reviewed name/category identity. The writer now performs the same exact-identity carry-forward transactionally, without claiming the preserved source was refreshed or creating catalog lifecycle events; `database-capacity` treats any recurrence as a critical identity-binding gap.
+- Migration `0014` is the forward correction for databases where `0013` encountered PostgreSQL's data-modifying-CTE snapshot rule: it restores only a last verified online instrument that still has trusted `present` membership and no later confirmed delisting. It never opens a ticker-shaped or fuzzy candidate and never writes a lifecycle event.
 - Applying `0011`/`0012`, draining legacy rows, changing Production variables, rebuilding Production, or invoking authenticated Production Cron remains separately authorized work. Never use a larger provider plan as evidence that retention is healthy.
 
 ### Phase 1 — ten official catalogs, shadow-write only

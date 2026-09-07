@@ -1079,6 +1079,66 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
       [json(memberships), batch.observedAt],
     ),
     sql.query(
+      `WITH carried_instrument_versions AS (
+         UPDATE identity.instrument_version AS current
+         SET valid_to = $2::timestamptz
+         FROM identity.asset_version AS prior_asset_version,
+           identity.asset_version AS current_asset_version,
+           identity.instrument AS instrument,
+           identity.source AS source
+         WHERE prior_asset_version.asset_version_id = current.asset_version_id
+           AND prior_asset_version.valid_to IS NOT NULL
+           AND current_asset_version.asset_id = prior_asset_version.asset_id
+           AND current_asset_version.valid_to IS NULL
+           AND current_asset_version.identity_status = 'verified'
+           AND instrument.instrument_id = current.instrument_id
+           AND instrument.source_id = current.source_id
+           AND source.source_id = current.source_id
+           AND current.valid_to IS NULL
+           AND current.identity_status = 'verified'
+           AND current.valid_from < $2::timestamptz
+           AND NOT EXISTS (
+             SELECT 1
+             FROM jsonb_to_recordset($1::jsonb) AS incoming(
+               source_key text, official_product_key text
+             )
+             WHERE incoming.source_key = source.source_key
+               AND incoming.official_product_key = instrument.official_product_key
+           )
+         RETURNING current.instrument_id, current.source_id,
+           current.official_venue_symbol, current.normalized_venue_symbol,
+           current.instrument_type, current.quote_currency,
+           current.contract_multiplier, current.official_status,
+           current.identity_status, current_asset_version.asset_version_id,
+           current_asset_version.identity_fingerprint AS asset_fingerprint,
+           source.source_key, instrument.official_product_key
+       )
+       INSERT INTO identity.instrument_version
+         (instrument_id, source_id, asset_version_id, official_venue_symbol,
+          normalized_venue_symbol, instrument_type, quote_currency,
+          contract_multiplier, official_status, identity_status,
+          identity_fingerprint, valid_from)
+       SELECT carried.instrument_id, carried.source_id,
+         carried.asset_version_id, carried.official_venue_symbol,
+         carried.normalized_venue_symbol, carried.instrument_type,
+         carried.quote_currency, carried.contract_multiplier,
+         carried.official_status, carried.identity_status,
+         encode(digest(convert_to(concat(
+           '[',
+           to_json(carried.source_key)::text, ',',
+           to_json(carried.official_product_key)::text, ',',
+           to_json(carried.official_venue_symbol)::text, ',',
+           to_json(carried.instrument_type)::text, ',',
+           to_json(btrim(carried.asset_fingerprint::text))::text, ',',
+           to_json(carried.official_status)::text, ',',
+           to_json(carried.identity_status)::text,
+           ']'
+         ), 'UTF8'), 'sha256'), 'hex'),
+         $2::timestamptz
+       FROM carried_instrument_versions AS carried`,
+      [json(memberships), batch.observedAt],
+    ),
+    sql.query(
       `INSERT INTO identity.instrument (source_id, official_product_key)
        SELECT source.source_id, incoming.official_product_key
        FROM (

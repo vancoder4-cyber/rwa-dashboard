@@ -1991,10 +1991,14 @@ export function assessDatabaseCapacity(row) {
   const basisFactRows = nonNegativeSafeInteger(row?.basis_fact_rows ?? row?.basisFactRows);
   const staleRouteFactRows = nonNegativeSafeInteger(row?.stale_route_fact_rows ?? row?.staleRouteFactRows);
   const staleBasisFactRows = nonNegativeSafeInteger(row?.stale_basis_fact_rows ?? row?.staleBasisFactRows);
+  const currentIdentityBindingGaps = nonNegativeSafeInteger(
+    row?.current_identity_binding_gaps ?? row?.currentIdentityBindingGaps,
+  );
   const retentionFunctionReady = (row?.retention_function_ready ?? row?.retentionFunctionReady) === true;
   const valid = [databaseBytes, routeFactBytes, basisFactBytes, routeFactRows, basisFactRows,
-    staleRouteFactRows, staleBasisFactRows].every(value => value !== null) && retentionFunctionReady;
-  const failed = !valid || databaseBytes >= DATABASE_STORAGE_FAIL_BYTES ||
+    staleRouteFactRows, staleBasisFactRows, currentIdentityBindingGaps]
+    .every(value => value !== null) && retentionFunctionReady;
+  const failed = !valid || currentIdentityBindingGaps > 0 || databaseBytes >= DATABASE_STORAGE_FAIL_BYTES ||
     routeFactRows >= ARBITRAGE_WIDE_FACT_FAIL_ROWS ||
     staleRouteFactRows >= ARBITRAGE_RETENTION_BACKLOG_FAIL_ROWS ||
     staleBasisFactRows >= ARBITRAGE_RETENTION_BACKLOG_FAIL_ROWS;
@@ -2010,10 +2014,13 @@ export function assessDatabaseCapacity(row) {
     basisFactRows,
     staleRouteFactRows,
     staleBasisFactRows,
+    currentIdentityBindingGaps,
     retentionFunctionReady,
     reason:!valid
       ? 'Arbitrage retention schema or capacity metrics are unavailable'
-      : failed ? 'Database or arbitrage retention backlog exceeded the hard operating budget'
+      : currentIdentityBindingGaps > 0
+        ? 'Current verified instruments are not bound to current asset identity versions'
+        : failed ? 'Database or arbitrage retention backlog exceeded the hard operating budget'
         : warned ? 'Arbitrage retention cleanup or database capacity needs attention'
           : null,
   };
@@ -2035,6 +2042,61 @@ export function buildDatabaseCapacityQueries(sql) {
          (SELECT count(*)::bigint::text
             FROM fact.arbitrage_basis_observation
            WHERE bucket_at < clock_timestamp() - interval '2 hours') AS stale_basis_fact_rows,
+         (SELECT (
+           (SELECT count(*)
+              FROM identity.instrument_version AS instrument_version
+              JOIN identity.asset_version AS bound_asset_version
+                ON bound_asset_version.asset_version_id = instrument_version.asset_version_id
+             WHERE instrument_version.valid_to IS NULL
+               AND instrument_version.identity_status = 'verified'
+               AND instrument_version.official_status = 'online'
+               AND NOT EXISTS (
+                 SELECT 1
+                 FROM identity.asset_version AS current_asset_version
+                 WHERE current_asset_version.asset_id = bound_asset_version.asset_id
+                   AND current_asset_version.asset_version_id = instrument_version.asset_version_id
+                   AND current_asset_version.valid_to IS NULL
+                   AND current_asset_version.identity_status = 'verified'
+               ))
+           +
+           (SELECT count(*)
+              FROM identity.instrument AS instrument
+              JOIN LATERAL (
+                SELECT instrument_version.*
+                FROM identity.instrument_version AS instrument_version
+                WHERE instrument_version.instrument_id = instrument.instrument_id
+                ORDER BY instrument_version.valid_from DESC, instrument_version.instrument_version_id DESC
+                LIMIT 1
+              ) AS latest ON true
+              JOIN identity.asset_version AS bound_asset_version
+                ON bound_asset_version.asset_version_id = latest.asset_version_id
+             WHERE latest.valid_to IS NOT NULL
+               AND latest.identity_status = 'verified'
+               AND latest.official_status = 'online'
+               AND NOT EXISTS (
+                 SELECT 1 FROM identity.instrument_version AS current_instrument
+                 WHERE current_instrument.instrument_id = instrument.instrument_id
+                   AND current_instrument.valid_to IS NULL
+               )
+               AND EXISTS (
+                 SELECT 1 FROM identity.asset_version AS current_asset_version
+                 WHERE current_asset_version.asset_id = bound_asset_version.asset_id
+                   AND current_asset_version.valid_to IS NULL
+                   AND current_asset_version.identity_status = 'verified'
+               )
+               AND EXISTS (
+                 SELECT 1 FROM ingest.catalog_membership AS membership
+                 WHERE membership.instrument_version_id = latest.instrument_version_id
+                   AND membership.presence_status = 'present'
+                   AND NOT EXISTS (
+                     SELECT 1 FROM analytics.catalog_change_event AS delisting
+                     WHERE delisting.instrument_version_id = latest.instrument_version_id
+                       AND delisting.event_type = 'delisted'
+                       AND delisting.status = 'confirmed'
+                       AND delisting.observed_at >= membership.observed_at
+                   )
+               ))
+         )::bigint::text) AS current_identity_binding_gaps,
          to_regprocedure('ops.prune_arbitrage_observation_history()') IS NOT NULL AS retention_function_ready`,
     ),
   ];

@@ -391,6 +391,22 @@ test('Unavailable and invalid Crypto observations fail closed without identity o
   assert.equal(gate.memberships.length, 0);
   assert.equal(gate.reviewCases.length, 0);
   assert.equal(gate.rejectedRows[0].reasonCode, 'IDENTITY_NORMALIZATION_REJECTED');
+
+  const calls = pgCalls(unavailableBatch);
+  const carryForward = calls.find(call => call.text.includes('WITH carried_instrument_versions AS'));
+  assert.ok(carryForward, 'preserved sources must retain exact instrument identity when a shared asset version advances');
+  assert.match(carryForward.text, /prior_asset_version\.valid_to IS NOT NULL/);
+  assert.match(carryForward.text, /current_asset_version\.valid_to IS NULL/);
+  assert.match(carryForward.text, /incoming\.source_key = source\.source_key/);
+  assert.match(carryForward.text, /incoming\.official_product_key = instrument\.official_product_key/);
+  assert.match(carryForward.text, /current\.official_venue_symbol/);
+  assert.match(carryForward.text, /current\.normalized_venue_symbol/);
+  assert.match(carryForward.text, /current\.contract_multiplier/);
+  assert.doesNotMatch(carryForward.text, /FROM carried_instrument_versions AS carried\s+WHERE NOT EXISTS/,
+    'the replacement insert must consume the UPDATE RETURNING rows instead of re-reading the old MVCC snapshot');
+  const replacementKeys = new Set(JSON.parse(carryForward.params[0]).map(row => row.source_key));
+  assert.equal(replacementKeys.has('spot:okx'), false,
+    'an unavailable source must be carried from its exact last-good identity, not treated as refreshed');
 });
 
 test('same-day write policy accepts only exact trusted Full, pending, review, and pending-review snapshots', () => {
@@ -1188,7 +1204,9 @@ test('confirmed delisting closes the exact current instrument version after even
   );
   const relistCalls = [];
   buildListingAuditPgQueries({ query(text, params = []) { relistCalls.push({ text, params }); return { text, params }; } }, relistedBatch, []);
-  const instrumentVersionInsert = relistCalls.find(call => call.text.includes('INSERT INTO identity.instrument_version'));
+  const instrumentVersionInsert = relistCalls.find(call =>
+    call.text.includes('INSERT INTO identity.instrument_version') &&
+    !call.text.includes('WITH carried_instrument_versions AS'));
   assert.match(instrumentVersionInsert.text, /WHERE NOT EXISTS/);
   assert.match(instrumentVersionInsert.text, /current\.valid_to IS NULL/);
 });

@@ -61,15 +61,17 @@ test('migration files are ordered, immutable-checksummed, and parse into stateme
     '0010_arbitrage_opportunity_publication.sql',
     '0011_arbitrage_bounded_history.sql',
     '0012_binance_hk_equity_identity.sql',
+    '0013_current_instrument_asset_binding.sql',
+    '0014_live_instrument_binding_repair.sql',
   ]);
   assert.deepEqual(migrations.map(row => row.version), [
-    '0001', '0002', '0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012',
+    '0001', '0002', '0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013', '0014',
   ]);
   for (const migration of migrations) {
     assert.match(migration.filename, MIGRATION_FILE_PATTERN);
     assert.match(migration.checksum, /^[0-9a-f]{64}$/);
     assert.equal(migration.checksum, migrationChecksum(migration.sql));
-    const minimumStatements = ['0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012']
+    const minimumStatements = ['0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013', '0014']
       .includes(migration.version) ? 3 : 11;
     assert.ok(migration.statements.length >= minimumStatements);
     assert.ok(migration.statements.every(statement => statement.trim().length > 0));
@@ -156,6 +158,32 @@ test('reviewed Binance HK-equity migration repairs exact identity without lifecy
   assert.match(sql, /instrument\.official_product_key = 'HK0992USDT'/);
   assert.match(sql, /old_asset_version\.canonical_underlying = 'HK0992'/);
   assert.match(sql, /corrected_asset_version\.canonical_underlying = 'LENOVO'/);
+  assert.doesNotMatch(sql, /(?:INSERT INTO|UPDATE|DELETE FROM) analytics\.catalog_change_event/);
+  assert.doesNotMatch(sql, /\b(?:LIKE|ILIKE)\b|\bsimilarity\s*\(/i);
+});
+
+test('forward identity-binding migration carries exact instruments onto the current asset version', async () => {
+  const sql = await readFile(path.join(MIGRATION_DIRECTORY, '0013_current_instrument_asset_binding.sql'), 'utf8');
+  assert.match(sql, /WITH repair_time AS/);
+  assert.match(sql, /prior_asset_version\.valid_to IS NOT NULL/);
+  assert.match(sql, /current_asset_version\.valid_to IS NULL/);
+  assert.match(sql, /INSERT INTO identity\.instrument_version/);
+  assert.match(sql, /current\.official_venue_symbol/);
+  assert.match(sql, /current\.normalized_venue_symbol/);
+  assert.match(sql, /current\.contract_multiplier/);
+  assert.match(sql, /current verified instrument versions are not bound to current verified asset versions/);
+  assert.doesNotMatch(sql, /(?:INSERT INTO|UPDATE|DELETE FROM) analytics\.catalog_change_event/);
+  assert.doesNotMatch(sql, /\b(?:LIKE|ILIKE)\b|\bsimilarity\s*\(/i);
+});
+
+test('forward live-binding repair restores only trusted present instruments without lifecycle events', async () => {
+  const sql = await readFile(path.join(MIGRATION_DIRECTORY, '0014_live_instrument_binding_repair.sql'), 'utf8');
+  assert.match(sql, /DISTINCT ON \(instrument_version\.instrument_id\)/);
+  assert.match(sql, /membership\.presence_status = 'present'/);
+  assert.match(sql, /delisting\.event_type = 'delisted'/);
+  assert.match(sql, /current_asset_version\.valid_to IS NULL/);
+  assert.match(sql, /INSERT INTO identity\.instrument_version/);
+  assert.match(sql, /trusted present instrument identity is missing its current asset binding/);
   assert.doesNotMatch(sql, /(?:INSERT INTO|UPDATE|DELETE FROM) analytics\.catalog_change_event/);
   assert.doesNotMatch(sql, /\b(?:LIKE|ILIKE)\b|\bsimilarity\s*\(/i);
 });
