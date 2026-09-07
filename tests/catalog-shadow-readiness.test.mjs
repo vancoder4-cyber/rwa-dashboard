@@ -1433,6 +1433,14 @@ test('read-only query bundle is fixed at nine bounded catalog-reconciliation que
   assert.match(calls[5].text, /pending_review_count/);
   assert.match(calls[5].text, /pending_identity_resolved_count/);
   assert.match(calls[5].text, /identity_resolved_added_count/);
+  assert.match(calls[5].text, /LEFT JOIN LATERAL/);
+  assert.match(calls[5].text, /previous_run\.status = 'full'/);
+  assert.match(calls[5].text, /previous_run\.catalog_status = 'full'/);
+  assert.match(calls[5].text, /previous_run\.identity_status = 'full'/);
+  assert.match(calls[5].text, /previous_run\.rejected_listing_count = 0/);
+  assert.match(calls[5].text, /previous_run\.metadata->>'rawStatus', ''\) = 'full'/);
+  assert.match(calls[5].text, /previous_run\.metadata->>'mergedStatus', ''\) IN \('full', 'warming'\)/);
+  assert.doesNotMatch(calls[5].text, /\blag\s*\(/i);
   assert.match(calls[5].text, /review\.status = 'open'/);
   assert.match(calls[5].text, /resolved_review\.status = 'verified'/);
   assert.match(calls[5].text, /added_members AS MATERIALIZED/);

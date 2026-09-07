@@ -1151,14 +1151,31 @@ export function buildCatalogShadowReadinessQueries(sql, limit = CATALOG_SHADOW_Q
       JOIN ingest.collection_attempt AS attempt ON attempt.cycle_id = cycle.cycle_id
       JOIN ingest.sink_commit AS sink ON sink.attempt_id = attempt.attempt_id
       ORDER BY cycle.bucket_at DESC, sink.sink_name`, [limit]),
-    sql.query(`${cte}, ordered_cycles AS (
-        SELECT cycle_id, bucket_at, lag(cycle_id) OVER (ORDER BY bucket_at) AS previous_cycle_id
-        FROM recent_cycles
-      ), source_cycles AS (
-        SELECT cycle.cycle_id, cycle.bucket_at, cycle.previous_cycle_id,
+    sql.query(`${cte}, source_cycles AS (
+        SELECT cycle.cycle_id, cycle.bucket_at,
+          previous_trusted.cycle_id AS previous_cycle_id,
           source.source_id, source.source_key
-        FROM ordered_cycles AS cycle
+        FROM recent_cycles AS cycle
         CROSS JOIN identity.source AS source
+        LEFT JOIN LATERAL (
+          SELECT previous_cycle.cycle_id
+          FROM recent_cycles AS previous_cycle
+          JOIN ingest.collection_attempt AS previous_attempt
+            ON previous_attempt.cycle_id = previous_cycle.cycle_id
+          JOIN ingest.source_run AS previous_run
+            ON previous_run.attempt_id = previous_attempt.attempt_id
+           AND previous_run.source_id = source.source_id
+          WHERE previous_cycle.bucket_at < cycle.bucket_at
+            AND previous_run.endpoint_key = '${LISTING_PG_ENDPOINT_KEY}'
+            AND previous_run.status = 'full'
+            AND previous_run.catalog_status = 'full'
+            AND previous_run.identity_status = 'full'
+            AND previous_run.rejected_listing_count = 0
+            AND COALESCE(previous_run.metadata->>'rawStatus', '') = 'full'
+            AND COALESCE(previous_run.metadata->>'mergedStatus', '') IN ('full', 'warming')
+          ORDER BY previous_cycle.bucket_at DESC
+          LIMIT 1
+        ) AS previous_trusted ON true
         WHERE source.source_key = ANY($2::text[])
       ), membership_set AS MATERIALIZED (
         SELECT cycle.cycle_id, run.source_id, instrument_version.instrument_id,
