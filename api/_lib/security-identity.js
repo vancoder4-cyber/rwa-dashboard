@@ -50,6 +50,10 @@ export const SECURITY_LISTING_REGISTRY = Object.freeze({
   // venue code for Lenovo (HKEX 0992), not a second company identity.
   BYD: Object.freeze({ category:'equity', status:'public', name:'BYD Company Limited', listedOn:'2002-07-31', aliases:Object.freeze([]) }),
   LENOVO: Object.freeze({ category:'equity', status:'public', name:'Lenovo Group Limited', listedOn:'1994-02-14', aliases:Object.freeze(['HK0992']) }),
+  // Reviewed 2026-09-07 against Bitget's exact live RWA stock contract and
+  // SoftBank Group's issuer/JPX records for Tokyo code 9984. Venue metadata
+  // must still admit SOFTBANK as a security before this lifecycle rule applies.
+  SOFTBANK: Object.freeze({ category:'equity', status:'public', name:'SoftBank Group Corp.', listedOn:'1994-07-22', aliases:Object.freeze([]) }),
   // Reviewed 2026-09-07 against The Coca-Cola Company's official
   // shareowner record. Venue metadata must still admit KO as a security first.
   KO: Object.freeze({ category:'equity', status:'public', name:'The Coca-Cola Company', listedOn:'1919-09-05', aliases:Object.freeze([]) }),

@@ -319,25 +319,27 @@ async function collectTradeXyz(baseUrl) {
 
 async function collectBitgetPerp() {
   const instruments = await fetchBitget('/api/v3/market/instruments?category=USDT-FUTURES');
-  const rows = [];
-  for (const instrument of instruments) {
-    const venueBase = normalizedUpper(instrument?.baseCoin);
-    const officialType = normalized(instrument?.symbolType).toLowerCase();
-    const identityException = BITGET_RWA_TYPE_EXCEPTIONS[venueBase];
-    if (normalized(instrument?.isRwa).toLowerCase() !== 'yes' || instrument?.status !== 'online') continue;
-    if (!BITGET_ALLOWED_RWA_TYPES.has(officialType) && !identityException) continue;
-    const category = identityException?.category || categoryFromOfficialSignalType(officialType);
-    const identity = normalizeSignalIdentity(venueBase, category, { venue: 'bitget' });
-    if (!identity) continue;
-    rows.push(listing('perp', 'bitget', instrument.symbol, identity.symbol, identity.category, {
-      venueCategory:category,
-      name: identityException?.name || instrument?.symbolName,
-      identityEvidence: identityException
-        ? 'audited exact Bitget RWA type exception'
-        : `Bitget isRwa=yes; symbolType=${officialType}`,
-    }));
-  }
+  const rows = instruments.map(bitgetPerpListingFromOfficial).filter(Boolean);
   return assertCatalogBounds('perp', 'bitget', rows);
+}
+
+export function bitgetPerpListingFromOfficial(instrument) {
+  const venueBase = normalizedUpper(instrument?.baseCoin);
+  const officialType = normalized(instrument?.symbolType).toLowerCase();
+  const identityException = BITGET_RWA_TYPE_EXCEPTIONS[venueBase];
+  if (normalized(instrument?.isRwa).toLowerCase() !== 'yes' || instrument?.status !== 'online') return null;
+  if (!BITGET_ALLOWED_RWA_TYPES.has(officialType) && !identityException) return null;
+  const category = identityException?.category || categoryFromOfficialSignalType(officialType);
+  const identity = normalizeSignalIdentity(venueBase, category, { venue: 'bitget' });
+  if (!identity) return null;
+  return listing('perp', 'bitget', instrument.symbol, identity.symbol, identity.category, {
+    venueCategory:category,
+    name: identityException?.name || securityDisplayName(identity.symbol) || instrument?.symbolName,
+    officialListedAt:officialEpochTimestamp(instrument?.launchTime),
+    identityEvidence: identityException
+      ? 'audited exact Bitget RWA type exception'
+      : `Bitget isRwa=yes; symbolType=${officialType}`,
+  });
 }
 
 async function collectGatePerp(baseUrl) {

@@ -66,15 +66,16 @@ test('migration files are ordered, immutable-checksummed, and parse into stateme
     '0015_okx_ko_soxs_identity_and_listing_time.sql',
     '0016_okx_ko_event_lifecycle.sql',
     '0017_binance_lenovo_event_identity.sql',
+    '0018_bitget_softbank_identity.sql',
   ]);
   assert.deepEqual(migrations.map(row => row.version), [
-    '0001', '0002', '0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013', '0014', '0015', '0016', '0017',
+    '0001', '0002', '0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013', '0014', '0015', '0016', '0017', '0018',
   ]);
   for (const migration of migrations) {
     assert.match(migration.filename, MIGRATION_FILE_PATTERN);
     assert.match(migration.checksum, /^[0-9a-f]{64}$/);
     assert.equal(migration.checksum, migrationChecksum(migration.sql));
-    const minimumStatements = ['0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013', '0014', '0015', '0016', '0017']
+    const minimumStatements = ['0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013', '0014', '0015', '0016', '0017', '0018']
       .includes(migration.version) ? 3 : 11;
     assert.ok(migration.statements.length >= minimumStatements);
     assert.ok(migration.statements.every(statement => statement.trim().length > 0));
@@ -233,6 +234,20 @@ test('Binance Lenovo event repair supplements only the exact existing lifecycle 
   assert.match(sql, /event\.evidence->>'listingKey' = 'perp:binance:HK0992USDT'/);
   assert.doesNotMatch(sql, /INSERT INTO analytics\.catalog_change_event/);
   assert.doesNotMatch(sql, /DELETE FROM analytics\.catalog_change_event/);
+  assert.doesNotMatch(sql, /\b(?:LIKE|ILIKE)\b|\bsimilarity\s*\(/i);
+});
+
+test('Bitget SOFTBANK forward repair corrects only admitted identity and never creates catalog facts', async () => {
+  const sql = await readFile(path.join(MIGRATION_DIRECTORY, '0018_bitget_softbank_identity.sql'), 'utf8');
+  assert.match(sql, /asset\.asset_key = 'equity:SOFTBANK'/);
+  assert.match(sql, /asset_version\.canonical_underlying = 'SOFTBANK'/);
+  assert.match(sql, /display_name = 'SoftBank Group Corp\.'/);
+  assert.match(sql, /source\.source_key = 'perp:bitget'/);
+  assert.match(sql, /instrument\.official_product_key = 'SOFTBANKUSDT'/);
+  assert.match(sql, /UPDATE identity\.instrument_version/);
+  assert.match(sql, /Bitget SOFTBANKUSDT is not bound to the reviewed SoftBank Group identity/);
+  assert.doesNotMatch(sql, /INSERT INTO identity\.(?:asset|asset_version|instrument|instrument_version)/);
+  assert.doesNotMatch(sql, /(?:INSERT INTO|UPDATE|DELETE FROM) (?:analytics\.catalog_change_event|ingest\.catalog_membership)/);
   assert.doesNotMatch(sql, /\b(?:LIKE|ILIKE)\b|\bsimilarity\s*\(/i);
 });
 

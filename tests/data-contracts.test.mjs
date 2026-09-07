@@ -26,6 +26,7 @@ import {
   categoryFromOfficialSignalType,
   normalizeSignalIdentity,
   securityDisplayName,
+  securityLifecycleStatus,
 } from '../api/_lib/security-identity.js';
 import gateBulkHandler from '../api/gate-bulk.js';
 import signalSnapshotHandler, {
@@ -192,6 +193,9 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
   assert.deepEqual(normalizeSignalIdentity('HK0992', 'equity', { venue:'binance' }), { symbol:'LENOVO', category:'equity' });
   assert.equal(securityDisplayName('BYD'), 'BYD Company Limited');
   assert.equal(securityDisplayName('HK0992'), 'Lenovo Group Limited');
+  assert.deepEqual(normalizeSignalIdentity('SOFTBANK', 'equity', { venue:'bitget' }), { symbol:'SOFTBANK', category:'equity' });
+  assert.equal(securityDisplayName('SOFTBANK'), 'SoftBank Group Corp.');
+  assert.equal(securityLifecycleStatus('SOFTBANK', 'equity'), 'public');
   assert.equal(securityDisplayName('KO'), 'The Coca-Cola Company');
   assert.equal(securityDisplayName('SOXS'), 'Direxion Daily Semiconductor Bear 3X ETF');
   assert.deepEqual(normalizeSignalIdentity('OPENAI', 'equity'), { symbol:'OPENAI', category:'pre-ipo' });
@@ -260,6 +264,10 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
   assert.deepEqual(SECURITY_LISTING_REGISTRY.UNITREE, {
     category:'equity', status:'public', name:'Unitree Robotics', listedOn:'2026-08-19', aliases:[],
   });
+  assert.deepEqual(SECURITY_LISTING_REGISTRY.SOFTBANK, {
+    category:'equity', status:'public', name:'SoftBank Group Corp.', listedOn:'1994-07-22', aliases:[],
+  });
+  assert.match(html, /SOFTBANK:\s*\{\s*name:\s*"SoftBank Group Corp\.",\s*category:\s*"equity"\s*\}/);
   for (const [canonical, record] of Object.entries(SECURITY_LISTING_REGISTRY)) {
     const entry = registrySource.match(new RegExp(
       `\\b${canonical}: Object\\.freeze\\(\\{[\\s\\S]*?category:'([^']+)'[\\s\\S]*?aliases:Object\\.freeze\\(\\[([^\\]]*)\\]\\)`,
