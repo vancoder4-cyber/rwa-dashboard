@@ -244,27 +244,47 @@ test('reviewed Binance exact alias correction updates the same contract without 
     venueSymbol:'HK0992USDT',
     canonicalSymbol:'HK0992',
     venueCategory:'equity',
-    lifecycleStatus:'public',
+    lifecycleStatus:null,
     name:'HK0992',
   };
-  const baseline = mergeListingAudit(null, fullObservations({
+  const baseline = mergeListingAudit(null, fullObservations(), new Date('2026-09-05T00:45:00Z'));
+  const listed = mergeListingAudit(baseline.state, fullObservations({
     'perp:binance':{
-      market:'perp', venue:'binance', status:'full', listings:[legacyLenovo],
+      market:'perp', venue:'binance', status:'full',
+      listings:[row('perp:binance'), legacyLenovo],
     },
   }), new Date('2026-09-06T00:45:00Z'));
+  assert.equal(listed.newEvents.filter(event => event.venueSymbol === 'HK0992USDT').length, 1);
   const reviewedLenovo = {
     ...legacyLenovo,
     canonicalSymbol:'LENOVO',
     name:'Lenovo Group Limited',
+    lifecycleStatus:'public',
   };
-  const corrected = mergeListingAudit(baseline.state, fullObservations({
+  const corrected = mergeListingAudit(listed.state, fullObservations({
     'perp:binance':{
-      market:'perp', venue:'binance', status:'full', listings:[reviewedLenovo],
+      market:'perp', venue:'binance', status:'full',
+      listings:[row('perp:binance'), reviewedLenovo],
     },
   }), new Date('2026-09-07T00:45:00Z'));
   const listingKey = 'perp:binance:HK0992USDT';
+  const retainedEvents = corrected.snapshot.events.filter(event => event.listingKey === listingKey);
   assert.equal(corrected.snapshot.sources.find(source => source.sourceKey === 'perp:binance').status, 'full');
   assert.deepEqual(corrected.newEvents, []);
+  assert.equal(retainedEvents.length, 1, 'the real listed event is retained exactly once');
+  assert.deepEqual({
+    canonicalSymbol:retainedEvents[0].canonicalSymbol,
+    category:retainedEvents[0].category,
+    venueCategory:retainedEvents[0].venueCategory,
+    lifecycleStatus:retainedEvents[0].lifecycleStatus,
+    name:retainedEvents[0].name,
+  }, {
+    canonicalSymbol:'LENOVO',
+    category:'equity',
+    venueCategory:'equity',
+    lifecycleStatus:'public',
+    name:'Lenovo Group Limited',
+  });
   assert.equal(corrected.state.known[listingKey].canonicalSymbol, 'LENOVO');
   assert.equal(corrected.state.known[listingKey].name, 'Lenovo Group Limited');
   assert.deepEqual(REVIEWED_EXACT_CANONICAL_CORRECTIONS, [{
@@ -274,6 +294,7 @@ test('reviewed Binance exact alias correction updates the same contract without 
     canonicalSymbol:'LENOVO',
     category:'equity',
     venueCategory:'equity',
+    previousLifecycleStatus:null,
     lifecycleStatus:'public',
   }]);
 });
@@ -282,7 +303,7 @@ test('exact canonical correction bypass rejects reverse, cross-venue and widened
   const previous = normalizeListingObservation({
     market:'perp', venue:'binance', venueSymbol:'HK0992USDT',
     canonicalSymbol:'HK0992', category:'equity', venueCategory:'equity',
-    lifecycleStatus:'public', identityStatus:'verified',
+    lifecycleStatus:null, identityStatus:'verified',
   });
   const current = normalizeListingObservation({
     market:'perp', venue:'binance', venueSymbol:'HK0992USDT',
@@ -296,6 +317,7 @@ test('exact canonical correction bypass rejects reverse, cross-venue and widened
   assert.equal(isReviewedExactCanonicalCorrection(previous, { ...current, category:'etf' }), false);
   assert.equal(isReviewedExactCanonicalCorrection({ ...previous, venueCategory:'pre-ipo' }, current), false);
   assert.equal(isReviewedExactCanonicalCorrection(previous, { ...current, venueCategory:'pre-ipo' }), false);
+  assert.equal(isReviewedExactCanonicalCorrection({ ...previous, lifecycleStatus:'public' }, current), false);
   assert.equal(isReviewedExactCanonicalCorrection({ ...previous, lifecycleStatus:'pre-ipo' }, current), false);
   assert.equal(isReviewedExactCanonicalCorrection(previous, { ...current, lifecycleStatus:'pre-ipo' }), false);
   assert.equal(isReviewedExactCanonicalCorrection({ ...previous, canonicalSymbol:'HK1211' }, current), false);

@@ -47,6 +47,7 @@ export const REVIEWED_EXACT_CANONICAL_CORRECTIONS = Object.freeze([
     canonicalSymbol: 'LENOVO',
     category: 'equity',
     venueCategory: 'equity',
+    previousLifecycleStatus: null,
     lifecycleStatus: 'public',
   }),
 ]);
@@ -282,7 +283,7 @@ export function isReviewedExactCanonicalCorrection(previousRow, currentRow) {
     category === correction.category &&
     previousVenueCategory === correction.venueCategory &&
     venueCategory === correction.venueCategory &&
-    previousLifecycleStatus === correction.lifecycleStatus &&
+    previousLifecycleStatus === normalized(correction.previousLifecycleStatus).toLowerCase() &&
     lifecycleStatus === correction.lifecycleStatus
   );
 }
