@@ -22,6 +22,7 @@ import {
   isDedicatedTradeXyzSource,
   krakenListingCandidate,
   mergeKrakenOfficialPairEntries,
+  okxPerpListingFromOfficial,
   tradeXyzListingFromOfficial,
 } from '../api/_lib/listing-sources.js';
 
@@ -65,6 +66,42 @@ test('listing audit first successful pass establishes ten independent baselines 
   assert.equal(first.snapshot.events.length, 0);
   assert.equal(first.snapshot.counts.activeListings, 10);
   assert.deepEqual(Object.keys(first.state.sources).sort(), [...LISTING_SOURCE_KEYS].sort());
+});
+
+test('OKX X-Perp listing keeps official list time and Dashboard identity without inventing an event', () => {
+  assert.deepEqual(okxPerpListingFromOfficial({
+    instId:'KO-USD_UM_XPERP-310912',
+    instType:'FUTURES',
+    ruleType:'xperp',
+    instCategory:'3',
+    state:'live',
+    uly:'KO-USD',
+    listTime:'1788770700112',
+  }), {
+    market:'perp',
+    venue:'okx',
+    venueSymbol:'KO-USD_UM_XPERP-310912',
+    canonicalSymbol:'KO',
+    category:'equity',
+    venueCategory:'equity',
+    lifecycleStatus:'public',
+    name:'The Coca-Cola Company',
+    identityStatus:'verified',
+    identityEvidence:'OKX instCategory=3; FUTURES/xperp',
+    officialListedAt:'2026-09-07T08:45:00.112Z',
+  });
+  const soxs = okxPerpListingFromOfficial({
+    instId:'SOXS-USD_UM_XPERP-310912',
+    instType:'FUTURES',
+    ruleType:'xperp',
+    instCategory:'3',
+    state:'live',
+    uly:'SOXS-USD',
+    listTime:'1788769800170',
+  });
+  assert.equal(soxs.category, 'etf');
+  assert.equal(soxs.name, 'Direxion Daily Semiconductor Bear 3X ETF');
+  assert.equal(soxs.officialListedAt, '2026-09-07T08:30:00.170Z');
 });
 
 test('listing audit emits Spot and Perp additions once and leaves an unavailable source baseline untouched', () => {

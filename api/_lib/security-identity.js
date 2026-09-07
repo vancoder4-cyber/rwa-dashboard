@@ -50,6 +50,9 @@ export const SECURITY_LISTING_REGISTRY = Object.freeze({
   // venue code for Lenovo (HKEX 0992), not a second company identity.
   BYD: Object.freeze({ category:'equity', status:'public', name:'BYD Company Limited', listedOn:'2002-07-31', aliases:Object.freeze([]) }),
   LENOVO: Object.freeze({ category:'equity', status:'public', name:'Lenovo Group Limited', listedOn:'1994-02-14', aliases:Object.freeze(['HK0992']) }),
+  // Reviewed 2026-09-07 against The Coca-Cola Company's official
+  // shareowner record. Venue metadata must still admit KO as a security first.
+  KO: Object.freeze({ category:'equity', status:'public', name:'The Coca-Cola Company', listedOn:'1919-09-05', aliases:Object.freeze([]) }),
   OPENAI: Object.freeze({ category:'pre-ipo', status:'pre-ipo', name:'OpenAI (Pre-IPO)', listedOn:null, aliases:Object.freeze([]) }),
   ANTHROPIC: Object.freeze({ category:'pre-ipo', status:'pre-ipo', name:'Anthropic (Pre-IPO)', listedOn:null, aliases:Object.freeze([]) }),
   SHEIN: Object.freeze({ category:'pre-ipo', status:'pre-ipo', name:'SHEIN (Pre-IPO)', listedOn:null, aliases:Object.freeze([]) }),
@@ -76,6 +79,12 @@ export const REVIEWED_ETF_IDENTITIES = Object.freeze({
     name:'GraniteShares 2x Long SK Hynix Daily ETF',
     listedOn:'2026-07-14',
   }),
+});
+
+// Official issuer/fund display names that refine an already admitted
+// security without expanding the ETF category-correction whitelist.
+export const REVIEWED_SECURITY_DISPLAY_NAMES = Object.freeze({
+  SOXS:'Direxion Daily Semiconductor Bear 3X ETF',
 });
 
 const SECURITY_ALIAS_MAP = Object.freeze(Object.fromEntries(
@@ -185,7 +194,8 @@ export function securityLifecycleStatus(symbol, category) {
 export function securityDisplayName(symbol) {
   const raw = String(symbol || '').trim().toUpperCase();
   const canonical = SECURITY_ALIAS_MAP[raw] || raw;
-  return SECURITY_LISTING_REGISTRY[canonical]?.name || REVIEWED_ETF_IDENTITIES[canonical]?.name || null;
+  return SECURITY_LISTING_REGISTRY[canonical]?.name || REVIEWED_ETF_IDENTITIES[canonical]?.name ||
+    REVIEWED_SECURITY_DISPLAY_NAMES[canonical] || null;
 }
 
 function normalizedCategory(value) {

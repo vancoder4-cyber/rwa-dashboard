@@ -19,6 +19,7 @@ import {
   GATE_SPOT_EXACT_LEGACY_PAIRS,
   GATE_SPOT_VERIFIED_WRAPPERS,
   REVIEWED_ETF_IDENTITIES,
+  REVIEWED_SECURITY_DISPLAY_NAMES,
   SECURITY_ETF_UNDERLYINGS,
   SECURITY_LISTING_REGISTRY,
   TOKENIZED_ETF_WRAPPERS,
@@ -191,6 +192,8 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
   assert.deepEqual(normalizeSignalIdentity('HK0992', 'equity', { venue:'binance' }), { symbol:'LENOVO', category:'equity' });
   assert.equal(securityDisplayName('BYD'), 'BYD Company Limited');
   assert.equal(securityDisplayName('HK0992'), 'Lenovo Group Limited');
+  assert.equal(securityDisplayName('KO'), 'The Coca-Cola Company');
+  assert.equal(securityDisplayName('SOXS'), 'Direxion Daily Semiconductor Bear 3X ETF');
   assert.deepEqual(normalizeSignalIdentity('OPENAI', 'equity'), { symbol:'OPENAI', category:'pre-ipo' });
   assert.deepEqual(normalizeSignalIdentity('ANTHROPIC', 'equity'), { symbol:'ANTHROPIC', category:'pre-ipo' });
   assert.deepEqual(normalizeSignalIdentity('SHEIN', 'equity', { venue:'bitget' }), { symbol:'SHEIN', category:'pre-ipo' });
@@ -224,6 +227,9 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
   assert.deepEqual(REVIEWED_ETF_IDENTITIES, {
     SKDD:{ category:'etf', name:'GraniteShares 2x Short SK Hynix Daily ETF', listedOn:'2026-07-14' },
     SKUU:{ category:'etf', name:'GraniteShares 2x Long SK Hynix Daily ETF', listedOn:'2026-07-14' },
+  });
+  assert.deepEqual(REVIEWED_SECURITY_DISPLAY_NAMES, {
+    SOXS:'Direxion Daily Semiconductor Bear 3X ETF',
   });
 
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');

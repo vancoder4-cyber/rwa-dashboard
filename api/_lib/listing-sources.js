@@ -387,18 +387,26 @@ async function collectBinancePerp(baseUrl) {
   return assertCatalogBounds('perp', 'binance', rows);
 }
 
+export function okxPerpListingFromOfficial(instrument) {
+  const canonical = canonicalOkxPerpSymbol(instrument);
+  const category = OKX_CATEGORIES[String(instrument?.instCategory || '')] || null;
+  const identity = normalizeSignalIdentity(canonical, category, { venue:'okx' });
+  if (!identity) return null;
+  return listing('perp', 'okx', instrument.instId, identity.symbol, identity.category, {
+    venueCategory:category,
+    // OKX listTime is copied only onto an independently diff-detected event;
+    // it never creates a lifecycle transition by itself.
+    officialListedAt:officialEpochTimestamp(instrument?.listTime),
+    identityEvidence:`OKX instCategory=${instrument.instCategory}; ${instrument.instType}/${instrument.ruleType || 'standard'}`,
+  });
+}
+
 async function collectOkxPerp(baseUrl) {
   const payload = await fetchSameOrigin(baseUrl, '/api/okx-market?type=perp-snapshot');
   const rows = [];
   for (const instrument of assertFullDeclaredCatalog(payload, 'OKX Perpetual')) {
-    const canonical = canonicalOkxPerpSymbol(instrument);
-    const category = OKX_CATEGORIES[String(instrument?.instCategory || '')] || null;
-    const identity = normalizeSignalIdentity(canonical, category, { venue: 'okx' });
-    if (!identity) continue;
-    rows.push(listing('perp', 'okx', instrument.instId, identity.symbol, identity.category, {
-      venueCategory:category,
-      identityEvidence: `OKX instCategory=${instrument.instCategory}; ${instrument.instType}/${instrument.ruleType || 'standard'}`,
-    }));
+    const row = okxPerpListingFromOfficial(instrument);
+    if (row) rows.push(row);
   }
   return assertCatalogBounds('perp', 'okx', rows);
 }
@@ -549,6 +557,7 @@ async function collectOkxSpot(baseUrl, deadlineAt = null) {
     if (!identity) continue;
     rows.push(listing('spot', 'okx', instrument.instId, identity.symbol, identity.category, {
       venueCategory:category,
+      officialListedAt:officialEpochTimestamp(instrument?.listTime),
       identityEvidence: String(instrument?.instCategory) === '3'
         ? 'OKX official Unified Tokenized Stocks category'
         : 'audited exact OKX tokenized-gold pair',
