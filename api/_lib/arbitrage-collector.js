@@ -27,6 +27,10 @@ const OKX = 'https://www.okx.com/api/v5';
 const HYPERLIQUID = 'https://api.hyperliquid.xyz/info';
 const MAX_CANDIDATE_ROUTES = 1_500;
 const ORDER_BOOK_CONCURRENCY = 4;
+const NON_BLOCKING_SPOT_PRICE_WARNINGS = new Set([
+  'PRICE_CHANGE_FIELDS_INCOMPLETE',
+  'KRAKEN_PRICE_CHANGE_UNAVAILABLE_BY_DESIGN',
+]);
 
 function finite(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -57,6 +61,17 @@ export function normalizeFundingHistoryState(result) {
     return { status:'warming', rows:result.rows, observed, expected };
   }
   return null;
+}
+
+export function spotSourceSupportsArbitrage(source) {
+  if (source?.status === 'full') return true;
+  if (source?.status !== 'partial') return false;
+  const listingCount = Number(source.listingCount);
+  const marketFieldCount = Number(source.marketFieldCount);
+  const warnings = Array.isArray(source.warnings) ? source.warnings : [];
+  return Number.isSafeInteger(listingCount) && listingCount > 0 &&
+    Number.isSafeInteger(marketFieldCount) && marketFieldCount === listingCount &&
+    warnings.length > 0 && warnings.every(warning => NON_BLOCKING_SPOT_PRICE_WARNINGS.has(warning));
 }
 
 function sourceKey(market, venue) {
@@ -353,7 +368,7 @@ export async function collectArbitragePublication(req, options = {}) {
     throw new TypeError('Perpetual market coverage is incomplete');
   }
   const spotSnapshot = await spotPromise;
-  if (Object.values(spotSnapshot.sources).some(source => source.status !== 'full')) {
+  if (Object.values(spotSnapshot.sources).some(source => !spotSourceSupportsArbitrage(source))) {
     throw new TypeError('Spot market coverage is incomplete');
   }
   const rawPerps = perpResults.flatMap(([, result]) => result.listings.map(normalizePerpListing));

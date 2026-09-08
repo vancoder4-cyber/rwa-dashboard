@@ -7,6 +7,7 @@ import {
   executableBookSide,
   isExecutableCatalogListing,
   normalizeFundingHistoryState,
+  spotSourceSupportsArbitrage,
   normalizeOrderBookPayload,
   requiresBinanceOpenInterestBackfill,
   routeHasExecutableBooks,
@@ -473,7 +474,14 @@ test('collector joins only exact database identities and emits one policy-qualif
     collectCatalog:async () => catalog,
     collectSpot:async () => ({
       listings:[spot],
-      sources:Object.fromEntries(['gate', 'kraken', 'bitget', 'binance', 'okx'].map(venue => [venue, { status:'full' }])),
+      sources:Object.fromEntries(['gate', 'kraken', 'bitget', 'binance', 'okx'].map(venue => [venue,
+        venue === 'okx'
+          ? {
+              status:'partial', listingCount:101, marketFieldCount:101, priceFieldCount:99,
+              warnings:['PRICE_CHANGE_FIELDS_INCOMPLETE'],
+            }
+          : { status:'full' },
+      ])),
       conflicts:[],
       quarantinedListings:0,
     }),
@@ -623,4 +631,19 @@ test('collector joins only exact database identities and emits one policy-qualif
     'every executable route must retain compact persistence history');
   assert.equal(JSON.parse(wideInsert.values[5]).length, 0,
     'candidate-only routes must not grow the wide published-fact table');
+});
+
+test('arbitrage spot coverage isolates price-only warming but rejects incomplete market coverage', () => {
+  assert.equal(spotSourceSupportsArbitrage({
+    status:'partial', listingCount:101, marketFieldCount:101, priceFieldCount:99,
+    warnings:['PRICE_CHANGE_FIELDS_INCOMPLETE'],
+  }), true);
+  assert.equal(spotSourceSupportsArbitrage({
+    status:'partial', listingCount:101, marketFieldCount:100, priceFieldCount:99,
+    warnings:['PRICE_CHANGE_FIELDS_INCOMPLETE'],
+  }), false);
+  assert.equal(spotSourceSupportsArbitrage({
+    status:'partial', listingCount:101, marketFieldCount:101, priceFieldCount:99,
+    warnings:['SOURCE_UNAVAILABLE'],
+  }), false);
 });
