@@ -56,7 +56,8 @@ export function normalizeFundingHistoryState(result) {
   if (result.status === 'full') return { status:'full', rows:result.rows };
   const observed = finite(result.observed);
   const expected = finite(result.expected);
-  if (result.status === 'partial' && Number.isInteger(observed) && observed >= 2 &&
+  if ((result.status === 'partial' || result.status === 'warming') &&
+      Number.isInteger(observed) && observed >= 2 &&
       Number.isInteger(expected) && expected > observed && observed === result.rows.length) {
     return { status:'warming', rows:result.rows, observed, expected };
   }

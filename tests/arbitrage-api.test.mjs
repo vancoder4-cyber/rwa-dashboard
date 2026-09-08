@@ -62,6 +62,9 @@ test('funding history distinguishes exact-contract warming from invalid coverage
   assert.deepEqual(normalizeFundingHistoryState({
     status:'partial', observed:2, expected:24, rows,
   }), { status:'warming', observed:2, expected:24, rows });
+  assert.deepEqual(normalizeFundingHistoryState({
+    status:'warming', observed:2, expected:24, rows,
+  }), { status:'warming', observed:2, expected:24, rows });
   assert.deepEqual(normalizeFundingHistoryState(rows), { status:'full', rows });
   assert.equal(normalizeFundingHistoryState({
     status:'unavailable', observed:0, expected:null, rows:[], error:'upstream failure',
