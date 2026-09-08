@@ -302,6 +302,13 @@ function reconcileMarketCatalogCoverage(catalogObservations, marketRows) {
   }
 }
 
+function executableCatalogFingerprints(catalogObservations) {
+  return new Set((Array.isArray(catalogObservations) ? catalogObservations : [])
+    .flatMap(observation => observation.listings
+      .filter(row => row?.identityStatus === 'verified' && isExecutableCatalogListing(row))
+      .map(row => catalogMarketFingerprint(row, true))));
+}
+
 function authoritativeListing(listing, identities) {
   const exactKey = identityKey(listing.market, listing.venue, listing.venueSymbol);
   const normalizedKey = identityKey(
@@ -380,7 +387,8 @@ export async function collectArbitragePublication(req, options = {}) {
   // A venue trading mode is not a catalog lifecycle event. Keep temporarily
   // suspended products in exact catalog reconciliation, but never treat their
   // stale book as an executable route or require an online database identity.
-  const executableRows = allRows.filter(isExecutableCatalogListing);
+  const executableFingerprints = executableCatalogFingerprints(catalogObservations);
+  const executableRows = allRows.filter(row => executableFingerprints.has(catalogMarketFingerprint(row)));
   const authoritative = executableRows.map(row => authoritativeListing(row, authority.identities));
   const rejectedListings = authoritative.filter(row => row === null).length;
   const quarantinedListings = spotSnapshot.quarantinedListings + perpResults.reduce(

@@ -430,6 +430,10 @@ test('collector joins only exact database identities and emits one policy-qualif
     market:'spot', venue:'kraken', venueSymbol:'NVDAXUSD', symbol:'NVDA', category:'equity',
     askPriceUsd:100, lastPriceUsd:100, observedAt:'2026-09-04T10:01:30.000Z',
   };
+  const suspendedSpot = {
+    market:'spot', venue:'kraken', venueSymbol:'BOTXUSD', symbol:'BOT', category:'equity',
+    askPriceUsd:20, lastPriceUsd:20, observedAt:'2026-09-04T10:01:30.000Z',
+  };
   const perp = {
     market:'perp', venue:'binance', venueSymbol:'NVDAUSDT', symbol:'NVDA', category:'equity',
     priceUsd:101.2, bidPriceUsd:101.2, openInterestUsd:2_000_000,
@@ -442,6 +446,8 @@ test('collector joins only exact database identities and emits one policy-qualif
   };
   catalog.find(row => row.market === 'spot' && row.venue === 'kraken').listings = [{
     ...spot, canonicalSymbol:'NVDA', identityStatus:'verified',
+  }, {
+    ...suspendedSpot, canonicalSymbol:'BOT', identityStatus:'verified', officialStatus:'suspended',
   }];
   catalog.find(row => row.market === 'perp' && row.venue === 'binance').listings = [{
     ...perp, canonicalSymbol:'NVDA', identityStatus:'verified',
@@ -473,7 +479,7 @@ test('collector joins only exact database identities and emits one policy-qualif
     readInputs:async () => ({ identities, basisHistory:[] }),
     collectCatalog:async () => catalog,
     collectSpot:async () => ({
-      listings:[spot],
+      listings:[spot, suspendedSpot],
       sources:Object.fromEntries(['gate', 'kraken', 'bitget', 'binance', 'okx'].map(venue => [venue,
         venue === 'okx'
           ? {
@@ -546,7 +552,7 @@ test('collector joins only exact database identities and emits one policy-qualif
     readInputs:async () => ({ identities:new Map([...identities, ...warmingIdentities]), basisHistory:[] }),
     collectCatalog:async () => mixedCatalog,
     collectSpot:async () => ({
-      listings:[spot, warmingSpot],
+      listings:[spot, suspendedSpot, warmingSpot],
       sources:Object.fromEntries(['gate', 'kraken', 'bitget', 'binance', 'okx'].map(venue => [venue, { status:'full' }])),
       conflicts:[],
       quarantinedListings:0,
@@ -594,7 +600,7 @@ test('collector joins only exact database identities and emits one policy-qualif
     readInputs:async () => ({ identities, basisHistory:[] }),
     collectCatalog:async () => catalog,
     collectSpot:async () => ({
-      listings:[spot],
+      listings:[spot, suspendedSpot],
       sources:Object.fromEntries(['gate', 'kraken', 'bitget', 'binance', 'okx'].map(venue => [venue, { status:'full' }])),
       conflicts:[],
       quarantinedListings:0,
