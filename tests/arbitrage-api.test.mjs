@@ -6,6 +6,7 @@ import {
   collectArbitragePublication,
   executableBookSide,
   isExecutableCatalogListing,
+  normalizeFundingHistoryState,
   normalizeOrderBookPayload,
   requiresBinanceOpenInterestBackfill,
   routeHasExecutableBooks,
@@ -50,6 +51,23 @@ test('Binance OI backfill distinguishes missing values from a real zero', () => 
   assert.equal(requiresBinanceOpenInterestBackfill({ venue:'binance' }), true);
   assert.equal(requiresBinanceOpenInterestBackfill({ venue:'binance', openInterestUsd:0 }), false);
   assert.equal(requiresBinanceOpenInterestBackfill({ venue:'okx', openInterestUsd:null }), false);
+});
+
+test('funding history distinguishes exact-contract warming from invalid coverage', () => {
+  const rows = [
+    { fundingTime:NOW - 2 * 60 * 60_000, fundingRate:0.0001 },
+    { fundingTime:NOW - 1 * 60 * 60_000, fundingRate:0.0001 },
+  ];
+  assert.deepEqual(normalizeFundingHistoryState({
+    status:'partial', observed:2, expected:24, rows,
+  }), { status:'warming', observed:2, expected:24, rows });
+  assert.deepEqual(normalizeFundingHistoryState(rows), { status:'full', rows });
+  assert.equal(normalizeFundingHistoryState({
+    status:'unavailable', observed:0, expected:null, rows:[], error:'upstream failure',
+  }), null);
+  assert.equal(normalizeFundingHistoryState({
+    status:'partial', observed:2, expected:24, rows:[...rows, { fundingTime:null, fundingRate:0.1 }],
+  }), null);
 });
 
 function emptySnapshot() {
@@ -485,6 +503,82 @@ test('collector joins only exact database identities and emits one policy-qualif
   assert.equal(result.routeFacts[0].authority.spotInstrumentVersionId, 11);
   assert.equal(result.routeFacts[0].authority.perpInstrumentVersionId, 12);
   assert.equal(result.sources.length, 10);
+
+  const warmingSpot = {
+    market:'spot', venue:'kraken', venueSymbol:'WDCXUSD', symbol:'WDC', category:'equity',
+    askPriceUsd:70, lastPriceUsd:70, observedAt:'2026-09-04T10:01:30.000Z',
+  };
+  const warmingPerp = {
+    market:'perp', venue:'binance', venueSymbol:'WDCUSDT', symbol:'WDC', category:'equity',
+    priceUsd:71, bidPriceUsd:71, openInterestUsd:2_000_000,
+    fundingRate:0.0002, fundingIntervalHours:1, observedAt:'2026-09-04T10:01:45.000Z',
+  };
+  const mixedCatalog = catalog.map(row => ({ ...row, listings:[...row.listings] }));
+  mixedCatalog.find(row => row.market === 'spot' && row.venue === 'kraken').listings.push({
+    ...warmingSpot, canonicalSymbol:'WDC', identityStatus:'verified',
+  });
+  mixedCatalog.find(row => row.market === 'perp' && row.venue === 'binance').listings.push({
+    ...warmingPerp, canonicalSymbol:'WDC', identityStatus:'verified',
+  });
+  const warmingIdentities = normalizeAuthoritativeArbitrageIdentityRows([
+    {
+      source_key:'spot:kraken', official_venue_symbol:'WDCxUSD', normalized_venue_symbol:'WDCXUSD',
+      category:'equity', canonical_underlying:'WDC', display_name:'Western Digital',
+      instrument_version_id:21, asset_version_id:3,
+    },
+    {
+      source_key:'perp:binance', official_venue_symbol:'WDCUSDT', normalized_venue_symbol:'WDCUSDT',
+      category:'equity', canonical_underlying:'WDC', display_name:'Western Digital',
+      instrument_version_id:22, asset_version_id:3,
+    },
+  ]);
+  const mixed = await collectArbitragePublication({ headers:{} }, {
+    nowMs:NOW,
+    baseUrl:'https://dashboard.example',
+    readInputs:async () => ({ identities:new Map([...identities, ...warmingIdentities]), basisHistory:[] }),
+    collectCatalog:async () => mixedCatalog,
+    collectSpot:async () => ({
+      listings:[spot, warmingSpot],
+      sources:Object.fromEntries(['gate', 'kraken', 'bitget', 'binance', 'okx'].map(venue => [venue, { status:'full' }])),
+      conflicts:[],
+      quarantinedListings:0,
+    }),
+    perpCollectors:{
+      gate:emptyPerpCollector,
+      binance:async () => ({ listings:[perp, warmingPerp], completeness:'full', warnings:[] }),
+      bitget:emptyPerpCollector,
+      tradexyz:async () => ({ listings:[normalizedTradeXyz], completeness:'full', warnings:[] }),
+      okx:emptyPerpCollector,
+    },
+    fillBinanceOi:async () => 0,
+    fetchOrderBook:async listing => listing.market === 'spot'
+      ? { priceUsd:listing.symbol === 'WDC' ? 70 : 100, executableDepthUsd:25_000, observedAt:'2026-09-04T10:01:30.000Z' }
+      : { priceUsd:listing.symbol === 'WDC' ? 71 : 101.2, executableDepthUsd:30_000, observedAt:'2026-09-04T10:01:45.000Z' },
+    fetchFundingHistories:async () => new Map([
+      ['binance:NVDAUSDT', [
+        { fundingTime:NOW - 24 * 60 * 60_000, fundingRate:0.00022 },
+        { fundingTime:NOW - 16 * 60 * 60_000, fundingRate:0.00022 },
+        { fundingTime:NOW - 8 * 60 * 60_000, fundingRate:0.00022 },
+        { fundingTime:NOW, fundingRate:0.00022 },
+      ]],
+      ['binance:WDCUSDT', {
+        status:'partial', observed:8, expected:24,
+        rows:Array.from({ length:8 }, (_, index) => ({
+          fundingTime:NOW - (7 - index) * 60 * 60_000,
+          fundingRate:0.0002,
+        })),
+      }],
+    ]),
+  });
+  assert.equal(mixed.snapshot.status, 'full');
+  assert.deepEqual(mixed.snapshot.routes.map(route => route.symbol), ['NVDA']);
+  assert.equal(mixed.snapshot.coverage.expectedRoutes, 1);
+  assert.equal(mixed.diagnostics.executableRoutes, 2);
+  assert.equal(mixed.diagnostics.fundingHistoryWarmingRoutes, 1);
+  assert.equal(mixed.diagnostics.fundingHistoryWarmingPerps, 1);
+  assert.deepEqual(mixed.diagnostics.fundingHistoryWarming, [{
+    listingKey:'perp:binance:WDCUSDT', canonicalSymbol:'WDC', observed:8, expected:24,
+  }]);
 
   const observedOnly = await collectArbitragePublication({ headers:{} }, {
     nowMs:NOW,

@@ -39,6 +39,26 @@ function positive(value) {
   return number !== null && number > 0 ? number : null;
 }
 
+function validFundingRows(rows) {
+  return Array.isArray(rows) && rows.length >= 2 && rows.every(row =>
+    finite(row?.fundingTime) !== null && finite(row?.fundingRate) !== null);
+}
+
+export function normalizeFundingHistoryState(result) {
+  if (Array.isArray(result)) {
+    return validFundingRows(result) ? { status:'full', rows:result } : null;
+  }
+  if (!result || !validFundingRows(result.rows)) return null;
+  if (result.status === 'full') return { status:'full', rows:result.rows };
+  const observed = finite(result.observed);
+  const expected = finite(result.expected);
+  if (result.status === 'partial' && Number.isInteger(observed) && observed >= 2 &&
+      Number.isInteger(expected) && expected > observed && observed === result.rows.length) {
+    return { status:'warming', rows:result.rows, observed, expected };
+  }
+  return null;
+}
+
 function sourceKey(market, venue) {
   return `${market}:${venue}`;
 }
@@ -183,13 +203,17 @@ async function fetchFundingHistories(baseUrl, perps) {
         { timeoutMs:25_000, retries:0 },
       );
       if (payload?.venue !== venue) throw new TypeError(`Invalid ${venue} funding-history envelope`);
+      if (!payload?.results || typeof payload.results !== 'object' || Array.isArray(payload.results)) {
+        throw new TypeError(`Invalid ${venue} funding-history results`);
+      }
       for (const row of batch) {
         const querySymbol = row.marketQuerySymbol || row.venueSymbol;
         const result = payload?.results?.[querySymbol];
-        if (result?.status !== 'full' || !Array.isArray(result?.rows)) {
+        const state = normalizeFundingHistoryState(result);
+        if (!state) {
           throw new TypeError(`Incomplete settled funding history for ${venue}:${row.venueSymbol}`);
         }
-        output.set(`${venue}:${row.venueSymbol}`, result.rows);
+        output.set(`${venue}:${row.venueSymbol}`, state);
       }
     }
   }
@@ -401,10 +425,23 @@ export async function collectArbitragePublication(req, options = {}) {
   const generatedAtMs = fixedNowMs ?? Date.now();
 
   const routeFacts = [];
+  const fundingHistoryWarming = new Map();
   for (const { spot, perp } of executableCandidates) {
     const spotBook = books.get(`spot:${spot.venue}:${spot.venueSymbol}`);
     const perpBook = books.get(`perp:${perp.venue}:${perp.venueSymbol}`);
-    const fundingHistory = fundingByPerp.get(`${perp.venue}:${perp.venueSymbol}`);
+    const fundingKey = `${perp.venue}:${perp.venueSymbol}`;
+    const fundingState = normalizeFundingHistoryState(fundingByPerp.get(fundingKey));
+    if (!fundingState) throw new TypeError(`Incomplete settled funding history for ${fundingKey}`);
+    if (fundingState.status === 'warming') {
+      fundingHistoryWarming.set(fundingKey, {
+        listingKey:`perp:${fundingKey}`,
+        canonicalSymbol:perp.symbol,
+        observed:fundingState.observed,
+        expected:fundingState.expected,
+      });
+      continue;
+    }
+    const fundingHistory = fundingState.rows;
     const routeIdentityValue = routeIdentity(
       { category:perp.category, symbol:perp.symbol },
       spot,
@@ -484,6 +521,10 @@ export async function collectArbitragePublication(req, options = {}) {
     diagnostics:{
       candidateRoutes:candidates.length,
       executableRoutes:executableCandidates.length,
+      fundingHistoryWarmingRoutes:executableCandidates.filter(({ perp }) =>
+        fundingHistoryWarming.has(`${perp.venue}:${perp.venueSymbol}`)).length,
+      fundingHistoryWarmingPerps:fundingHistoryWarming.size,
+      fundingHistoryWarming:[...fundingHistoryWarming.values()].slice(0, 20),
       observedRoutes:routeFacts.length,
       publishedRoutes:publishedRoutes.length,
     },
