@@ -674,22 +674,27 @@ test('listing audit admits the reviewed Bitget 3000+ expansion only with exact d
   );
 });
 
-test('reviewed Bitget expansion resets only the disputed RLGHL removal clock', () => {
-  const disputed = {
+test('reviewed Bitget expansion clears recovered RLGHL and resets only the disputed RWBD removal clock', () => {
+  const recoveredRLGHL = {
     ...row('spot:bitget', 'LGHL'),
     venueSymbol:'RLGHLUSDT',
     canonicalSymbol:'LGHL',
   };
+  const disputedRWBD = {
+    ...row('spot:bitget', 'WBD'),
+    venueSymbol:'RWBDUSDT',
+    canonicalSymbol:'WBD',
+  };
   const retainedLegacy = Array.from(
-    { length:706 },
+    { length:705 },
     (_, index) => row('spot:bitget', `OLD${String(index).padStart(4, '0')}`),
   );
   const additions = Array.from(
     { length:2_313 },
     (_, index) => row('spot:bitget', `NEW${String(index).padStart(4, '0')}`),
   );
-  const previousRows = [disputed, ...retainedLegacy];
-  const currentRows = [...retainedLegacy, ...additions];
+  const previousRows = [recoveredRLGHL, disputedRWBD, ...retainedLegacy];
+  const currentRows = [recoveredRLGHL, ...retainedLegacy, ...additions];
   const catalogEvidence = {
     status:'full',
     method:'bitget-reality-stock-info-exact-intersection-v1',
@@ -719,10 +724,13 @@ test('reviewed Bitget expansion resets only the disputed RLGHL removal clock', (
   assert.equal(source.added, 2_313);
   assert.equal(source.pendingRemovalCount, 1);
   assert.equal(reviewed.newEvents.length, 2_313);
-  assert.equal(reviewed.state.sources['spot:bitget'].pendingRemovals['spot:bitget:RLGHLUSDT'],
+  assert.equal(reviewed.state.sources['spot:bitget'].pendingRemovals['spot:bitget:RLGHLUSDT'], undefined);
+  assert.equal(reviewed.state.sources['spot:bitget'].pendingRemovals['spot:bitget:RWBDUSDT'],
     '2026-11-01T00:45:00.000Z');
   assert.equal(reviewed.newEvents.some(event =>
-    event.changeType === 'delisted' && event.venueSymbol === 'RLGHLUSDT'), false);
+    event.venueSymbol === 'RLGHLUSDT'), false);
+  assert.equal(reviewed.newEvents.some(event =>
+    event.changeType === 'delisted' && event.venueSymbol === 'RWBDUSDT'), false);
   assert.deepEqual(
     reviewed.state.sources['spot:bitget'].reviewedExpansionEvidence['bitget-reality-3000-2026-10-27'],
     {
@@ -732,7 +740,7 @@ test('reviewed Bitget expansion resets only the disputed RLGHL removal clock', (
       currentCount:3_019,
       addedCount:2_313,
       missingCount:1,
-      missingVenueSymbols:['RLGHLUSDT'],
+      missingVenueSymbols:['RWBDUSDT'],
       missingEvidenceResetAt:'2026-11-01T00:45:00.000Z',
       matchedCount:3_017,
       legacyCount:2,
@@ -759,7 +767,7 @@ test('reviewed Bitget expansion resets only the disputed RLGHL removal clock', (
 
   const recovered = mergeListingAudit(reviewed.state, fullObservations({
     'spot:bitget':{
-      market:'spot', venue:'bitget', status:'full', listings:[...currentRows, disputed],
+      market:'spot', venue:'bitget', status:'full', listings:[...currentRows, disputedRWBD],
       catalogEvidence:{
         ...catalogEvidence,
         instrumentsCount:3_020,
@@ -772,7 +780,7 @@ test('reviewed Bitget expansion resets only the disputed RLGHL removal clock', (
     },
   }), new Date('2026-11-02T00:45:00Z'));
   assert.equal(recovered.snapshot.sources.find(row => row.sourceKey === 'spot:bitget').status, 'full');
-  assert.equal(recovered.newEvents.some(event => event.venueSymbol === 'RLGHLUSDT'), false);
+  assert.equal(recovered.newEvents.some(event => event.venueSymbol === 'RWBDUSDT'), false);
 
   const confirmed = mergeListingAudit(reviewed.state, fullObservations({
     'spot:bitget':{
@@ -781,9 +789,9 @@ test('reviewed Bitget expansion resets only the disputed RLGHL removal clock', (
   }), new Date('2026-11-02T00:45:00Z'));
   assert.equal(confirmed.snapshot.sources.find(row => row.sourceKey === 'spot:bitget').status, 'full');
   assert.equal(confirmed.newEvents.filter(event =>
-    event.changeType === 'delisted' && event.venueSymbol === 'RLGHLUSDT').length, 1);
+    event.changeType === 'delisted' && event.venueSymbol === 'RWBDUSDT').length, 1);
 
-  const arbitraryMissingRows = [disputed, ...retainedLegacy.slice(1), ...additions];
+  const arbitraryMissingRows = [recoveredRLGHL, disputedRWBD, ...retainedLegacy.slice(1), ...additions];
   const arbitraryMissing = mergeListingAudit(baseline.state, fullObservations({
     'spot:bitget':{
       market:'spot', venue:'bitget', status:'full', listings:arbitraryMissingRows, catalogEvidence,
@@ -793,7 +801,7 @@ test('reviewed Bitget expansion resets only the disputed RLGHL removal clock', (
     'unavailable');
 
   const secondAddition = row('spot:bitget', 'NEW2313');
-  const twoMissingRows = [...retainedLegacy.slice(1), ...additions, secondAddition];
+  const twoMissingRows = [recoveredRLGHL, ...retainedLegacy.slice(1), ...additions, secondAddition];
   const twoMissing = mergeListingAudit(baseline.state, fullObservations({
     'spot:bitget':{
       market:'spot', venue:'bitget', status:'full', listings:twoMissingRows, catalogEvidence,
