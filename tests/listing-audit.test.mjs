@@ -718,6 +718,7 @@ test('reviewed Bitget expansion resets only the disputed RLGHL removal clock', (
   assert.equal(source.status, 'partial');
   assert.equal(source.added, 2_313);
   assert.equal(source.pendingRemovalCount, 1);
+  assert.equal(reviewed.newEvents.length, 2_313);
   assert.equal(reviewed.state.sources['spot:bitget'].pendingRemovals['spot:bitget:RLGHLUSDT'],
     '2026-11-01T00:45:00.000Z');
   assert.equal(reviewed.newEvents.some(event =>
@@ -736,6 +737,16 @@ test('reviewed Bitget expansion resets only the disputed RLGHL removal clock', (
       matchedCount:3_017,
       legacyCount:2,
     },
+  );
+  const compactReviewed = compactListingAuditBundle(reviewed.state, reviewed.snapshot);
+  const hydratedReviewed = hydrateListingAuditState(compactReviewed.state);
+  assert.deepEqual(
+    hydratedReviewed.sources['spot:bitget'].reviewedExpansionEvidence,
+    reviewed.state.sources['spot:bitget'].reviewedExpansionEvidence,
+  );
+  assert.deepEqual(
+    hydratedReviewed.sources['spot:bitget'].pendingRemovals,
+    reviewed.state.sources['spot:bitget'].pendingRemovals,
   );
 
   const sameDay = mergeListingAudit(reviewed.state, fullObservations({
