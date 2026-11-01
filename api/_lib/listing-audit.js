@@ -37,7 +37,7 @@ export const REVIEWED_SOURCE_EXPANSIONS = Object.freeze([
     addedCountMin: 2_200,
     addedCountMax: 3_000,
     legacyCountMax: 10,
-    allowedMissingVenueSymbols: Object.freeze(['RLGHLUSDT']),
+    allowedMissingVenueSymbols: Object.freeze(['RWBDUSDT']),
     resetMissingEvidence: true,
     reviewedFrom: '2026-10-27',
     reviewedThrough: '2026-11-15',
