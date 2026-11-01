@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: '20 1 * * *'
   workflow_dispatch:
+    inputs:
+      dashboard_url:
+        description: Public Dashboard origin to audit (use a Git-origin Preview for pre-merge validation)
+        required: false
+        default: https://avenir-rwa-analyst.vercel.app
+        type: string
 
 permissions:
   contents: read
@@ -16,6 +22,8 @@ jobs:
   production-health:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      DASHBOARD_URL: ${{ inputs.dashboard_url || 'https://avenir-rwa-analyst.vercel.app' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

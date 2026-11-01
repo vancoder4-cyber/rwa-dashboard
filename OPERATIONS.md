@@ -17,7 +17,7 @@
    - The endpoint is intentionally read-only and returns no credentials or private configuration.
 
 3. **GitHub Actions**
-   - `.github/workflows/data-health.yml` runs every day at 01:20 UTC and on demand.
+   - `.github/workflows/data-health.yml` runs every day at 01:20 UTC against Production and on demand; a manual dispatch may set `dashboard_url` to a Git-origin Preview for pre-merge read-only audits.
    - `.github/workflows/production-deployment-guard.yml` runs after a successful Production deployment status and every 15 minutes. It is the external provenance authority: it joins GitHub `main`, the newest Production deployment created by `vercel[bot]`, `/api/deployment-provenance`, and exact production/static-repository hashes. A missing Project ID, unmatched deployment URL/ID, CLI source, wrong repo/project/ref/SHA, runtime disagreement or artifact drift fails the workflow. No Vercel write-capable token is stored in Actions.
    - This guard protects Dashboard only and has no Bot dependency. Dashboard remains authoritative and fully operational if a downstream Bot is absent, stale or failing; consumer guards may only pause their own writes and notifications.
    - It runs contract tests, inline-script parsing, live reference/funding/Nasdaq/OCC/OKX data contracts, the rolling seven-day competitor-listing review and the production health endpoint. Traditional checks include Top 100 cardinality, adjacent-session alignment and rank-change invariants. OKX checks keep Crypto `instCategory=1` excluded, preserve SWAP + X-Perp listings, and inner-join OI to the live catalog.

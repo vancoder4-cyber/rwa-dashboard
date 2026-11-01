@@ -78,6 +78,14 @@ DASHBOARD_URL=https://your-preview.vercel.app npm run audit:data
 DASHBOARD_URL=https://your-preview.vercel.app npm run audit:health
 ```
 
+If the release operator's local network cannot reach the Preview, run the same branch code on GitHub's runner instead:
+
+```bash
+gh workflow run data-health.yml --ref <branch> -f dashboard_url=https://your-preview.vercel.app
+```
+
+The scheduled workflow keeps the production origin as its default. The override is accepted only on an explicitly dispatched run and does not change the application or writer configuration.
+
 Configure this GitHub Actions secret before enabling the Production deployment guard:
 
 - `VERCEL_PROJECT_ID`: the exact Dashboard project ID;
