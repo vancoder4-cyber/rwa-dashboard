@@ -68,15 +68,16 @@ test('migration files are ordered, immutable-checksummed, and parse into stateme
     '0017_binance_lenovo_event_identity.sql',
     '0018_bitget_softbank_identity.sql',
     '0019_reviewed_rwa_identity_corrections.sql',
+    '0020_jio_jpl_public_identity.sql',
   ]);
   assert.deepEqual(migrations.map(row => row.version), [
-    '0001', '0002', '0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013', '0014', '0015', '0016', '0017', '0018', '0019',
+    '0001', '0002', '0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013', '0014', '0015', '0016', '0017', '0018', '0019', '0020',
   ]);
   for (const migration of migrations) {
     assert.match(migration.filename, MIGRATION_FILE_PATTERN);
     assert.match(migration.checksum, /^[0-9a-f]{64}$/);
     assert.equal(migration.checksum, migrationChecksum(migration.sql));
-    const minimumStatements = ['0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013', '0014', '0015', '0016', '0017', '0018', '0019']
+    const minimumStatements = ['0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013', '0014', '0015', '0016', '0017', '0018', '0019', '0020']
       .includes(migration.version) ? 3 : 11;
     assert.ok(migration.statements.length >= minimumStatements);
     assert.ok(migration.statements.every(statement => statement.trim().length > 0));
@@ -273,6 +274,27 @@ test('reviewed H100/MOONSHOT/OURA migration is exact, idempotent, and event-neut
   assert.doesNotMatch(sql, /UPDATE analytics\.catalog_change_event/);
   assert.doesNotMatch(sql, /DELETE FROM analytics\.catalog_change_event/);
   assert.doesNotMatch(sql, /INSERT INTO ingest\.catalog_membership/);
+});
+
+test('JIO to JPL forward migration rebinds exact history and repairs publication without creating events', async () => {
+  const sql = await readFile(path.join(MIGRATION_DIRECTORY, '0020_jio_jpl_public_identity.sql'), 'utf8');
+  assert.match(sql, /VALUES \('equity:JPL'\)/);
+  assert.match(sql, /'perp:tradexyz', 'XYZ:JIO'/);
+  assert.match(sql, /'perp:gate', 'JIO_USDT'/);
+  assert.match(sql, /old_asset_version\.category = 'pre-ipo'/);
+  assert.match(sql, /old_asset_version\.canonical_underlying = 'JIO'/);
+  assert.match(sql, /SET asset_version_id = target_asset_version\.asset_version_id/);
+  assert.match(sql, /event\.event_type IN \('listed', 'relisted'\)/);
+  assert.match(sql, /'venueCategory', 'equity'/);
+  assert.match(sql, /'lifecycleStatus', 'public'/);
+  assert.match(sql, /published\.canonical_symbol IS DISTINCT FROM 'JPL'/);
+  assert.match(sql, /old_asset\.asset_key = 'pre-ipo:JIO'/);
+  assert.match(sql, /an instrument version remains bound to legacy pre-ipo:JIO/);
+  assert.match(sql, /legacy pre-ipo:JIO identity remains current/);
+  assert.doesNotMatch(sql, /INSERT INTO analytics\.catalog_change_event/);
+  assert.doesNotMatch(sql, /DELETE FROM analytics\.catalog_change_event/);
+  assert.doesNotMatch(sql, /INSERT INTO ingest\.catalog_membership/);
+  assert.doesNotMatch(sql, /\b(?:LIKE|ILIKE)\b|\bsimilarity\s*\(/i);
 });
 
 test('SQL splitter preserves comments, quoted semicolons, and dollar-quoted role blocks', () => {

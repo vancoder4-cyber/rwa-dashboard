@@ -199,6 +199,10 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
   assert.equal(securityLifecycleStatus('SOFTBANK', 'equity'), 'public');
   assert.equal(securityDisplayName('KO'), 'The Coca-Cola Company');
   assert.equal(securityDisplayName('SOXS'), 'Direxion Daily Semiconductor Bear 3X ETF');
+  assert.deepEqual(normalizeSignalIdentity('JIO', 'pre-ipo', { venue:'tradexyz' }), { symbol:'JPL', category:'equity' });
+  assert.deepEqual(normalizeSignalIdentity('JIO', 'equity', { venue:'gate' }), { symbol:'JPL', category:'equity' });
+  assert.equal(securityDisplayName('JIO'), 'Jio Platforms Limited');
+  assert.equal(securityLifecycleStatus('JIO', 'equity'), 'public');
   assert.deepEqual(normalizeSignalIdentity('OPENAI', 'equity'), { symbol:'OPENAI', category:'pre-ipo' });
   assert.deepEqual(normalizeSignalIdentity('ANTHROPIC', 'equity'), { symbol:'ANTHROPIC', category:'pre-ipo' });
   assert.deepEqual(normalizeSignalIdentity('MOONSHOT', 'equity', { venue:'bitget' }), { symbol:'MOONSHOT', category:'pre-ipo' });
@@ -277,6 +281,9 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
   });
   assert.deepEqual(SECURITY_LISTING_REGISTRY.SOFTBANK, {
     category:'equity', status:'public', name:'SoftBank Group Corp.', listedOn:'1994-07-22', aliases:[],
+  });
+  assert.deepEqual(SECURITY_LISTING_REGISTRY.JPL, {
+    category:'equity', status:'public', name:'Jio Platforms Limited', listedOn:'2026-10-28', aliases:['JIO'],
   });
   assert.match(html, /SOFTBANK:\s*\{\s*name:\s*"SoftBank Group Corp\.",\s*category:\s*"equity"\s*\}/);
   for (const [canonical, record] of Object.entries(SECURITY_LISTING_REGISTRY)) {

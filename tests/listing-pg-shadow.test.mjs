@@ -717,6 +717,22 @@ test('verified identity guard rejects category/canonical drift but permits non-i
     lifecycle_status:null,
   });
   assert.equal(exactCorrections.filter(row => ['MOONSHOT', 'OURA'].includes(row.canonical_underlying)).length, 4);
+  assert.deepEqual(exactCorrections.filter(row => row.canonical_underlying === 'JPL'), [
+    {
+      source_key:'perp:tradexyz', official_product_key:'XYZ:JIO',
+      previous_asset_key:'pre-ipo:JIO', previous_category:'pre-ipo',
+      previous_canonical_underlying:'JIO', previous_venue_category:'pre-ipo',
+      previous_lifecycle_status:null, asset_key:'equity:JPL', category:'equity',
+      canonical_underlying:'JPL', venue_category:'equity', lifecycle_status:'public',
+    },
+    {
+      source_key:'perp:gate', official_product_key:'JIO_USDT',
+      previous_asset_key:'pre-ipo:JIO', previous_category:'pre-ipo',
+      previous_canonical_underlying:'JIO', previous_venue_category:'pre-ipo',
+      previous_lifecycle_status:null, asset_key:'equity:JPL', category:'equity',
+      canonical_underlying:'JPL', venue_category:'equity', lifecycle_status:'public',
+    },
+  ]);
   assert.doesNotMatch(metadataGuard.text, /incoming\.(?:display_name|name|quote_currency|official_status|asset_fingerprint|instrument_fingerprint)/);
   const metadataPayload = JSON.parse(metadataGuard.params[0]);
   const metadataGuardRow = metadataPayload.find(row => row.official_product_key === 'AAPL-GATE-PERP');

@@ -22,6 +22,7 @@ import listingChangesHandler, {
 import { validateListingAuditSnapshot } from '../api/health.js';
 import {
   bitgetPerpListingFromOfficial,
+  gatePerpListingFromOfficial,
   gateExactLegacySpotListing,
   isDedicatedTradeXyzSource,
   krakenListingCandidate,
@@ -133,6 +134,40 @@ test('Bitget SOFTBANK exact official product resolves to the reviewed public ide
   assert.equal(bitgetPerpListingFromOfficial({
     symbol:'QNTUSDT', baseCoin:'QNT', isRwa:'NO', symbolType:'crypto', status:'online',
   }), null);
+});
+
+test('JIO venue products resolve to the listed JPL identity while preserving venue category', () => {
+  assert.deepEqual(tradeXyzListingFromOfficial({
+    name:'xyz:JIO', fullName:'Jio Platforms', isDelisted:false,
+  }, 'stocks'), {
+    market:'perp',
+    venue:'tradexyz',
+    venueSymbol:'XYZ:JIO',
+    canonicalSymbol:'JPL',
+    category:'equity',
+    venueCategory:'equity',
+    lifecycleStatus:'public',
+    name:'Jio Platforms',
+    identityStatus:'verified',
+    identityEvidence:'Hyperliquid perpCategories:stocks',
+  });
+  assert.deepEqual(gatePerpListingFromOfficial({
+    name:'JIO_USDT', contract_type:'stocks', is_pre_market:false,
+  }), {
+    market:'perp',
+    venue:'gate',
+    venueSymbol:'JIO_USDT',
+    canonicalSymbol:'JPL',
+    category:'equity',
+    venueCategory:'equity',
+    lifecycleStatus:'public',
+    name:'Jio Platforms Limited',
+    identityStatus:'verified',
+    identityEvidence:'Gate contract_type=stocks',
+  });
+  assert.equal(gatePerpListingFromOfficial({
+    name:'JIO_USDT', contract_type:'crypto', is_pre_market:false,
+  }), null, 'the lifecycle alias must not upgrade a non-security product');
 });
 
 test('listing audit emits Spot and Perp additions once and leaves an unavailable source baseline untouched', () => {
@@ -330,11 +365,11 @@ test('reviewed Binance exact alias correction updates the same contract without 
   });
 });
 
-test('reviewed H100 and private-company corrections are exact, one-way, and event-neutral', () => {
+test('reviewed H100, JPL lifecycle and private-company corrections are exact, one-way, and event-neutral', () => {
   const cases = REVIEWED_EXACT_CANONICAL_CORRECTIONS.filter(correction =>
-    ['H100_USDT', 'MOONSHOTUSDT', 'MOONSHOT-USDT-SWAP', 'OURAUSDT', 'OURA-USDT-SWAP']
+    ['XYZ:JIO', 'JIO_USDT', 'H100_USDT', 'MOONSHOTUSDT', 'MOONSHOT-USDT-SWAP', 'OURAUSDT', 'OURA-USDT-SWAP']
       .includes(correction.venueSymbol));
-  assert.equal(cases.length, 5);
+  assert.equal(cases.length, 7);
   for (const correction of cases) {
     const [market, venue] = correction.sourceKey.split(':');
     const legacy = {
@@ -585,6 +620,9 @@ test('listing audit admits the reviewed Bitget 3000+ expansion only with exact d
       previousCount:600,
       currentCount:3_019,
       addedCount:2_419,
+      missingCount:0,
+      missingVenueSymbols:[],
+      missingEvidenceResetAt:null,
       matchedCount:3_017,
       legacyCount:2,
     },
@@ -634,6 +672,135 @@ test('listing audit admits the reviewed Bitget 3000+ expansion only with exact d
     unverified.snapshot.sources.find(source => source.sourceKey === 'spot:bitget').status,
     'unavailable',
   );
+});
+
+test('reviewed Bitget expansion resets only the disputed RLGHL removal clock', () => {
+  const disputed = {
+    ...row('spot:bitget', 'LGHL'),
+    venueSymbol:'RLGHLUSDT',
+    canonicalSymbol:'LGHL',
+  };
+  const retainedLegacy = Array.from(
+    { length:706 },
+    (_, index) => row('spot:bitget', `OLD${String(index).padStart(4, '0')}`),
+  );
+  const additions = Array.from(
+    { length:2_313 },
+    (_, index) => row('spot:bitget', `NEW${String(index).padStart(4, '0')}`),
+  );
+  const previousRows = [disputed, ...retainedLegacy];
+  const currentRows = [...retainedLegacy, ...additions];
+  const catalogEvidence = {
+    status:'full',
+    method:'bitget-reality-stock-info-exact-intersection-v1',
+    instrumentsCount:3_019,
+    realityCandidatesCount:3_017,
+    stockInfoCount:3_017,
+    matchedCount:3_017,
+    admittedCount:3_019,
+    admittedRealityCount:3_017,
+    legacyCount:2,
+  };
+  const baseline = mergeListingAudit(null, fullObservations({
+    'spot:bitget':{ market:'spot', venue:'bitget', status:'full', listings:previousRows },
+  }), new Date('2026-10-30T00:45:00Z'));
+  const stalePending = structuredClone(baseline.state);
+  stalePending.sources['spot:bitget'].pendingRemovals = {
+    'spot:bitget:RLGHLUSDT':'2026-10-30T00:45:00.000Z',
+  };
+
+  const reviewed = mergeListingAudit(stalePending, fullObservations({
+    'spot:bitget':{
+      market:'spot', venue:'bitget', status:'full', listings:currentRows, catalogEvidence,
+    },
+  }), new Date('2026-11-01T00:45:00Z'));
+  const source = reviewed.snapshot.sources.find(row => row.sourceKey === 'spot:bitget');
+  assert.equal(source.status, 'partial');
+  assert.equal(source.added, 2_313);
+  assert.equal(source.pendingRemovalCount, 1);
+  assert.equal(reviewed.newEvents.length, 2_313);
+  assert.equal(reviewed.state.sources['spot:bitget'].pendingRemovals['spot:bitget:RLGHLUSDT'],
+    '2026-11-01T00:45:00.000Z');
+  assert.equal(reviewed.newEvents.some(event =>
+    event.changeType === 'delisted' && event.venueSymbol === 'RLGHLUSDT'), false);
+  assert.deepEqual(
+    reviewed.state.sources['spot:bitget'].reviewedExpansionEvidence['bitget-reality-3000-2026-10-27'],
+    {
+      acceptedAt:'2026-11-01T00:45:00.000Z',
+      method:catalogEvidence.method,
+      previousCount:707,
+      currentCount:3_019,
+      addedCount:2_313,
+      missingCount:1,
+      missingVenueSymbols:['RLGHLUSDT'],
+      missingEvidenceResetAt:'2026-11-01T00:45:00.000Z',
+      matchedCount:3_017,
+      legacyCount:2,
+    },
+  );
+  const compactReviewed = compactListingAuditBundle(reviewed.state, reviewed.snapshot);
+  const hydratedReviewed = hydrateListingAuditState(compactReviewed.state);
+  assert.deepEqual(
+    hydratedReviewed.sources['spot:bitget'].reviewedExpansionEvidence,
+    reviewed.state.sources['spot:bitget'].reviewedExpansionEvidence,
+  );
+  assert.deepEqual(
+    hydratedReviewed.sources['spot:bitget'].pendingRemovals,
+    reviewed.state.sources['spot:bitget'].pendingRemovals,
+  );
+
+  const sameDay = mergeListingAudit(reviewed.state, fullObservations({
+    'spot:bitget':{
+      market:'spot', venue:'bitget', status:'full', listings:currentRows, catalogEvidence,
+    },
+  }), new Date('2026-11-01T12:45:00Z'));
+  assert.equal(sameDay.snapshot.sources.find(row => row.sourceKey === 'spot:bitget').status, 'partial');
+  assert.equal(sameDay.newEvents.some(event => event.changeType === 'delisted'), false);
+
+  const recovered = mergeListingAudit(reviewed.state, fullObservations({
+    'spot:bitget':{
+      market:'spot', venue:'bitget', status:'full', listings:[...currentRows, disputed],
+      catalogEvidence:{
+        ...catalogEvidence,
+        instrumentsCount:3_020,
+        realityCandidatesCount:3_018,
+        stockInfoCount:3_018,
+        matchedCount:3_018,
+        admittedCount:3_020,
+        admittedRealityCount:3_018,
+      },
+    },
+  }), new Date('2026-11-02T00:45:00Z'));
+  assert.equal(recovered.snapshot.sources.find(row => row.sourceKey === 'spot:bitget').status, 'full');
+  assert.equal(recovered.newEvents.some(event => event.venueSymbol === 'RLGHLUSDT'), false);
+
+  const confirmed = mergeListingAudit(reviewed.state, fullObservations({
+    'spot:bitget':{
+      market:'spot', venue:'bitget', status:'full', listings:currentRows, catalogEvidence,
+    },
+  }), new Date('2026-11-02T00:45:00Z'));
+  assert.equal(confirmed.snapshot.sources.find(row => row.sourceKey === 'spot:bitget').status, 'full');
+  assert.equal(confirmed.newEvents.filter(event =>
+    event.changeType === 'delisted' && event.venueSymbol === 'RLGHLUSDT').length, 1);
+
+  const arbitraryMissingRows = [disputed, ...retainedLegacy.slice(1), ...additions];
+  const arbitraryMissing = mergeListingAudit(baseline.state, fullObservations({
+    'spot:bitget':{
+      market:'spot', venue:'bitget', status:'full', listings:arbitraryMissingRows, catalogEvidence,
+    },
+  }), new Date('2026-11-01T00:45:00Z'));
+  assert.equal(arbitraryMissing.snapshot.sources.find(row => row.sourceKey === 'spot:bitget').status,
+    'unavailable');
+
+  const secondAddition = row('spot:bitget', 'NEW2313');
+  const twoMissingRows = [...retainedLegacy.slice(1), ...additions, secondAddition];
+  const twoMissing = mergeListingAudit(baseline.state, fullObservations({
+    'spot:bitget':{
+      market:'spot', venue:'bitget', status:'full', listings:twoMissingRows, catalogEvidence,
+    },
+  }), new Date('2026-11-01T00:45:00Z'));
+  assert.equal(twoMissing.snapshot.sources.find(row => row.sourceKey === 'spot:bitget').status,
+    'unavailable');
 });
 
 test('listing audit keeps active review reminders and closes them when exact identity becomes verified', () => {
