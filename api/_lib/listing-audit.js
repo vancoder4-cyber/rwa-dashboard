@@ -3,7 +3,7 @@ import { REVIEWED_ETF_IDENTITIES } from './security-identity.js';
 export const LISTING_AUDIT_SCHEMA_VERSION = 'rwa-listing-audit/v1';
 export const LISTING_AUDIT_STATE_VERSION = 1;
 export const LISTING_EVENT_RETENTION_DAYS = 45;
-export const LISTING_EVENT_MAX = 2_000;
+export const LISTING_EVENT_MAX = 5_000;
 export const LISTING_KNOWN_RETENTION_DAYS = 180;
 export const LISTING_SOURCE_DRIFT_RATIO = 0.10;
 export const LISTING_SOURCE_DRIFT_ALLOWANCE = 5;
@@ -21,6 +21,27 @@ export const LISTING_SOURCE_KEYS = Object.freeze([
   'spot:binance',
   'spot:okx',
 ]);
+// One-way, source-scoped catalog expansions that were independently reviewed
+// against two official venue catalogs. This is intentionally not a general
+// threshold override: it applies only to the exact last-good -> expanded
+// count transition, within the bounded release window, and it can be consumed
+// only once by a persisted source state.
+export const REVIEWED_SOURCE_EXPANSIONS = Object.freeze([
+  Object.freeze({
+    id: 'bitget-reality-3000-2026-10-27',
+    sourceKey: 'spot:bitget',
+    previousCountMin: 500,
+    previousCountMax: 800,
+    currentCountMin: 3_000,
+    currentCountMax: 3_500,
+    addedCountMin: 2_200,
+    addedCountMax: 3_000,
+    legacyCountMax: 10,
+    reviewedFrom: '2026-10-27',
+    reviewedThrough: '2026-11-15',
+    evidenceMethod: 'bitget-reality-stock-info-exact-intersection-v1',
+  }),
+]);
 // Dated, officially reviewed company-lifecycle corrections. Only these
 // symbols may move one way from an earlier Pre-IPO identity to a confirmed
 // public Equity without entering the generic identity-drift quarantine. An
@@ -35,20 +56,82 @@ export const REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS = Object.freeze([
   'UNITREE',
 ]);
 export const REVIEWED_ETF_CATEGORY_CORRECTIONS = Object.freeze(Object.keys(REVIEWED_ETF_IDENTITIES));
-// Exact venue-product aliases whose official security identity was corrected
-// after an earlier Runtime Cache baseline had already been established. These
-// entries are deliberately one-way and product-scoped: they update identity
-// metadata for the unchanged listing key and never create a listing event.
+// Exact venue products whose reviewed identity was corrected after an earlier
+// Runtime Cache baseline had already been established. These entries are
+// deliberately one-way and product-scoped: they update identity metadata for
+// the unchanged listing key and never create a listing event.
 export const REVIEWED_EXACT_CANONICAL_CORRECTIONS = Object.freeze([
   Object.freeze({
     sourceKey: 'perp:binance',
     venueSymbol: 'HK0992USDT',
     previousCanonicalSymbol: 'HK0992',
     canonicalSymbol: 'LENOVO',
+    previousCategory: 'equity',
     category: 'equity',
+    previousVenueCategory: 'equity',
     venueCategory: 'equity',
     previousLifecycleStatus: null,
     lifecycleStatus: 'public',
+  }),
+  Object.freeze({
+    sourceKey: 'perp:gate',
+    venueSymbol: 'H100_USDT',
+    previousCanonicalSymbol: 'H100',
+    canonicalSymbol: 'H100',
+    previousCategory: 'index',
+    category: 'commodity',
+    previousVenueCategory: 'index',
+    venueCategory: 'index',
+    previousLifecycleStatus: null,
+    lifecycleStatus: null,
+  }),
+  Object.freeze({
+    sourceKey: 'perp:bitget',
+    venueSymbol: 'MOONSHOTUSDT',
+    previousCanonicalSymbol: 'MOONSHOT',
+    canonicalSymbol: 'MOONSHOT',
+    previousCategory: 'equity',
+    category: 'pre-ipo',
+    previousVenueCategory: 'equity',
+    venueCategory: 'equity',
+    previousLifecycleStatus: null,
+    lifecycleStatus: 'pre-ipo',
+  }),
+  Object.freeze({
+    sourceKey: 'perp:okx',
+    venueSymbol: 'MOONSHOT-USDT-SWAP',
+    previousCanonicalSymbol: 'MOONSHOT',
+    canonicalSymbol: 'MOONSHOT',
+    previousCategory: 'equity',
+    category: 'pre-ipo',
+    previousVenueCategory: 'equity',
+    venueCategory: 'equity',
+    previousLifecycleStatus: null,
+    lifecycleStatus: 'pre-ipo',
+  }),
+  Object.freeze({
+    sourceKey: 'perp:bitget',
+    venueSymbol: 'OURAUSDT',
+    previousCanonicalSymbol: 'OURA',
+    canonicalSymbol: 'OURA',
+    previousCategory: 'equity',
+    category: 'pre-ipo',
+    previousVenueCategory: 'equity',
+    venueCategory: 'equity',
+    previousLifecycleStatus: null,
+    lifecycleStatus: 'pre-ipo',
+  }),
+  Object.freeze({
+    sourceKey: 'perp:okx',
+    venueSymbol: 'OURA-USDT-SWAP',
+    previousCanonicalSymbol: 'OURA',
+    canonicalSymbol: 'OURA',
+    previousCategory: 'equity',
+    category: 'pre-ipo',
+    previousVenueCategory: 'equity',
+    venueCategory: 'equity',
+    previousLifecycleStatus: null,
+    lifecycleStatus: 'pre-ipo',
   }),
 ]);
 
@@ -72,6 +155,32 @@ function normalizedUpper(value) {
 function isoTimestamp(value, fallback = null) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? fallback : date.toISOString();
+}
+
+function normalizedCatalogEvidence(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const method = normalized(input.method);
+  const status = normalized(input.status).toLowerCase();
+  if (method !== 'bitget-reality-stock-info-exact-intersection-v1' || status !== 'full') return null;
+  const countKeys = [
+    'instrumentsCount',
+    'realityCandidatesCount',
+    'stockInfoCount',
+    'matchedCount',
+    'admittedCount',
+    'admittedRealityCount',
+    'legacyCount',
+  ];
+  const counts = Object.fromEntries(countKeys.map(key => [key, Number(input[key])]));
+  if (Object.values(counts).some(value => !Number.isSafeInteger(value) || value < 0)) return null;
+  if (
+    counts.matchedCount !== counts.realityCandidatesCount ||
+    counts.stockInfoCount < counts.matchedCount ||
+    counts.admittedRealityCount > counts.matchedCount ||
+    counts.admittedCount !== counts.admittedRealityCount + counts.legacyCount ||
+    counts.instrumentsCount < counts.admittedCount
+  ) return null;
+  return Object.freeze({ method, status, ...counts });
 }
 
 export function listingSourceKey(market, venue) {
@@ -148,6 +257,9 @@ export function normalizeSourceObservation(input) {
   const validationReason = invalidCatalog
     ? `catalog normalization rejected ${invalidCount} invalid and ${duplicateCount} duplicate listings`
     : null;
+  const catalogEvidence = sourceKey === 'spot:bitget'
+    ? normalizedCatalogEvidence(input?.catalogEvidence)
+    : null;
   return {
     sourceKey,
     market,
@@ -155,6 +267,7 @@ export function normalizeSourceObservation(input) {
     status,
     reason: normalized(input?.reason) || validationReason,
     listings: [...rows.values()].sort((left, right) => left.key.localeCompare(right.key)),
+    catalogEvidence,
   };
 }
 
@@ -279,18 +392,52 @@ export function isReviewedExactCanonicalCorrection(previousRow, currentRow) {
     currentVenueSymbol === correction.venueSymbol &&
     previousCanonicalSymbol === correction.previousCanonicalSymbol &&
     canonicalSymbol === correction.canonicalSymbol &&
-    previousCategory === correction.category &&
+    previousCategory === correction.previousCategory &&
     category === correction.category &&
-    previousVenueCategory === correction.venueCategory &&
+    previousVenueCategory === correction.previousVenueCategory &&
     venueCategory === correction.venueCategory &&
     previousLifecycleStatus === normalized(correction.previousLifecycleStatus).toLowerCase() &&
-    lifecycleStatus === correction.lifecycleStatus
+    lifecycleStatus === normalized(correction.lifecycleStatus).toLowerCase()
   );
 }
 
 function isReviewedIdentityCorrection(previousRow, currentRow) {
   return isReviewedLifecycleCategoryCorrection(previousRow, currentRow) ||
     isReviewedExactCanonicalCorrection(previousRow, currentRow);
+}
+
+function reviewedSourceExpansionForTransition({
+  observation,
+  previousSource,
+  previousRows,
+  currentRows,
+  addedRows,
+  missingRows,
+  observedAt,
+}) {
+  if (missingRows.length) return null;
+  const observedDay = normalized(observedAt).slice(0, 10);
+  const consumed = new Set(Array.isArray(previousSource?.reviewedExpansionIds)
+    ? previousSource.reviewedExpansionIds.map(normalized).filter(Boolean)
+    : []);
+  const evidence = observation?.catalogEvidence;
+  return REVIEWED_SOURCE_EXPANSIONS.find(review =>
+    observation?.sourceKey === review.sourceKey &&
+    !consumed.has(review.id) &&
+    observedDay >= review.reviewedFrom && observedDay <= review.reviewedThrough &&
+    previousRows.length >= review.previousCountMin && previousRows.length <= review.previousCountMax &&
+    currentRows.length >= review.currentCountMin && currentRows.length <= review.currentCountMax &&
+    addedRows.length >= review.addedCountMin && addedRows.length <= review.addedCountMax &&
+    currentRows.length === previousRows.length + addedRows.length &&
+    currentRows.every(row => row.identityStatus === 'verified' && row.inclusionStatus === 'eligible') &&
+    evidence?.status === 'full' &&
+    evidence?.method === review.evidenceMethod &&
+    evidence?.admittedCount === currentRows.length &&
+    evidence?.admittedRealityCount + evidence?.legacyCount === currentRows.length &&
+    evidence?.legacyCount <= review.legacyCountMax &&
+    evidence?.matchedCount === evidence?.realityCandidatesCount &&
+    evidence?.admittedRealityCount <= evidence?.matchedCount
+  ) || null;
 }
 
 function dailyEventTimestamp(value) {
@@ -390,7 +537,18 @@ export function mergeListingAudit(previousState, rawObservations, now = new Date
     const extremePureGrowth = !warming && !hasRemovals &&
       observedAddedRows.length > LISTING_SOURCE_EXTREME_GROWTH_ALLOWANCE &&
       driftRatio > LISTING_SOURCE_EXTREME_GROWTH_RATIO;
-    if (identityDrift.length || removalDrift || extremePureGrowth) {
+    const reviewedExpansion = extremePureGrowth
+      ? reviewedSourceExpansionForTransition({
+        observation,
+        previousSource,
+        previousRows,
+        currentRows,
+        addedRows: observedAddedRows,
+        missingRows: observedMissingRows,
+        observedAt: nowIso,
+      })
+      : null;
+    if (identityDrift.length || removalDrift || (extremePureGrowth && !reviewedExpansion)) {
       const reason = identityDrift.length
         ? `identity drift for ${identityDrift.slice(0, 3).map(row => row.venueSymbol).join(', ')}`
         : removalDrift
@@ -492,6 +650,26 @@ export function mergeListingAudit(previousState, rawObservations, now = new Date
     }
 
     const baselineAt = previousSource?.baselineAt || nowIso;
+    const reviewedExpansionIds = new Set(Array.isArray(previousSource?.reviewedExpansionIds)
+      ? previousSource.reviewedExpansionIds.map(normalized).filter(Boolean)
+      : []);
+    const reviewedExpansionEvidence = previousSource?.reviewedExpansionEvidence &&
+      typeof previousSource.reviewedExpansionEvidence === 'object' &&
+      !Array.isArray(previousSource.reviewedExpansionEvidence)
+      ? { ...previousSource.reviewedExpansionEvidence }
+      : {};
+    if (reviewedExpansion) reviewedExpansionIds.add(reviewedExpansion.id);
+    if (reviewedExpansion) {
+      reviewedExpansionEvidence[reviewedExpansion.id] = {
+        acceptedAt: nowIso,
+        method: observation.catalogEvidence.method,
+        previousCount: previousRows.length,
+        currentCount: currentRows.length,
+        addedCount: addedRows.length,
+        matchedCount: observation.catalogEvidence.matchedCount,
+        legacyCount: observation.catalogEvidence.legacyCount,
+      };
+    }
     next.sources[sourceKey] = {
       sourceKey,
       market,
@@ -502,6 +680,8 @@ export function mergeListingAudit(previousState, rawObservations, now = new Date
       // keeps the Runtime Cache bundle safely below its size budget.
       listingKeys: effectiveRows.map(row => row.key),
       pendingRemovals,
+      reviewedExpansionIds: [...reviewedExpansionIds].sort(),
+      reviewedExpansionEvidence,
     };
     sourceSummaries.push({
       sourceKey,

@@ -1,4 +1,6 @@
 import { getJsonWithRetry } from './_lib/http.mjs';
+import { canonicalOkxSpotSymbol, OKX_SPOT_GOLD_EXCEPTIONS } from '../api/_lib/okx.js';
+import { collectBitgetSpot } from '../api/_lib/listing-sources.js';
 
 const baseUrl = String(process.env.DASHBOARD_URL || 'https://avenir-rwa-analyst.vercel.app').replace(/\/$/, '');
 
@@ -45,18 +47,74 @@ for (const field of ['tickers','marks','openInterest','funding']) {
 
 const okxSpot = await getJson('/api/okx-market?type=spot-snapshot', { timeoutMs:30_000 });
 const okxSpotInstruments = Array.isArray(okxSpot.instruments) ? okxSpot.instruments : [];
-if (okxSpotInstruments.length < 51) throw new Error(`OKX spot catalog regressed below 51 listings: ${okxSpotInstruments.length}`);
-const exactOkxGold = new Set(['PAXG-USD','PAXG-USDT','XAUT-USDT']);
+if (okxSpotInstruments.length < 50) throw new Error(`OKX spot catalog regressed below 50 listings: ${okxSpotInstruments.length}`);
+const exactOkxGold = new Set(Object.keys(OKX_SPOT_GOLD_EXCEPTIONS));
+const admittedOkxGold = new Set();
 for (const row of okxSpotInstruments) {
-  const isUts = row.state === 'live' && row.instType === 'SPOT' && String(row.instCategory) === '3' && row.quoteCcy === 'USDT';
-  const isGold = exactOkxGold.has(row.instId);
-  if (!isUts && !isGold) throw new Error(`OKX crypto spot leaked into RWA catalog: ${row.instId}`);
+  const instId = String(row?.instId || '').trim().toUpperCase();
+  const canonical = canonicalOkxSpotSymbol(row);
+  const isUts = canonical !== null && String(row.instCategory ?? '').trim() === '3' && !exactOkxGold.has(instId);
+  const isGold = canonical !== null && exactOkxGold.has(instId);
+  if (isGold) admittedOkxGold.add(instId);
+  if (!isUts && !isGold) throw new Error(`OKX crypto spot leaked into RWA catalog: ${instId || '(missing instId)'}`);
+}
+if (admittedOkxGold.size !== exactOkxGold.size || [...exactOkxGold].some(instId => !admittedOkxGold.has(instId))) {
+  throw new Error(`OKX gold coverage regressed: expected ${[...exactOkxGold].join('/')}, received ${[...admittedOkxGold].join('/') || 'none'}`);
 }
 if (okxSpotInstruments.some(row => ['XRP-USDT','XLM-USDT','CAT-USDT','LIT-USDT'].includes(row.instId))) {
   throw new Error('OKX same-ticker crypto collision entered the spot catalog');
 }
 if (new Set(okxSpotInstruments.map(row => row.canonicalSymbol)).size < 50) {
   throw new Error('OKX spot canonical coverage regressed below 50 assets');
+}
+
+const bitgetSpotCollection = await collectBitgetSpot(baseUrl, Date.now() + 35_000);
+const bitgetSpotListings = bitgetSpotCollection.listings;
+const bitgetCollectionEvidence = bitgetSpotCollection.catalogEvidence;
+if (bitgetCollectionEvidence?.status !== 'full' ||
+    bitgetCollectionEvidence?.method !== 'bitget-reality-stock-info-exact-intersection-v1' ||
+    Number(bitgetCollectionEvidence?.admittedCount) !== bitgetSpotListings.length ||
+    Number(bitgetCollectionEvidence?.admittedRealityCount) + Number(bitgetCollectionEvidence?.legacyCount) !== bitgetSpotListings.length ||
+    Number(bitgetCollectionEvidence?.matchedCount) < Number(bitgetCollectionEvidence?.admittedRealityCount)) {
+  throw new Error('Bitget Spot collector did not preserve exact dual-catalog verification evidence');
+}
+const bitgetSpot = await getJson('/api/bitget-market?type=spot-snapshot', { timeoutMs:35_000 });
+const bitgetInstruments = Array.isArray(bitgetSpot.instruments) ? bitgetSpot.instruments : [];
+const bitgetInstrumentSymbols = bitgetInstruments.map(row => String(row?.symbol || '').trim().toUpperCase());
+const bitgetCoverage = bitgetSpot?.coverage?.instruments;
+const bitgetProxyEvidence = bitgetSpot?.catalogEvidence;
+if (bitgetSpot.schemaVersion !== 1 || bitgetSpot.catalogStatus !== 'full' || !bitgetInstruments.length ||
+    bitgetCoverage?.status !== 'full' || Number(bitgetCoverage.observed) !== bitgetInstruments.length ||
+    Number(bitgetCoverage.expected) !== bitgetInstruments.length ||
+    bitgetProxyEvidence?.status !== 'full' ||
+    bitgetProxyEvidence?.method !== 'bitget-reality-stock-info-exact-intersection-v1' ||
+    Number(bitgetProxyEvidence?.instrumentsCount) !== bitgetInstruments.length ||
+    Number(bitgetProxyEvidence?.matchedCount) !== Number(bitgetProxyEvidence?.realityCandidatesCount) ||
+    Number(bitgetProxyEvidence?.stockInfoCount) < Number(bitgetProxyEvidence?.matchedCount) ||
+    bitgetInstrumentSymbols.some(symbol => !symbol) ||
+    new Set(bitgetInstrumentSymbols).size !== bitgetInstrumentSymbols.length) {
+  throw new Error('Bitget Spot proxy did not return one complete, unique identity catalog');
+}
+const bitgetProfiles = [
+  ['realityTickers', new Set(bitgetInstruments
+    .filter(row => String(row?.isReality || '').toLowerCase() === 'yes')
+    .map(row => String(row?.symbol || '').trim().toUpperCase()))],
+  ['standardTickers', new Set(bitgetInstruments
+    .filter(row => String(row?.isReality || '').toLowerCase() !== 'yes')
+    .map(row => String(row?.symbol || '').trim().toUpperCase()))],
+];
+for (const [field, expectedSymbols] of bitgetProfiles) {
+  const rows = Array.isArray(bitgetSpot[field]) ? bitgetSpot[field] : [];
+  const symbols = rows.map(row => String(row?.symbol || '').trim().toUpperCase());
+  const coverage = bitgetSpot?.coverage?.[field];
+  if (!['full', 'partial', 'unavailable'].includes(coverage?.status) ||
+      Number(coverage?.observed) !== rows.length || Number(coverage?.expected) !== expectedSymbols.size ||
+      rows.length > expectedSymbols.size || new Set(symbols).size !== symbols.length ||
+      symbols.some(symbol => !expectedSymbols.has(symbol)) ||
+      (coverage.status === 'full' && rows.length !== expectedSymbols.size) ||
+      (coverage.status === 'unavailable' && rows.length !== 0)) {
+    throw new Error(`Bitget ${field} coverage is internally inconsistent`);
+  }
 }
 
 const traditional = await getJson('/api/tradfi-activity?limit=100', { timeoutMs:55_000 });
@@ -224,6 +282,12 @@ console.log(JSON.stringify({
     spotListings: okxSpotInstruments.length,
     canonicalSpotAssets: new Set(okxSpotInstruments.map(row => row.canonicalSymbol)).size,
     coverage: { perp:okxPerp.coverage, spot:okxSpot.coverage },
+  },
+  bitget: {
+    catalogInstruments:bitgetInstruments.length,
+    admittedSpotListings:bitgetSpotListings.length,
+    tickerStatus:bitgetSpot.tickerStatus,
+    coverage:bitgetSpot.coverage,
   },
   traditional: {
     scope: traditional.scope,

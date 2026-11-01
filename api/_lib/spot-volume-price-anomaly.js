@@ -18,7 +18,6 @@ export const SPOT_ANOMALY_THRESHOLDS = Object.freeze({
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const HISTORY_MAX_BYTES = 1_750_000;
 const SOURCE_TIMEOUT_MS = 20_000;
-const BITGET_BASE = 'https://api.bitget.com';
 const KRAKEN_BASE = 'https://api.kraken.com/0/public';
 const VENUE_SET = new Set(SPOT_ANOMALY_SOURCE_NAMES);
 const CATEGORY_CODES = Object.freeze({
@@ -225,28 +224,15 @@ function bitgetRows(payload, label) {
   return payload.data;
 }
 
-async function bitgetMarket(_baseUrl, catalog, deadlineAt) {
-  const requestPolicy = boundedMarketPolicy(deadlineAt);
-  const settled = await Promise.allSettled([
-    fetchJsonWithPolicy(
-      `${BITGET_BASE}/api/v3/market/tickers?category=SPOT`,
-      { headers: { Accept: 'application/json' } },
-      requestPolicy,
-    ),
-    fetchJsonWithPolicy(
-      `${BITGET_BASE}/api/v2/spot/market/tickers`,
-      { headers: { Accept: 'application/json' } },
-      requestPolicy,
-    ),
-  ]);
+export async function bitgetMarket(baseUrl, catalog, deadlineAt) {
+  const payload = await fetchSameOrigin(baseUrl, '/api/bitget-market?type=spot-snapshot', deadlineAt);
+  if (payload?.schemaVersion !== 1 || payload?.catalogStatus !== 'full') {
+    throw new TypeError('Bitget Spot identity catalog unavailable');
+  }
   let realityRows = [];
   let standardRows = [];
-  if (settled[0].status === 'fulfilled') {
-    try { realityRows = bitgetRows(settled[0].value, 'Reality'); } catch { /* unavailable fields below */ }
-  }
-  if (settled[1].status === 'fulfilled') {
-    try { standardRows = bitgetRows(settled[1].value, 'standard Spot'); } catch { /* unavailable fields below */ }
-  }
+  try { realityRows = bitgetRows({ code:'00000', data:payload?.realityTickers }, 'Reality'); } catch { /* unavailable fields below */ }
+  try { standardRows = bitgetRows({ code:'00000', data:payload?.standardTickers }, 'standard Spot'); } catch { /* unavailable fields below */ }
   if (!realityRows.length && !standardRows.length) throw new TypeError('Bitget Spot market snapshots unavailable');
   const realityBySymbol = new Map(realityRows.map(row => [normalizedUpper(row?.symbol), row]));
   const standardBySymbol = new Map(standardRows.map(row => [normalizedUpper(row?.symbol), row]));
@@ -261,8 +247,8 @@ async function bitgetMarket(_baseUrl, catalog, deadlineAt) {
       'official-rolling24h-fraction',
       {
         lastPriceUsd:reality ? (ticker.lastPr ?? ticker.lastPrice) : (ticker.close ?? ticker.lastPr),
-        bidPriceUsd:ticker.bidPr ?? ticker.bidPrice,
-        askPriceUsd:ticker.askPr ?? ticker.askPrice,
+        bidPriceUsd:ticker.bidPr ?? ticker.bidPrice ?? ticker.bid1Price,
+        askPriceUsd:ticker.askPr ?? ticker.askPrice ?? ticker.ask1Price,
         observedAt:Number.isFinite(Number(ticker.ts ?? ticker.timestamp))
           ? new Date(Number(ticker.ts ?? ticker.timestamp)).toISOString()
           : new Date().toISOString(),

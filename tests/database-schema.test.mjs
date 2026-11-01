@@ -67,15 +67,16 @@ test('migration files are ordered, immutable-checksummed, and parse into stateme
     '0016_okx_ko_event_lifecycle.sql',
     '0017_binance_lenovo_event_identity.sql',
     '0018_bitget_softbank_identity.sql',
+    '0019_reviewed_rwa_identity_corrections.sql',
   ]);
   assert.deepEqual(migrations.map(row => row.version), [
-    '0001', '0002', '0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013', '0014', '0015', '0016', '0017', '0018',
+    '0001', '0002', '0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013', '0014', '0015', '0016', '0017', '0018', '0019',
   ]);
   for (const migration of migrations) {
     assert.match(migration.filename, MIGRATION_FILE_PATTERN);
     assert.match(migration.checksum, /^[0-9a-f]{64}$/);
     assert.equal(migration.checksum, migrationChecksum(migration.sql));
-    const minimumStatements = ['0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013', '0014', '0015', '0016', '0017', '0018']
+    const minimumStatements = ['0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013', '0014', '0015', '0016', '0017', '0018', '0019']
       .includes(migration.version) ? 3 : 11;
     assert.ok(migration.statements.length >= minimumStatements);
     assert.ok(migration.statements.every(statement => statement.trim().length > 0));
@@ -249,6 +250,29 @@ test('Bitget SOFTBANK forward repair corrects only admitted identity and never c
   assert.doesNotMatch(sql, /INSERT INTO identity\.(?:asset|asset_version|instrument|instrument_version)/);
   assert.doesNotMatch(sql, /(?:INSERT INTO|UPDATE|DELETE FROM) (?:analytics\.catalog_change_event|ingest\.catalog_membership)/);
   assert.doesNotMatch(sql, /\b(?:LIKE|ILIKE)\b|\bsimilarity\s*\(/i);
+});
+
+test('reviewed H100/MOONSHOT/OURA migration is exact, idempotent, and event-neutral', async () => {
+  const sql = await readFile(path.join(MIGRATION_DIRECTORY, '0019_reviewed_rwa_identity_corrections.sql'), 'utf8');
+  for (const [sourceKey, productKey] of [
+    ['perp:gate', 'H100_USDT'],
+    ['perp:bitget', 'MOONSHOTUSDT'],
+    ['perp:okx', 'MOONSHOT-USDT-SWAP'],
+    ['perp:bitget', 'OURAUSDT'],
+    ['perp:okx', 'OURA-USDT-SWAP'],
+  ]) {
+    assert.match(sql, new RegExp(`'${sourceKey.replace(':', '\\:')}', '${productKey.replaceAll('-', '\\-')}'`));
+  }
+  assert.match(sql, /VALUES \('commodity:H100'\), \('pre-ipo:MOONSHOT'\), \('pre-ipo:OURA'\)/);
+  assert.match(sql, /old_asset_version\.category = correction\.previous_category/);
+  assert.match(sql, /instrument\.official_product_key = correction\.official_product_key/);
+  assert.match(sql, /SET asset_version_id = target_asset_version\.asset_version_id/);
+  assert.match(sql, /ON CONFLICT \(asset_key\) DO NOTHING/);
+  assert.match(sql, /WHERE NOT EXISTS \([\s\S]*?current\.valid_to IS NULL/);
+  assert.doesNotMatch(sql, /INSERT INTO analytics\.catalog_change_event/);
+  assert.doesNotMatch(sql, /UPDATE analytics\.catalog_change_event/);
+  assert.doesNotMatch(sql, /DELETE FROM analytics\.catalog_change_event/);
+  assert.doesNotMatch(sql, /INSERT INTO ingest\.catalog_membership/);
 });
 
 test('SQL splitter preserves comments, quoted semicolons, and dollar-quoted role blocks', () => {

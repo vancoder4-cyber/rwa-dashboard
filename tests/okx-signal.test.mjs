@@ -208,7 +208,7 @@ test('OKX production baselines distinguish listings from canonical assets', () =
   assert.equal(PRODUCTION_BASELINES.perpetuals.okx, 183);
   assert.equal(PRODUCTION_BASELINES.perpetuals.binance, 155);
   assert.equal(PRODUCTION_BASELINES.perpetuals.total, 1079);
-  assert.equal(PRODUCTION_BASELINES.spot.okx, 51);
-  assert.equal(PRODUCTION_BASELINES.spot.total, 973);
+  assert.equal(PRODUCTION_BASELINES.spot.okx, 50);
+  assert.equal(PRODUCTION_BASELINES.spot.total, 972);
   assert.equal(PRODUCTION_BASELINES.canonicalPerpetualAssets, 469);
 });

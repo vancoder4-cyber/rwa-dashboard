@@ -65,6 +65,15 @@ const summary = {
   newOrRelisted: recent.length,
   reviewRequired: pending.length,
   unavailableSources: unavailable.map(source => source.sourceKey),
+  sources: payload.sources.map(source => ({
+    sourceKey: source.sourceKey,
+    status: source.status,
+    listingCount: source.listingCount,
+    previousCount: source.previousCount,
+    added: source.added,
+    removed: source.removed,
+    reason: source.reason || null,
+  })),
   events: recent.slice(0, 50).map(event => ({
     detectedAt: event.detectedAt,
     changeType: event.changeType,

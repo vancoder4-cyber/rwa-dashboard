@@ -6,7 +6,9 @@ import {
 } from './_lib/listing-audit.js';
 import {
   LISTING_AUDIT_EVENTS_ENCODING,
+  LISTING_AUDIT_EVENTS_ENCODING_V1,
   LISTING_AUDIT_KNOWN_ENCODING,
+  LISTING_AUDIT_KNOWN_ENCODING_V1,
   prepareListingAuditCheckpoint,
   readListingAuditCheckpoint,
   resolveListingCheckpointWriteMode,
@@ -82,12 +84,17 @@ function listingKeyParts(key) {
 }
 
 export function compactListingAuditState(state) {
+  const identityEvidenceTable = [...new Set(Object.values(state?.known || {})
+    .map(row => row?.identityEvidence || null)
+    .filter(Boolean))]
+    .sort();
+  const identityEvidenceIndex = new Map(identityEvidenceTable.map((value, index) => [value, index]));
   const known = Object.fromEntries(Object.entries(state?.known || {}).map(([key, row]) => [key, [
     row?.canonicalSymbol || null,
     row?.category || null,
     row?.name || null,
     row?.identityStatus === 'review-required' ? 'r' : 'v',
-    row?.identityEvidence || null,
+    row?.identityEvidence ? identityEvidenceIndex.get(row.identityEvidence) : null,
     row?.active ? 1 : 0,
     row?.firstSeenAt || null,
     row?.lastSeenAt || null,
@@ -97,26 +104,33 @@ export function compactListingAuditState(state) {
     row?.officialListedAt || null,
     row?.officialStatus || 'online',
   ]]));
-  const events = (Array.isArray(state?.events) ? state.events : []).map(event => [
-    event?.eventId || null,
-    event?.listingKey || null,
-    event?.changeType === 'relisted' ? 'r' : event?.changeType === 'delisted' ? 'd' : 'n',
-    event?.detectedAt || null,
-    event?.canonicalSymbol || null,
-    event?.category || null,
-    event?.name || null,
-    event?.identityStatus === 'review-required' ? 'r' : 'v',
-    event?.identityEvidence || null,
-    event?.inclusionStatus === 'review-required' ? 'r' : event?.inclusionStatus === 'removed' ? 'm' : 'e',
-    event?.venueCategory || event?.category || null,
-    event?.lifecycleStatus || null,
-    event?.officialListedAt || null,
-    event?.timeBasis || (event?.officialListedAt ? 'official' : 'first_observed'),
-  ]);
+  // Event identity fields are already stored once in `known`. The event
+  // window is 45 days while inactive known rows are retained for 180 days, so
+  // every retained event can safely reference the exact listing identity in
+  // the same atomic bundle. This keeps a reviewed multi-thousand-instrument
+  // venue expansion inside the fixed Runtime Cache/checkpoint byte budget.
+  const events = (Array.isArray(state?.events) ? state.events : []).map(event => {
+    const listingKey = event?.listingKey || null;
+    const changeCode = event?.changeType === 'relisted' ? 'r' : event?.changeType === 'delisted' ? 'd' : 'n';
+    const detectedAt = event?.detectedAt || null;
+    const changeType = changeCode === 'r' ? 'relisted' : changeCode === 'd' ? 'delisted' : 'new';
+    const derivedEventId = listingKey && detectedAt
+      ? `${changeType}:${listingKey}:${String(detectedAt).slice(0, 10)}`
+      : null;
+    const overrides = {};
+    if (event?.eventId && event.eventId !== derivedEventId) overrides.eventId = event.eventId;
+    const eventOfficialListedAt = event?.officialListedAt || null;
+    const knownOfficialListedAt = state?.known?.[listingKey]?.officialListedAt || null;
+    if (eventOfficialListedAt !== knownOfficialListedAt) overrides.officialListedAt = eventOfficialListedAt;
+    return Object.keys(overrides).length
+      ? [listingKey, changeCode, detectedAt, overrides]
+      : [listingKey, changeCode, detectedAt];
+  });
   return {
     ...state,
     knownEncoding: LISTING_AUDIT_KNOWN_ENCODING,
     eventsEncoding: LISTING_AUDIT_EVENTS_ENCODING,
+    identityEvidenceTable,
     known,
     events,
   };
@@ -124,11 +138,14 @@ export function compactListingAuditState(state) {
 
 export function hydrateListingAuditState(state) {
   if (!state) return null;
-  const known = state.knownEncoding === LISTING_AUDIT_KNOWN_ENCODING
+  const known = [LISTING_AUDIT_KNOWN_ENCODING, LISTING_AUDIT_KNOWN_ENCODING_V1].includes(state.knownEncoding)
     ? Object.fromEntries(Object.entries(state.known || {}).flatMap(([key, compact]) => {
       if (!Array.isArray(compact) || compact.length < 9) return [];
       const { market, venue, venueSymbol } = listingKeyParts(key);
       const identityStatus = compact[3] === 'r' ? 'review-required' : 'verified';
+      const identityEvidence = state.knownEncoding === LISTING_AUDIT_KNOWN_ENCODING
+        ? state.identityEvidenceTable?.[compact[4]] || null
+        : compact[4];
       return [[key, {
         key,
         sourceKey:`${market}:${venue}`,
@@ -143,7 +160,7 @@ export function hydrateListingAuditState(state) {
         officialStatus:compact[12] || 'online',
         name:compact[2],
         identityStatus,
-        identityEvidence:compact[4],
+        identityEvidence,
         inclusionStatus:identityStatus === 'verified' ? 'eligible' : 'review-required',
         everSeen:true,
         active:compact[5] === 1,
@@ -154,6 +171,40 @@ export function hydrateListingAuditState(state) {
     }))
     : state.known;
   const events = state.eventsEncoding === LISTING_AUDIT_EVENTS_ENCODING
+    ? (Array.isArray(state.events) ? state.events : []).flatMap(compact => {
+      if (!Array.isArray(compact) || compact.length < 3) return [];
+      const [listingKey, changeCode, detectedAt, overrides = null] = compact;
+      const identity = known?.[listingKey];
+      if (!identity) return [];
+      const changeType = changeCode === 'r' ? 'relisted' : changeCode === 'd' ? 'delisted' : 'new';
+      const eventId = overrides?.eventId || `${changeType}:${listingKey}:${String(detectedAt).slice(0, 10)}`;
+      const officialListedAt = overrides && Object.hasOwn(overrides, 'officialListedAt')
+        ? overrides.officialListedAt
+        : identity.officialListedAt || null;
+      return [{
+        eventId,
+        listingKey,
+        changeType,
+        detectedAt,
+        observedAt:detectedAt,
+        market:identity.market,
+        venue:identity.venue,
+        venueSymbol:identity.venueSymbol,
+        canonicalSymbol:identity.canonicalSymbol,
+        category:identity.category,
+        venueCategory:identity.venueCategory || identity.category,
+        lifecycleStatus:identity.lifecycleStatus || null,
+        officialListedAt,
+        timeBasis:officialListedAt ? 'official' : 'first_observed',
+        name:identity.name || identity.canonicalSymbol,
+        identityStatus:identity.identityStatus,
+        identityEvidence:identity.identityEvidence || null,
+        inclusionStatus:changeType === 'delisted' || !identity.active
+          ? 'removed'
+          : identity.inclusionStatus,
+      }];
+    })
+    : state.eventsEncoding === LISTING_AUDIT_EVENTS_ENCODING_V1
     ? (Array.isArray(state.events) ? state.events : []).flatMap(compact => {
       if (!Array.isArray(compact) || compact.length < 10) return [];
       const [
@@ -187,6 +238,7 @@ export function hydrateListingAuditState(state) {
   const {
     knownEncoding: _knownEncoding,
     eventsEncoding: _eventsEncoding,
+    identityEvidenceTable: _identityEvidenceTable,
     ...rest
   } = state;
   return { ...rest, known, events };

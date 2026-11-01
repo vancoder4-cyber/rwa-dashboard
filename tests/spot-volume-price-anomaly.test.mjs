@@ -406,12 +406,15 @@ test('market normalization uses quote turnover, Bitget platform turnover, and no
       body = { schemaVersion:1, catalogStatus:'full', tickers:[{ symbol:'AAPLBUSDT', quoteVolume:'600000', priceChangePercent:'16' }] };
     } else if (url.includes('/api/okx-market?type=spot-snapshot')) {
       body = { tickers:[{ instId:'AAPL-USDT', volCcy24h:'600000', last:'116', open24h:'100' }] };
-    } else if (url.includes('/api/v3/market/tickers?category=SPOT')) {
-      body = { code:'00000', data:[{
-        symbol:'AAPLUSDT', platformTurnover24h:'600000', turnover24h:'999999999', price24hPcnt:'0.16',
-      }] };
-    } else if (url.includes('/api/v2/spot/market/tickers')) {
-      body = { code:'00000', data:[] };
+    } else if (url.includes('/api/bitget-market?type=spot-snapshot')) {
+      body = {
+        schemaVersion:1,
+        catalogStatus:'full',
+        realityTickers:[{
+          symbol:'AAPLUSDT', platformTurnover24h:'600000', turnover24h:'999999999', price24hPcnt:'0.16',
+        }],
+        standardTickers:[],
+      };
     } else if (url.includes('/Ticker?')) {
       body = { error:[], result:{ AAPLUSD:{ v:['0','100'], p:['0','6000'], o:'1' } } };
     } else {

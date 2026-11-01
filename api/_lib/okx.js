@@ -6,12 +6,12 @@ import { fetchJsonWithPolicy } from './upstream.js';
 export const OKX_API_BASE = 'https://www.okx.com/api/v5';
 export const OKX_RWA_PERP_CATEGORIES = Object.freeze(['3', '4', '5', '6']);
 export const OKX_SPOT_GOLD_EXCEPTIONS = Object.freeze({
-  'PAXG-USD': Object.freeze({ baseCcy: 'PAXG', quoteCcy: 'USD' }),
   'PAXG-USDT': Object.freeze({ baseCcy: 'PAXG', quoteCcy: 'USDT' }),
   'XAUT-USDT': Object.freeze({ baseCcy: 'XAUT', quoteCcy: 'USDT' }),
 });
 
 const OKX_RWA_PERP_CATEGORY_SET = new Set(OKX_RWA_PERP_CATEGORIES);
+const OKX_SPOT_GOLD_CATEGORY_SET = new Set(['', '1', '4']);
 // X-Perp FUTURES IDs contain an underscore-bearing family segment, e.g.
 // AAPL-USD_UM_XPERP-310613.
 const OKX_INSTRUMENT_ID_RE = /^[A-Z0-9._]+(?:-[A-Z0-9._]+){1,3}$/;
@@ -91,7 +91,7 @@ export function canonicalOkxSpotSymbol(instrument) {
   const instId = normalizedUpper(instrument.instId);
   const goldException = OKX_SPOT_GOLD_EXCEPTIONS[instId];
   if (goldException) {
-    return normalized(instrument.instCategory) === '1' &&
+    return OKX_SPOT_GOLD_CATEGORY_SET.has(normalized(instrument.instCategory)) &&
       baseCcy === goldException.baseCcy && quoteCcy === goldException.quoteCcy
       ? baseCcy
       : null;

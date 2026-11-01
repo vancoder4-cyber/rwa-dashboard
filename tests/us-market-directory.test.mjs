@@ -640,12 +640,14 @@ test('venue-scoped normalization keeps real QQQX/SPYX securities distinct from G
       realSpyx:normalizeOfficialRwaSymbol('SPYX', 'ETF', '', 'bitget'),
       gateQqqx:normalizeOfficialRwaSymbol('QQQX', 'STOCK', '', 'gate'),
       gateSpyx:normalizeOfficialRwaSymbol('SPYX', 'STOCK', '', 'gate'),
+      gateH100:normalizeOfficialRwaSymbol('H100', 'INDICES', '', 'gate'),
+      otherH100:normalizeOfficialRwaSymbol('H100', 'INDICES', '', 'tradexyz'),
     };
   `;
   const context = {
     TOKENIZED_ETF_WRAPPERS:{ QQQX:'QQQ', SPYX:'SPY', TQQQX:'TQQQ', SLVON:'SLV' },
     BROAD_STOCK_INDEX_SYMBOLS:new Set(['SP500', 'NDX100', 'KR200', 'JP225']),
-    categoryFromOfficial(type) { return type === 'ETF' ? 'etf' : 'equity'; },
+    categoryFromOfficial(type) { return type === 'ETF' ? 'etf' : type === 'INDICES' ? 'index' : 'equity'; },
     canonicalSymbolForCategory(symbol) { return symbol; },
   };
   runInNewContext(source, context);
@@ -654,6 +656,8 @@ test('venue-scoped normalization keeps real QQQX/SPYX securities distinct from G
     realSpyx:{ symbol:'SPYX', category:'etf' },
     gateQqqx:{ symbol:'QQQ', category:'etf', underlyingSymbol:'QQQ' },
     gateSpyx:{ symbol:'SPY', category:'etf', underlyingSymbol:'SPY' },
+    gateH100:{ symbol:'H100', category:'commodity' },
+    otherH100:{ symbol:'H100', category:'index' },
   });
 });
 

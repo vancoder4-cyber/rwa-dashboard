@@ -58,7 +58,7 @@ const FUNDING_PROBES = Object.freeze({
 // category/type metadata remains the identity gate, while the listing audit
 // reports legitimate catalog growth independently.
 const OKX_REVIEWED_PERP_MINIMUMS = Object.freeze({ total: 183, swap: 149, xperp: 34 });
-const OKX_REVIEWED_SPOT_MINIMUMS = Object.freeze({ total: 51, uts: 48, gold: 3 });
+const OKX_REVIEWED_SPOT_MINIMUMS = Object.freeze({ total: 50, uts: 48, gold: 2 });
 const SIGNAL_SOURCE_KEYS = Object.freeze(['gate', 'binance', 'bitget', 'tradexyz', 'okx']);
 const SIGNAL_IDENTITY_CONFLICT_DETAIL_LIMIT = 20;
 const SIGNAL_SOURCE_STATUSES = new Set(['full', 'partial', 'unavailable']);
@@ -2239,7 +2239,7 @@ export function validateOkxSpotSnapshot(payload) {
     .map(row => normalizedUpper(row?.instId) || '(missing instId)');
   const utsListings = instruments.filter(row => normalized(row?.instCategory) === '3').length;
   const goldIds = new Set(instruments
-    .filter(row => normalized(row?.instCategory) === '1' && OKX_SPOT_GOLD_EXCEPTIONS[normalizedUpper(row?.instId)])
+    .filter(row => OKX_SPOT_GOLD_EXCEPTIONS[normalizedUpper(row?.instId)] && canonicalOkxSpotSymbol(row) !== null)
     .map(row => normalizedUpper(row?.instId)));
   const expectedListings = PRODUCTION_BASELINES.spot.okx;
   const tickerCoverage = summarizeResourceCoverage(payload?.tickers, uniqueIds, payload?.coverage?.tickers);

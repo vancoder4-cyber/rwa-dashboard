@@ -18,8 +18,10 @@ export const LISTING_AUDIT_BUNDLE_VERSION = 2;
 export const LISTING_AUDIT_CHECKPOINT_MAX_BYTES = 1_750_000;
 export const LISTING_AUDIT_CHECKPOINT_READER_ROLE = 'rwa_listing_audit_reader';
 export const LISTING_AUDIT_CHECKPOINT_WRITER_ROLE = 'rwa_catalog_shadow_writer';
-export const LISTING_AUDIT_KNOWN_ENCODING = 'listing-row-array/v1';
-export const LISTING_AUDIT_EVENTS_ENCODING = 'listing-event-array/v1';
+export const LISTING_AUDIT_KNOWN_ENCODING_V1 = 'listing-row-array/v1';
+export const LISTING_AUDIT_KNOWN_ENCODING = 'listing-row-evidence-reference-array/v2';
+export const LISTING_AUDIT_EVENTS_ENCODING_V1 = 'listing-event-array/v1';
+export const LISTING_AUDIT_EVENTS_ENCODING = 'listing-event-reference-array/v2';
 
 const CHECKPOINT_WRITE_MODES = new Set(['off', 'shadow', 'required']);
 const READ_MODES = new Set(['runtime-cache', 'dual-read', 'durable-fallback', 'postgres-authoritative']);
@@ -52,8 +54,12 @@ function timestampMilliseconds(value) {
 function validateCompactListingState(bundle, observedAtMs) {
   const state = bundle.state;
   const snapshot = bundle.snapshot;
-  if (state.version !== LISTING_AUDIT_STATE_VERSION || state.knownEncoding !== LISTING_AUDIT_KNOWN_ENCODING ||
-      state.eventsEncoding !== LISTING_AUDIT_EVENTS_ENCODING || !state.known || typeof state.known !== 'object' ||
+  const supportedKnownEncoding = [LISTING_AUDIT_KNOWN_ENCODING_V1, LISTING_AUDIT_KNOWN_ENCODING]
+    .includes(state.knownEncoding);
+  const supportedEventEncoding = [LISTING_AUDIT_EVENTS_ENCODING_V1, LISTING_AUDIT_EVENTS_ENCODING]
+    .includes(state.eventsEncoding);
+  if (state.version !== LISTING_AUDIT_STATE_VERSION || !supportedKnownEncoding ||
+      !supportedEventEncoding || !state.known || typeof state.known !== 'object' ||
       Array.isArray(state.known) || !state.sources || typeof state.sources !== 'object' || Array.isArray(state.sources) ||
       !Array.isArray(state.events) || Date.parse(String(state.updatedAt || '')) !== observedAtMs) {
     throw new TypeError('Listing Audit checkpoint compact state contract is invalid');
@@ -62,9 +68,18 @@ function validateCompactListingState(bundle, observedAtMs) {
   const activeKeys = new Set();
   let activeListings = 0;
   let reviewRequired = 0;
+  const evidenceTable = state.knownEncoding === LISTING_AUDIT_KNOWN_ENCODING
+    ? state.identityEvidenceTable
+    : null;
+  if (state.knownEncoding === LISTING_AUDIT_KNOWN_ENCODING &&
+      (!Array.isArray(evidenceTable) || evidenceTable.some(value => typeof value !== 'string' || !value))) {
+    throw new TypeError('Listing Audit checkpoint known identity evidence table is invalid');
+  }
   for (const [listingKey, row] of Object.entries(state.known)) {
     if (!Array.isArray(row) || row.length < 11 || !LISTING_SOURCE_KEYS.some(sourceKey => listingKey.startsWith(`${sourceKey}:`)) ||
-        !['v', 'r'].includes(row[3]) || ![0, 1].includes(row[5])) {
+        !['v', 'r'].includes(row[3]) || ![0, 1].includes(row[5]) ||
+        (state.knownEncoding === LISTING_AUDIT_KNOWN_ENCODING && row[4] !== null &&
+          (!Number.isInteger(row[4]) || row[4] < 0 || row[4] >= evidenceTable.length))) {
       throw new TypeError('Listing Audit checkpoint known identity encoding is invalid');
     }
     if (row[5] === 1) {
@@ -91,10 +106,22 @@ function validateCompactListingState(bundle, observedAtMs) {
   }
   const eventCounts = { n:0, r:0, d:0 };
   for (const row of state.events) {
-    if (!Array.isArray(row) || row.length < 12 || !Object.hasOwn(eventCounts, row[2])) {
+    const listingKey = state.eventsEncoding === LISTING_AUDIT_EVENTS_ENCODING ? row?.[0] : row?.[1];
+    const changeCode = state.eventsEncoding === LISTING_AUDIT_EVENTS_ENCODING ? row?.[1] : row?.[2];
+    const minimumLength = state.eventsEncoding === LISTING_AUDIT_EVENTS_ENCODING ? 3 : 12;
+    const overrides = state.eventsEncoding === LISTING_AUDIT_EVENTS_ENCODING ? row?.[3] : undefined;
+    const overridesValid = overrides === undefined || (
+      overrides && typeof overrides === 'object' && !Array.isArray(overrides) &&
+      Object.keys(overrides).every(key => ['eventId', 'officialListedAt'].includes(key)) &&
+      (overrides.eventId === undefined || (typeof overrides.eventId === 'string' && overrides.eventId)) &&
+      (overrides.officialListedAt === undefined || overrides.officialListedAt === null ||
+        Number.isFinite(Date.parse(overrides.officialListedAt)))
+    );
+    if (!Array.isArray(row) || row.length < minimumLength || !Object.hasOwn(eventCounts, changeCode) ||
+        !Object.hasOwn(state.known, listingKey) || !overridesValid) {
       throw new TypeError('Listing Audit checkpoint event encoding is invalid');
     }
-    eventCounts[row[2]] += 1;
+    eventCounts[changeCode] += 1;
   }
   const counts = snapshot.counts;
   if (nonNegativeInteger(counts?.activeListings) !== activeListings ||

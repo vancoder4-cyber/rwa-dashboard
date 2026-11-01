@@ -8,6 +8,10 @@ import {
 import {
   LISTING_AUDIT_BUNDLE_FORMAT,
   LISTING_AUDIT_CHECKPOINT_KEY,
+  LISTING_AUDIT_EVENTS_ENCODING,
+  LISTING_AUDIT_EVENTS_ENCODING_V1,
+  LISTING_AUDIT_KNOWN_ENCODING,
+  LISTING_AUDIT_KNOWN_ENCODING_V1,
   prepareListingAuditCheckpoint,
   readListingAuditCheckpoint,
   resolveListingCheckpointWriteMode,
@@ -16,6 +20,7 @@ import {
 } from '../api/_lib/listing-audit-checkpoint.js';
 import {
   compactListingAuditBundle,
+  hydrateListingAuditState,
   readListingChangesSnapshot,
   runListingAudit,
   selectListingAuditBundle,
@@ -144,6 +149,45 @@ test('checkpoint accepts only an exact compact ten-source bundle with matching t
   const detachedListing = structuredClone(bundle);
   detachedListing.state.sources['perp:binance'].listingKeys = [];
   assert.throws(() => prepareListingAuditCheckpoint(detachedListing), /active listings do not reconcile/);
+});
+
+test('compact v2 references exact known identities while legacy v1 checkpoints remain readable', () => {
+  const first = bundleAt('2026-08-30T00:45:00.000Z');
+  const second = bundleAt(
+    '2026-08-31T00:45:00.000Z',
+    first.merged.state,
+    { sourceKey:'perp:binance', symbol:'NEWCO' },
+  );
+  assert.equal(second.bundle.state.knownEncoding, LISTING_AUDIT_KNOWN_ENCODING);
+  assert.equal(second.bundle.state.eventsEncoding, LISTING_AUDIT_EVENTS_ENCODING);
+  assert.deepEqual(hydrateListingAuditState(second.bundle.state), second.merged.state);
+  assert.doesNotThrow(() => prepareListingAuditCheckpoint(second.bundle));
+
+  const legacy = structuredClone(second.bundle);
+  legacy.state.knownEncoding = LISTING_AUDIT_KNOWN_ENCODING_V1;
+  delete legacy.state.identityEvidenceTable;
+  for (const [listingKey, row] of Object.entries(legacy.state.known)) {
+    row[4] = second.merged.state.known[listingKey].identityEvidence || null;
+  }
+  legacy.state.eventsEncoding = LISTING_AUDIT_EVENTS_ENCODING_V1;
+  legacy.state.events = second.merged.state.events.map(event => [
+    event.eventId,
+    event.listingKey,
+    event.changeType === 'relisted' ? 'r' : event.changeType === 'delisted' ? 'd' : 'n',
+    event.detectedAt,
+    event.canonicalSymbol,
+    event.category,
+    event.name,
+    event.identityStatus === 'review-required' ? 'r' : 'v',
+    event.identityEvidence || null,
+    event.inclusionStatus === 'review-required' ? 'r' : event.inclusionStatus === 'removed' ? 'm' : 'e',
+    event.venueCategory || event.category,
+    event.lifecycleStatus || null,
+    event.officialListedAt || null,
+    event.timeBasis || (event.officialListedAt ? 'official' : 'first_observed'),
+  ]);
+  assert.deepEqual(hydrateListingAuditState(legacy.state), second.merged.state);
+  assert.doesNotThrow(() => prepareListingAuditCheckpoint(legacy));
 });
 
 test('durable checkpoint read validates checksum, bytes, schema, source set, and least-privilege role', async () => {

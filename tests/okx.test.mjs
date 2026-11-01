@@ -43,9 +43,8 @@ const XXOM_SPOT = Object.freeze({
   state: 'live', instCategory: '3',
 });
 const GOLD_SPOTS = Object.freeze([
-  Object.freeze({ instType:'SPOT', instId:'PAXG-USD', baseCcy:'PAXG', quoteCcy:'USD', state:'live', instCategory:'1' }),
   Object.freeze({ instType:'SPOT', instId:'PAXG-USDT', baseCcy:'PAXG', quoteCcy:'USDT', state:'live', instCategory:'1' }),
-  Object.freeze({ instType:'SPOT', instId:'XAUT-USDT', baseCcy:'XAUT', quoteCcy:'USDT', state:'live', instCategory:'1' }),
+  Object.freeze({ instType:'SPOT', instId:'XAUT-USDT', baseCcy:'XAUT', quoteCcy:'USDT', state:'live', instCategory:'4' }),
 ]);
 
 function responseRecorder() {
@@ -130,9 +129,12 @@ test('OKX spot strips exactly one X after category gate and admits only exact go
   assert.equal(isOkxRwaSpotInstrument({ ...XAAPL_SPOT, instCategory:'1' }), false);
   assert.equal(isOkxRwaSpotInstrument({ ...XAAPL_SPOT, quoteCcy:'USDC', instId:'XAAPL-USDC' }), false);
   assert.equal(isOkxRwaSpotInstrument({ ...XAAPL_SPOT, baseCcy:'AAPL', instId:'AAPL-USDT' }), false);
-  assert.deepEqual(GOLD_SPOTS.map(canonicalOkxSpotSymbol), ['PAXG', 'PAXG', 'XAUT']);
+  assert.deepEqual(GOLD_SPOTS.map(canonicalOkxSpotSymbol), ['PAXG', 'XAUT']);
+  assert.equal(canonicalOkxSpotSymbol({ ...GOLD_SPOTS[0], instCategory:'' }), 'PAXG');
   assert.equal(isOkxRwaSpotInstrument({ ...GOLD_SPOTS[0], instId:'BTC-USD', baseCcy:'BTC' }), false);
   assert.equal(isOkxRwaSpotInstrument({ ...GOLD_SPOTS[0], instCategory:'3' }), false);
+  assert.equal(isOkxRwaSpotInstrument({ ...GOLD_SPOTS[0], instCategory:'5' }), false);
+  assert.equal(isOkxRwaSpotInstrument({ ...GOLD_SPOTS[0], instId:'PAXG-USD', quoteCcy:'USD' }), false);
 });
 
 test('OKX perp snapshot inner-joins live official instruments and preserves real zero funding', async () => {
@@ -179,13 +181,13 @@ test('OKX spot snapshot filters category collisions and retains UTS and exact go
     assert.equal(response.statusCode, 200);
     assert.deepEqual(
       response.payload.instruments.map(row => row.instId),
-      ['PAXG-USD', 'PAXG-USDT', 'XAAPL-USDT', 'XAUT-USDT', 'XXOM-USDT'],
+      ['PAXG-USDT', 'XAAPL-USDT', 'XAUT-USDT', 'XXOM-USDT'],
     );
     assert.deepEqual(
       response.payload.instruments.map(row => row.canonicalSymbol),
-      ['PAXG', 'PAXG', 'AAPL', 'XAUT', 'XOM'],
+      ['PAXG', 'AAPL', 'XAUT', 'XOM'],
     );
-    assert.equal(response.payload.tickers.length, 5);
+    assert.equal(response.payload.tickers.length, 4);
     assert.equal(response.payload.coverage.status, 'full');
   });
 });
@@ -287,6 +289,13 @@ test('OKX funding history prefers a real settled zero and validates symbol again
 
 test('OKX client integration keeps contract-level coverage and distinct-venue spread semantics', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const okxSpotStart = html.indexOf('async function fetchSpotRwaOkx()');
+  const okxSpotEnd = html.indexOf('\nasync function ', okxSpotStart + 1);
+  const okxSpotClient = html.slice(okxSpotStart, okxSpotEnd);
+  assert.match(okxSpotClient, /'PAXG-USDT':\{ base:'PAXG', quote:'USDT' \}/);
+  assert.match(okxSpotClient, /'XAUT-USDT':\{ base:'XAUT', quote:'USDT' \}/);
+  assert.doesNotMatch(okxSpotClient, /PAXG-USD'/);
+  assert.match(okxSpotClient, /\['', '1', '4'\]\.includes/);
   assert.match(html, /representativeFundingRatesByVenue\(venues\)/);
   assert.match(html, /if \(annRates\.length < 2\) return;/);
   assert.match(html, /distinctVenueFundingSpread\(a\.listings\)/);

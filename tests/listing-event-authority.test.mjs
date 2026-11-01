@@ -132,7 +132,7 @@ test('PostgreSQL event projection maps one listed contract to the compatible pub
   }]);
   assert.equal(snapshot.counts.new, 1);
   assert.equal(snapshot.history.retentionDays, 45);
-  assert.equal(snapshot.history.maxEvents, 2_000);
+  assert.equal(snapshot.history.maxEvents, 5_000);
   assert.equal(Object.hasOwn(snapshot.events[0], 'evidence'), false);
   assert.equal(Object.hasOwn(snapshot.events[0], 'currentSourceRunId'), false);
 });
@@ -191,7 +191,7 @@ test('authoritative reader uses only safe publication views under the dedicated 
   assert.match(calls[3].text, /publication\.listing_change_event_v1/);
   assert.match(calls[4].text, /publication\.listing_audit_pending_review_v1/);
   assert.doesNotMatch(calls.slice(2).map(call => call.text).join('\n'), /analytics\.catalog_change_event/);
-  assert.deepEqual(calls[3].params, [45, 2_001]);
+  assert.deepEqual(calls[3].params, [45, 5_001]);
 });
 
 test('PostgreSQL-authoritative API recovery does not consult an evicted Runtime Cache', async () => {

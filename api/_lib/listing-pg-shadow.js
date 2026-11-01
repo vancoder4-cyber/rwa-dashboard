@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   LISTING_SOURCE_KEYS,
   normalizeListingObservation,
+  REVIEWED_EXACT_CANONICAL_CORRECTIONS,
   REVIEWED_ETF_CATEGORY_CORRECTIONS,
   REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS,
 } from './listing-audit.js';
@@ -627,6 +628,23 @@ function json(value) {
   return JSON.stringify(value);
 }
 
+function reviewedExactIdentityCorrectionRows() {
+  return REVIEWED_EXACT_CANONICAL_CORRECTIONS.map(correction => ({
+    source_key:correction.sourceKey,
+    official_product_key:correction.venueSymbol,
+    previous_asset_key:`${correction.previousCategory}:${correction.previousCanonicalSymbol}`,
+    previous_category:correction.previousCategory,
+    previous_canonical_underlying:correction.previousCanonicalSymbol,
+    previous_venue_category:correction.previousVenueCategory,
+    previous_lifecycle_status:correction.previousLifecycleStatus,
+    asset_key:`${correction.category}:${correction.canonicalSymbol}`,
+    category:correction.category,
+    canonical_underlying:correction.canonicalSymbol,
+    venue_category:correction.venueCategory,
+    lifecycle_status:correction.lifecycleStatus,
+  }));
+}
+
 function sourceRows(batch) {
   return batch.sourceRuns.map(row => ({
     source_key: row.sourceKey,
@@ -856,6 +874,18 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
            ON current_asset_version.asset_version_id = current.asset_version_id
          JOIN identity.asset AS current_asset
            ON current_asset.asset_id = current_asset_version.asset_id
+         LEFT JOIN LATERAL (
+           SELECT membership.normalized_attributes
+           FROM ingest.catalog_membership AS membership
+           JOIN identity.instrument_version AS membership_version
+             ON membership_version.instrument_version_id = membership.instrument_version_id
+            AND membership_version.source_id = membership.source_id
+           WHERE membership_version.instrument_id = current.instrument_id
+             AND membership.source_id = current.source_id
+             AND membership.presence_status = 'present'
+           ORDER BY membership.observed_at DESC, membership.source_run_id DESC
+           LIMIT 1
+         ) AS previous_membership ON true
          WHERE (
            current_asset.asset_key <> incoming.asset_key
            OR current_asset_version.category <> incoming.category
@@ -880,8 +910,39 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
            AND incoming.asset_key = incoming.category || ':' || incoming.canonical_underlying
            AND incoming.venue_category IN ('equity', 'etf')
          )
+         AND NOT EXISTS (
+           SELECT 1
+           FROM jsonb_to_recordset($4::jsonb) AS correction(
+             source_key text, official_product_key text,
+             previous_asset_key text, previous_category text,
+             previous_canonical_underlying text,
+             previous_venue_category text, previous_lifecycle_status text,
+             asset_key text,
+             category text, canonical_underlying text,
+             venue_category text, lifecycle_status text
+           )
+           WHERE correction.source_key = source.source_key
+             AND correction.official_product_key = instrument.official_product_key
+             AND correction.previous_asset_key = current_asset.asset_key
+             AND correction.previous_category = current_asset_version.category
+             AND correction.previous_canonical_underlying = current_asset_version.canonical_underlying
+             AND correction.previous_venue_category IS NOT DISTINCT FROM
+               NULLIF(btrim(previous_membership.normalized_attributes->>'venueCategory'), '')
+             AND correction.previous_lifecycle_status IS NOT DISTINCT FROM
+               NULLIF(btrim(previous_membership.normalized_attributes->>'lifecycleStatus'), '')
+             AND correction.asset_key = incoming.asset_key
+             AND correction.category = incoming.category
+             AND correction.canonical_underlying = incoming.canonical_underlying
+             AND correction.venue_category = incoming.venue_category
+             AND correction.lifecycle_status IS NOT DISTINCT FROM incoming.lifecycle_status
+         )
        ) THEN ingest.reject_verified_catalog_identity_conflict() ELSE 1 END AS verified_identity_guard`,
-      [json(memberships), REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS, REVIEWED_ETF_CATEGORY_CORRECTIONS],
+      [
+        json(memberships),
+        REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS,
+        REVIEWED_ETF_CATEGORY_CORRECTIONS,
+        json(reviewedExactIdentityCorrectionRows()),
+      ],
     ),
     sql.query(
       `INSERT INTO ingest.collection_cycle
@@ -1622,6 +1683,18 @@ export async function findListingAuditVerifiedIdentityConflicts(batch, { runTran
          ON current_asset_version.asset_version_id = current.asset_version_id
        JOIN identity.asset AS current_asset
          ON current_asset.asset_id = current_asset_version.asset_id
+       LEFT JOIN LATERAL (
+         SELECT membership.normalized_attributes
+         FROM ingest.catalog_membership AS membership
+         JOIN identity.instrument_version AS membership_version
+           ON membership_version.instrument_version_id = membership.instrument_version_id
+          AND membership_version.source_id = membership.source_id
+         WHERE membership_version.instrument_id = current.instrument_id
+           AND membership.source_id = current.source_id
+           AND membership.presence_status = 'present'
+         ORDER BY membership.observed_at DESC, membership.source_run_id DESC
+         LIMIT 1
+       ) AS previous_membership ON true
        WHERE (
          current_asset.asset_key <> incoming.asset_key
          OR current_asset_version.category <> incoming.category
@@ -1637,9 +1710,49 @@ export async function findListingAuditVerifiedIdentityConflicts(batch, { runTran
          AND incoming.venue_category IN ('equity', 'pre-ipo')
          AND incoming.lifecycle_status = 'public'
        )
+       AND NOT (
+         incoming.canonical_underlying = ANY($3::text[])
+         AND current_asset_version.canonical_underlying = incoming.canonical_underlying
+         AND current_asset_version.category = 'equity'
+         AND incoming.category = 'etf'
+         AND current_asset.asset_key = current_asset_version.category || ':' || current_asset_version.canonical_underlying
+         AND incoming.asset_key = incoming.category || ':' || incoming.canonical_underlying
+         AND incoming.venue_category IN ('equity', 'etf')
+       )
+       AND NOT EXISTS (
+         SELECT 1
+         FROM jsonb_to_recordset($4::jsonb) AS correction(
+           source_key text, official_product_key text,
+           previous_asset_key text, previous_category text,
+           previous_canonical_underlying text,
+           previous_venue_category text, previous_lifecycle_status text,
+           asset_key text,
+           category text, canonical_underlying text,
+           venue_category text, lifecycle_status text
+         )
+         WHERE correction.source_key = source.source_key
+           AND correction.official_product_key = instrument.official_product_key
+           AND correction.previous_asset_key = current_asset.asset_key
+           AND correction.previous_category = current_asset_version.category
+           AND correction.previous_canonical_underlying = current_asset_version.canonical_underlying
+           AND correction.previous_venue_category IS NOT DISTINCT FROM
+             NULLIF(btrim(previous_membership.normalized_attributes->>'venueCategory'), '')
+           AND correction.previous_lifecycle_status IS NOT DISTINCT FROM
+             NULLIF(btrim(previous_membership.normalized_attributes->>'lifecycleStatus'), '')
+           AND correction.asset_key = incoming.asset_key
+           AND correction.category = incoming.category
+           AND correction.canonical_underlying = incoming.canonical_underlying
+           AND correction.venue_category = incoming.venue_category
+           AND correction.lifecycle_status IS NOT DISTINCT FROM incoming.lifecycle_status
+       )
        ORDER BY source.source_key COLLATE "C", instrument.official_product_key COLLATE "C"
        LIMIT 20`,
-      [json(memberships), REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS],
+      [
+        json(memberships),
+        REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS,
+        REVIEWED_ETF_CATEGORY_CORRECTIONS,
+        json(reviewedExactIdentityCorrectionRows()),
+      ],
     ),
   ], { isolationLevel:'Serializable', readOnly:true });
   const rows = Array.isArray(results?.[2]) ? results[2] : [];
