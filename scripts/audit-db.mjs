@@ -43,6 +43,7 @@ const [ledger, extensions, roles, privileges, counts, latestCycle, storage] = aw
       has_table_privilege('rwa_catalog_shadow_writer', 'ingest.catalog_membership', 'INSERT') AS writer_membership_insert,
       has_table_privilege('rwa_catalog_shadow_writer', 'fact.listing_observation_hourly', 'INSERT') AS writer_fact_insert,
       has_table_privilege('rwa_catalog_shadow_writer', 'alert.event', 'INSERT') AS writer_alert_insert,
+      has_database_privilege('rwa_catalog_shadow_writer', current_database(), 'TEMP') AS writer_database_temp,
       has_table_privilege('rwa_analytics_reader', 'analytics.catalog_change_event', 'SELECT') AS reader_analytics_select,
       has_table_privilege('rwa_analytics_reader', 'identity.source', 'INSERT') AS reader_identity_insert,
       has_table_privilege('rwa_alert_dispatcher', 'alert.delivery', 'UPDATE') AS dispatcher_delivery_update,
@@ -140,7 +141,9 @@ if (extensions.map(row => row.extname).join(',') !== 'btree_gist,pgcrypto') fail
 if (roles.length !== EXPECTED_ROLES.length || roles.some(role => role.rolcanlogin)) fail('least-privilege roles are missing or LOGIN-enabled');
 
 const privilege = privileges[0] || {};
-if (!privilege.writer_catalog_insert || !privilege.writer_membership_insert) fail('catalog writer lacks required Phase 1 grants');
+if (!privilege.writer_catalog_insert || !privilege.writer_membership_insert || !privilege.writer_database_temp) {
+  fail('catalog writer lacks required Phase 1 grants or transaction-local staging privilege');
+}
 if (privilege.writer_fact_insert || privilege.writer_alert_insert) fail('catalog writer can mutate a later-phase table');
 if (!privilege.reader_analytics_select || privilege.reader_identity_insert) fail('analytics reader grants are invalid');
 if (!privilege.dispatcher_delivery_update || privilege.dispatcher_identity_insert) fail('alert dispatcher grants are invalid');

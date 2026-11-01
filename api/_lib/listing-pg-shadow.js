@@ -19,6 +19,10 @@ export const LISTING_PG_VERIFIED_IDENTITY_CONFLICT_ERROR_CODE = 'CONFLICTING_VER
 export const LISTING_PG_PUBLICATION_LEASE_LOST_ERROR_CODE = 'LISTING_AUDIT_PUBLICATION_LEASE_LOST';
 export const LISTING_PG_PUBLICATION_LEASE_KEY = 'listing-audit-runtime-cache';
 export const LISTING_PG_PUBLICATION_LEASE_SECONDS = 180;
+// Neon HTTP transactions serialize every query and parameter into one request.
+// Keep the deduplicated transaction-local JSON inputs well below Neon's 64 MiB
+// transport limit so future catalog growth fails closed before any SQL is sent.
+export const LISTING_PG_TRANSACTION_JSON_MAX_BYTES = 24 * 1024 * 1024;
 
 const PG_WRITE_MODES = new Set(['off', 'shadow', 'required']);
 const TRUSTED_SOURCE_STATUSES = new Set(['warming', 'full']);
@@ -758,6 +762,18 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
   const reviews = reviewRows(batch);
   const events = eventRows(batch);
   const replacementSources = replacementSourceRows(batch);
+  let transactionJsonBytes = 0;
+  const transactionJson = value => {
+    const payload = json(value);
+    transactionJsonBytes += Buffer.byteLength(payload, 'utf8');
+    return payload;
+  };
+  // These two high-cardinality inputs are staged once inside the same
+  // Serializable transaction. Repeating either JSON parameter across every
+  // SCD2/evidence statement can exceed the Neon HTTP request limit even when
+  // each individual statement is small.
+  const membershipInput = transactionJson(memberships);
+  const eventInput = transactionJson(events);
   const artifacts = archivedArtifacts.map(row => ({
     source_key: row.sourceKey,
     environment: batch.environment,
@@ -791,7 +807,7 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
     .join('; ')
     .slice(0, 2_000) || null;
 
-  return [
+  const queries = [
     sql.query(`SET LOCAL ROLE rwa_catalog_shadow_writer`),
     sql.query(`SET LOCAL statement_timeout = '15s'`),
     sql.query(`SET LOCAL lock_timeout = '3s'`),
@@ -800,6 +816,32 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
          $1 || chr(31) || $2 || chr(31) || $3::text, 0
        )) AS catalog_retry_lock`,
       [batch.jobName, batch.pipelineVersion, batch.bucketAt],
+    ),
+    sql.query(
+      `CREATE TEMP TABLE listing_membership_input ON COMMIT DROP AS
+       SELECT *
+       FROM jsonb_to_recordset($1::jsonb) AS incoming(
+         source_key text, official_product_key text, asset_key text,
+         category text, canonical_underlying text, venue_category text,
+         lifecycle_status text, display_name text, market_origin text,
+         asset_fingerprint text, official_venue_symbol text,
+         normalized_venue_symbol text, instrument_type text,
+         quote_currency text, official_status text,
+         instrument_fingerprint text, evidence_sha256 text,
+         artifact_sha256 text, evidence_notes text,
+         official_catalog_position text, normalized_attributes jsonb
+       )`,
+      [membershipInput],
+    ),
+    sql.query(
+      `CREATE TEMP TABLE listing_event_input ON COMMIT DROP AS
+       SELECT *
+       FROM jsonb_to_recordset($1::jsonb) AS incoming(
+         source_key text, normalized_venue_symbol text, event_type text,
+         effective_day date, observed_at timestamptz,
+         official_listed_at timestamptz, time_basis text, evidence jsonb
+       )`,
+      [eventInput],
     ),
     sql.query(
       `INSERT INTO identity.source (source_key, market, venue, data_domain, catalog_authority, enabled)
@@ -812,7 +854,7 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
          catalog_authority = 'official',
          enabled = true,
          updated_at = clock_timestamp()`,
-      [json(sources)],
+      [transactionJson(sources)],
     ),
     sql.query(
       `SELECT CASE WHEN EXISTS (
@@ -852,16 +894,12 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
           AND current.valid_to IS NULL
           AND current.identity_status = 'verified'
        ) THEN ingest.reject_catalog_identity_downgrade() ELSE 1 END AS identity_downgrade_guard`,
-      [json(reviews)],
+      [transactionJson(reviews)],
     ),
     sql.query(
       `SELECT CASE WHEN EXISTS (
          SELECT 1
-         FROM jsonb_to_recordset($1::jsonb) AS incoming(
-           source_key text, official_product_key text, asset_key text,
-           category text, canonical_underlying text, venue_category text,
-           lifecycle_status text
-         )
+         FROM pg_temp.listing_membership_input AS incoming
          JOIN identity.source AS source ON source.source_key = incoming.source_key
          JOIN identity.instrument AS instrument
            ON instrument.source_id = source.source_id
@@ -892,7 +930,7 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
            OR current_asset_version.canonical_underlying <> incoming.canonical_underlying
          )
          AND NOT (
-           incoming.canonical_underlying = ANY($2::text[])
+           incoming.canonical_underlying = ANY($1::text[])
            AND current_asset_version.canonical_underlying = incoming.canonical_underlying
            AND current_asset_version.category = 'pre-ipo'
            AND incoming.category = 'equity'
@@ -902,7 +940,7 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
            AND incoming.lifecycle_status = 'public'
          )
          AND NOT (
-           incoming.canonical_underlying = ANY($3::text[])
+           incoming.canonical_underlying = ANY($2::text[])
            AND current_asset_version.canonical_underlying = incoming.canonical_underlying
            AND current_asset_version.category = 'equity'
            AND incoming.category = 'etf'
@@ -912,7 +950,7 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
          )
          AND NOT EXISTS (
            SELECT 1
-           FROM jsonb_to_recordset($4::jsonb) AS correction(
+           FROM jsonb_to_recordset($3::jsonb) AS correction(
              source_key text, official_product_key text,
              previous_asset_key text, previous_category text,
              previous_canonical_underlying text,
@@ -938,10 +976,9 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
          )
        ) THEN ingest.reject_verified_catalog_identity_conflict() ELSE 1 END AS verified_identity_guard`,
       [
-        json(memberships),
         REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS,
         REVIEWED_ETF_CATEGORY_CORRECTIONS,
-        json(reviewedExactIdentityCorrectionRows()),
+        transactionJson(reviewedExactIdentityCorrectionRows()),
       ],
     ),
     sql.query(
@@ -1031,7 +1068,7 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
            WHEN EXCLUDED.metadata->>'writeDisposition' = 'latest-trusted' THEN EXCLUDED.metadata
            ELSE ingest.source_run.metadata
          END`,
-      [...common, batch.observedAt, json(runs)],
+      [...common, batch.observedAt, transactionJson(runs)],
     ),
     sql.query(
       `WITH source_summary AS (
@@ -1081,7 +1118,7 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
          AND evidence.source_run_id = source_run.source_run_id
          AND evidence.source_id = source.source_id
          AND evidence.evidence_kind = 'official-catalog'`,
-      [...common, json(replacementSources)],
+      [...common, transactionJson(replacementSources)],
     ),
     sql.query(
       `DELETE FROM ingest.catalog_membership AS membership
@@ -1094,29 +1131,29 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
          AND source_run.attempt_id = (${attemptLookup})
          AND membership.source_run_id = source_run.source_run_id
          AND membership.source_id = source.source_id`,
-      [...common, json(replacementSources)],
+      [...common, transactionJson(replacementSources)],
     ),
     sql.query(
       `INSERT INTO identity.asset (asset_key)
        SELECT DISTINCT x.asset_key
-       FROM jsonb_to_recordset($1::jsonb) AS x(asset_key text)
+       FROM pg_temp.listing_membership_input AS x
        ON CONFLICT (asset_key) DO NOTHING`,
-      [json(memberships)],
+      [],
     ),
     sql.query(
       `UPDATE identity.asset_version AS current
-       SET valid_to = $2::timestamptz
+       SET valid_to = $1::timestamptz
        FROM identity.asset AS asset
        JOIN (
          SELECT DISTINCT ON (asset_key) asset_key, asset_fingerprint
-         FROM jsonb_to_recordset($1::jsonb) AS x(asset_key text, asset_fingerprint text)
+         FROM pg_temp.listing_membership_input AS x
          ORDER BY asset_key, asset_fingerprint
        ) AS incoming ON incoming.asset_key = asset.asset_key
        WHERE current.asset_id = asset.asset_id
          AND current.valid_to IS NULL
          AND current.identity_fingerprint <> incoming.asset_fingerprint
-         AND current.valid_from < $2::timestamptz`,
-      [json(memberships), batch.observedAt],
+         AND current.valid_from < $1::timestamptz`,
+      [batch.observedAt],
     ),
     sql.query(
       `INSERT INTO identity.asset_version
@@ -1124,27 +1161,24 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
           identity_status, identity_fingerprint, valid_from)
        SELECT asset.asset_id, incoming.category, incoming.canonical_underlying,
          incoming.display_name, incoming.market_origin, 'verified',
-         incoming.asset_fingerprint, $2::timestamptz
+         incoming.asset_fingerprint, $1::timestamptz
        FROM identity.asset AS asset
        JOIN (
          SELECT DISTINCT ON (asset_key) asset_key, category, canonical_underlying,
            display_name, market_origin, asset_fingerprint
-         FROM jsonb_to_recordset($1::jsonb) AS x(
-           asset_key text, category text, canonical_underlying text,
-           display_name text, market_origin text, asset_fingerprint text
-         )
+         FROM pg_temp.listing_membership_input AS x
          ORDER BY asset_key, asset_fingerprint
        ) AS incoming ON incoming.asset_key = asset.asset_key
        WHERE NOT EXISTS (
          SELECT 1 FROM identity.asset_version AS current
          WHERE current.asset_id = asset.asset_id AND current.valid_to IS NULL
        )`,
-      [json(memberships), batch.observedAt],
+      [batch.observedAt],
     ),
     sql.query(
       `WITH carried_instrument_versions AS (
          UPDATE identity.instrument_version AS current
-         SET valid_to = $2::timestamptz
+         SET valid_to = $1::timestamptz
          FROM identity.asset_version AS prior_asset_version,
            identity.asset_version AS current_asset_version,
            identity.instrument AS instrument,
@@ -1159,12 +1193,10 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
            AND source.source_id = current.source_id
            AND current.valid_to IS NULL
            AND current.identity_status = 'verified'
-           AND current.valid_from < $2::timestamptz
+           AND current.valid_from < $1::timestamptz
            AND NOT EXISTS (
              SELECT 1
-             FROM jsonb_to_recordset($1::jsonb) AS incoming(
-               source_key text, official_product_key text
-             )
+             FROM pg_temp.listing_membership_input AS incoming
              WHERE incoming.source_key = source.source_key
                AND incoming.official_product_key = instrument.official_product_key
            )
@@ -1197,35 +1229,34 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
            to_json(carried.identity_status)::text,
            ']'
          ), 'UTF8'), 'sha256'), 'hex'),
-         $2::timestamptz
+         $1::timestamptz
        FROM carried_instrument_versions AS carried`,
-      [json(memberships), batch.observedAt],
+      [batch.observedAt],
     ),
     sql.query(
       `INSERT INTO identity.instrument (source_id, official_product_key)
        SELECT source.source_id, incoming.official_product_key
        FROM (
          SELECT DISTINCT source_key, official_product_key
-         FROM jsonb_to_recordset($1::jsonb) AS x(source_key text, official_product_key text)
+         FROM pg_temp.listing_membership_input AS x
        ) AS incoming
        JOIN identity.source AS source ON source.source_key = incoming.source_key
        ON CONFLICT (source_id, official_product_key) DO NOTHING`,
-      [json(memberships)],
+      [],
     ),
     sql.query(
       `UPDATE identity.instrument_version AS current
-       SET valid_to = $2::timestamptz
+       SET valid_to = $1::timestamptz
        FROM identity.instrument AS instrument
        JOIN identity.source AS source ON source.source_id = instrument.source_id
-       JOIN jsonb_to_recordset($1::jsonb) AS incoming(
-         source_key text, official_product_key text, instrument_fingerprint text
-       ) ON incoming.source_key = source.source_key
+       JOIN pg_temp.listing_membership_input AS incoming
+         ON incoming.source_key = source.source_key
           AND incoming.official_product_key = instrument.official_product_key
        WHERE current.instrument_id = instrument.instrument_id
          AND current.valid_to IS NULL
          AND current.identity_fingerprint <> incoming.instrument_fingerprint
-         AND current.valid_from < $2::timestamptz`,
-      [json(memberships), batch.observedAt],
+         AND current.valid_from < $1::timestamptz`,
+      [batch.observedAt],
     ),
     sql.query(
       `INSERT INTO identity.instrument_version
@@ -1235,13 +1266,8 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
        SELECT instrument.instrument_id, source.source_id, asset_version.asset_version_id,
          incoming.official_venue_symbol, incoming.normalized_venue_symbol,
          incoming.instrument_type, incoming.quote_currency, incoming.official_status,
-         'verified', incoming.instrument_fingerprint, $2::timestamptz
-       FROM jsonb_to_recordset($1::jsonb) AS incoming(
-         source_key text, official_product_key text, asset_key text,
-         official_venue_symbol text, normalized_venue_symbol text,
-         instrument_type text, quote_currency text, official_status text,
-         instrument_fingerprint text
-       )
+         'verified', incoming.instrument_fingerprint, $1::timestamptz
+       FROM pg_temp.listing_membership_input AS incoming
        JOIN identity.source AS source ON source.source_key = incoming.source_key
        JOIN identity.instrument AS instrument
          ON instrument.source_id = source.source_id
@@ -1253,7 +1279,7 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
          SELECT 1 FROM identity.instrument_version AS current
          WHERE current.instrument_id = instrument.instrument_id AND current.valid_to IS NULL
        )`,
-      [json(memberships), batch.observedAt],
+      [batch.observedAt],
     ),
     sql.query(
       `INSERT INTO ingest.catalog_membership
@@ -1262,10 +1288,7 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
        SELECT source_run.source_run_id, instrument_version.instrument_version_id,
          source.source_id, 'present', incoming.official_catalog_position,
          incoming.normalized_attributes, $5::timestamptz
-       FROM jsonb_to_recordset($6::jsonb) AS incoming(
-         source_key text, official_product_key text, instrument_fingerprint text,
-         official_catalog_position text, normalized_attributes jsonb
-       )
+       FROM pg_temp.listing_membership_input AS incoming
        JOIN identity.source AS source ON source.source_key = incoming.source_key
        JOIN identity.instrument AS instrument
          ON instrument.source_id = source.source_id
@@ -1283,7 +1306,7 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
          official_catalog_position = EXCLUDED.official_catalog_position,
          normalized_attributes = EXCLUDED.normalized_attributes,
          observed_at = EXCLUDED.observed_at`,
-      [...common, batch.observedAt, json(memberships)],
+      [...common, batch.observedAt],
     ),
     sql.query(
       `INSERT INTO identity.review_case
@@ -1304,18 +1327,16 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
        ON CONFLICT (source_id, candidate_official_product_key, status) DO UPDATE SET
          candidate_payload = EXCLUDED.candidate_payload,
          reason_codes = EXCLUDED.reason_codes`,
-      [json(reviews), batch.observedAt],
+      [transactionJson(reviews), batch.observedAt],
     ),
     sql.query(
       `UPDATE identity.review_case AS review
        SET status = 'verified',
          resolved_asset_id = asset_version.asset_id,
          resolved_instrument_id = instrument.instrument_id,
-         decided_at = $2::timestamptz,
+         decided_at = $1::timestamptz,
          decision_note = 'Auto-verified by a later trusted exact official catalog observation'
-       FROM jsonb_to_recordset($1::jsonb) AS incoming(
-         source_key text, official_product_key text
-       )
+       FROM pg_temp.listing_membership_input AS incoming
        JOIN identity.source AS source ON source.source_key = incoming.source_key
        JOIN identity.instrument AS instrument
          ON instrument.source_id = source.source_id
@@ -1336,7 +1357,7 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
              AND decided.status = 'verified'
              AND decided.review_case_id <> review.review_case_id
          )`,
-      [json(memberships), batch.observedAt],
+      [batch.observedAt],
     ),
     sql.query(
       `UPDATE identity.review_case AS review
@@ -1361,7 +1382,7 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
            WHERE current_review.source_key = source.source_key
              AND current_review.official_product_key = review.candidate_official_product_key
          )`,
-      [json(replacementSources), json(reviews), batch.observedAt],
+      [transactionJson(replacementSources), transactionJson(reviews), batch.observedAt],
     ),
     sql.query(
       `INSERT INTO ingest.raw_artifact
@@ -1408,7 +1429,7 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
            ELSE EXCLUDED.error_summary
          END,
          metadata = EXCLUDED.metadata`,
-      [...common, json(artifacts)],
+      [...common, transactionJson(artifacts)],
     ),
     sql.query(
       `INSERT INTO identity.evidence
@@ -1417,10 +1438,7 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
        SELECT source.source_id, source_run.source_run_id, instrument.instrument_id,
          artifact.artifact_id, 'official-catalog', artifact.object_uri,
          $5::timestamptz, incoming.evidence_sha256, incoming.evidence_notes
-       FROM jsonb_to_recordset($6::jsonb) AS incoming(
-         source_key text, official_product_key text, evidence_sha256 text,
-         artifact_sha256 text, evidence_notes text
-       )
+       FROM pg_temp.listing_membership_input AS incoming
        JOIN identity.source AS source ON source.source_key = incoming.source_key
        JOIN identity.instrument AS instrument
          ON instrument.source_id = source.source_id
@@ -1441,7 +1459,7 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
          official_uri = COALESCE(identity.evidence.official_uri, EXCLUDED.official_uri),
          evidence_sha256 = EXCLUDED.evidence_sha256,
          notes = EXCLUDED.notes`,
-      [...common, batch.observedAt, json(memberships)],
+      [...common, batch.observedAt],
     ),
     sql.query(
        `INSERT INTO analytics.catalog_change_event AS stored_event
@@ -1453,11 +1471,7 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
          source_run.source_run_id, incoming.event_type,
          incoming.effective_day, false, 'confirmed', incoming.observed_at,
          incoming.official_listed_at, incoming.time_basis, incoming.evidence
-       FROM jsonb_to_recordset($5::jsonb) AS incoming(
-         source_key text, normalized_venue_symbol text, event_type text,
-         effective_day date, observed_at timestamptz, official_listed_at timestamptz,
-         time_basis text, evidence jsonb
-       )
+       FROM pg_temp.listing_event_input AS incoming
        JOIN identity.source AS source ON source.source_key = incoming.source_key
        JOIN identity.instrument_version AS instrument_version
          ON instrument_version.source_id = source.source_id
@@ -1505,15 +1519,12 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
            )
            ELSE stored_event.evidence
          END`,
-      [...common, json(events)],
+      common,
     ),
     sql.query(
       `UPDATE identity.instrument_version AS current
        SET valid_to = incoming.observed_at
-       FROM jsonb_to_recordset($4::jsonb) AS incoming(
-         source_key text, normalized_venue_symbol text, event_type text,
-         effective_day date, observed_at timestamptz
-       )
+       FROM pg_temp.listing_event_input AS incoming
        JOIN identity.source AS source ON source.source_key = incoming.source_key
        JOIN analytics.catalog_change_event AS event
          ON event.source_id = source.source_id
@@ -1527,7 +1538,7 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
          AND current.identity_status = 'verified'
          AND current.valid_to IS NULL
          AND current.valid_from < incoming.observed_at`,
-      [batch.jobName, batch.pipelineVersion, batch.bucketAt, json(events)],
+      [batch.jobName, batch.pipelineVersion, batch.bucketAt],
     ),
     sql.query(
       `WITH actual_counts AS (
@@ -1590,7 +1601,7 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
          checksum = EXCLUDED.checksum,
          committed_at = EXCLUDED.committed_at,
          error_summary = EXCLUDED.error_summary`,
-      [...common, batch.observedAt, json([
+      [...common, batch.observedAt, transactionJson([
         {
           sink_name: 'blob-normalized-catalog',
           status: artifacts.length === 0 || artifacts.every(row => row.archive_status === 'pending')
@@ -1617,6 +1628,12 @@ export function buildListingAuditPgQueries(sql, batch, archivedArtifacts = []) {
       ])],
     ),
   ];
+  if (transactionJsonBytes > LISTING_PG_TRANSACTION_JSON_MAX_BYTES) {
+    throw new RangeError(
+      `Listing Audit PostgreSQL transaction JSON is ${transactionJsonBytes} bytes, above the ${LISTING_PG_TRANSACTION_JSON_MAX_BYTES}-byte safety budget`,
+    );
+  }
+  return queries;
 }
 
 export async function writeListingAuditPgBatch(batch, archivedArtifacts, { runTransaction } = {}) {
