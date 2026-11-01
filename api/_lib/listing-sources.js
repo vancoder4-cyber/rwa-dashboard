@@ -350,20 +350,25 @@ async function collectGatePerp(baseUrl) {
   const payload = await fetchSameOrigin(baseUrl, '/api/gate-bulk?type=perp-snapshot');
   const rows = [];
   for (const contract of Array.isArray(payload?.contracts) ? payload.contracts : []) {
-    const venueSymbol = normalizedUpper(contract?.name);
-    const venueBase = venueSymbol.replace(/_USDT$/, '');
-    const officialCategory = categoryFromOfficialSignalType(contract?.contract_type);
-    const category = officialCategory === 'equity' && ['1', 'true', 'yes'].includes(normalized(contract?.is_pre_market).toLowerCase())
-      ? 'pre-ipo'
-      : officialCategory;
-    const identity = normalizeSignalIdentity(venueBase, category, { venue: 'gate' });
-    if (!identity) continue;
-    rows.push(listing('perp', 'gate', venueSymbol, identity.symbol, identity.category, {
-      venueCategory:category,
-      identityEvidence: `Gate contract_type=${contract.contract_type}`,
-    }));
+    const row = gatePerpListingFromOfficial(contract);
+    if (row) rows.push(row);
   }
   return assertCatalogBounds('perp', 'gate', rows);
+}
+
+export function gatePerpListingFromOfficial(contract) {
+  const venueSymbol = normalizedUpper(contract?.name);
+  const venueBase = venueSymbol.replace(/_USDT$/, '');
+  const officialCategory = categoryFromOfficialSignalType(contract?.contract_type);
+  const category = officialCategory === 'equity' && ['1', 'true', 'yes'].includes(normalized(contract?.is_pre_market).toLowerCase())
+    ? 'pre-ipo'
+    : officialCategory;
+  const identity = normalizeSignalIdentity(venueBase, category, { venue: 'gate' });
+  if (!identity || !venueSymbol) return null;
+  return listing('perp', 'gate', venueSymbol, identity.symbol, identity.category, {
+    venueCategory:category,
+    identityEvidence: `Gate contract_type=${contract?.contract_type}`,
+  });
 }
 
 async function collectBinancePerp(baseUrl) {

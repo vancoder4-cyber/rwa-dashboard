@@ -37,6 +37,8 @@ export const REVIEWED_SOURCE_EXPANSIONS = Object.freeze([
     addedCountMin: 2_200,
     addedCountMax: 3_000,
     legacyCountMax: 10,
+    allowedMissingVenueSymbols: Object.freeze(['RLGHLUSDT']),
+    resetMissingEvidence: true,
     reviewedFrom: '2026-10-27',
     reviewedThrough: '2026-11-15',
     evidenceMethod: 'bitget-reality-stock-info-exact-intersection-v1',
@@ -54,6 +56,7 @@ export const REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS = Object.freeze([
   'CXMT',
   'QNT',
   'UNITREE',
+  'JPL',
 ]);
 export const REVIEWED_ETF_CATEGORY_CORRECTIONS = Object.freeze(Object.keys(REVIEWED_ETF_IDENTITIES));
 // Exact venue products whose reviewed identity was corrected after an earlier
@@ -61,6 +64,30 @@ export const REVIEWED_ETF_CATEGORY_CORRECTIONS = Object.freeze(Object.keys(REVIE
 // deliberately one-way and product-scoped: they update identity metadata for
 // the unchanged listing key and never create a listing event.
 export const REVIEWED_EXACT_CANONICAL_CORRECTIONS = Object.freeze([
+  Object.freeze({
+    sourceKey: 'perp:tradexyz',
+    venueSymbol: 'XYZ:JIO',
+    previousCanonicalSymbol: 'JIO',
+    canonicalSymbol: 'JPL',
+    previousCategory: 'pre-ipo',
+    category: 'equity',
+    previousVenueCategory: 'pre-ipo',
+    venueCategory: 'equity',
+    previousLifecycleStatus: null,
+    lifecycleStatus: 'public',
+  }),
+  Object.freeze({
+    sourceKey: 'perp:gate',
+    venueSymbol: 'JIO_USDT',
+    previousCanonicalSymbol: 'JIO',
+    canonicalSymbol: 'JPL',
+    previousCategory: 'pre-ipo',
+    category: 'equity',
+    previousVenueCategory: 'pre-ipo',
+    venueCategory: 'equity',
+    previousLifecycleStatus: null,
+    lifecycleStatus: 'public',
+  }),
   Object.freeze({
     sourceKey: 'perp:binance',
     venueSymbol: 'HK0992USDT',
@@ -415,29 +442,33 @@ function reviewedSourceExpansionForTransition({
   missingRows,
   observedAt,
 }) {
-  if (missingRows.length) return null;
   const observedDay = normalized(observedAt).slice(0, 10);
   const consumed = new Set(Array.isArray(previousSource?.reviewedExpansionIds)
     ? previousSource.reviewedExpansionIds.map(normalized).filter(Boolean)
     : []);
   const evidence = observation?.catalogEvidence;
-  return REVIEWED_SOURCE_EXPANSIONS.find(review =>
-    observation?.sourceKey === review.sourceKey &&
-    !consumed.has(review.id) &&
-    observedDay >= review.reviewedFrom && observedDay <= review.reviewedThrough &&
-    previousRows.length >= review.previousCountMin && previousRows.length <= review.previousCountMax &&
-    currentRows.length >= review.currentCountMin && currentRows.length <= review.currentCountMax &&
-    addedRows.length >= review.addedCountMin && addedRows.length <= review.addedCountMax &&
-    currentRows.length === previousRows.length + addedRows.length &&
-    currentRows.every(row => row.identityStatus === 'verified' && row.inclusionStatus === 'eligible') &&
-    evidence?.status === 'full' &&
-    evidence?.method === review.evidenceMethod &&
-    evidence?.admittedCount === currentRows.length &&
-    evidence?.admittedRealityCount + evidence?.legacyCount === currentRows.length &&
-    evidence?.legacyCount <= review.legacyCountMax &&
-    evidence?.matchedCount === evidence?.realityCandidatesCount &&
-    evidence?.admittedRealityCount <= evidence?.matchedCount
-  ) || null;
+  return REVIEWED_SOURCE_EXPANSIONS.find(review => {
+    const allowedMissing = new Set(Array.isArray(review.allowedMissingVenueSymbols)
+      ? review.allowedMissingVenueSymbols.map(normalizedUpper).filter(Boolean)
+      : []);
+    return observation?.sourceKey === review.sourceKey &&
+      !consumed.has(review.id) &&
+      observedDay >= review.reviewedFrom && observedDay <= review.reviewedThrough &&
+      previousRows.length >= review.previousCountMin && previousRows.length <= review.previousCountMax &&
+      currentRows.length >= review.currentCountMin && currentRows.length <= review.currentCountMax &&
+      addedRows.length >= review.addedCountMin && addedRows.length <= review.addedCountMax &&
+      missingRows.length <= allowedMissing.size &&
+      missingRows.every(row => allowedMissing.has(normalizedUpper(row.venueSymbol))) &&
+      currentRows.length === previousRows.length + addedRows.length - missingRows.length &&
+      currentRows.every(row => row.identityStatus === 'verified' && row.inclusionStatus === 'eligible') &&
+      evidence?.status === 'full' &&
+      evidence?.method === review.evidenceMethod &&
+      evidence?.admittedCount === currentRows.length &&
+      evidence?.admittedRealityCount + evidence?.legacyCount === currentRows.length &&
+      evidence?.legacyCount <= review.legacyCountMax &&
+      evidence?.matchedCount === evidence?.realityCandidatesCount &&
+      evidence?.admittedRealityCount <= evidence?.matchedCount;
+  }) || null;
 }
 
 function dailyEventTimestamp(value) {
@@ -534,10 +565,10 @@ export function mergeListingAudit(previousState, rawObservations, now = new Date
     const hasRemovals = observedMissingRows.length > 0;
     const removalDrift = !warming && hasRemovals &&
       changedListings > LISTING_SOURCE_DRIFT_ALLOWANCE && driftRatio > LISTING_SOURCE_DRIFT_RATIO;
-    const extremePureGrowth = !warming && !hasRemovals &&
+    const extremeGrowth = !warming &&
       observedAddedRows.length > LISTING_SOURCE_EXTREME_GROWTH_ALLOWANCE &&
       driftRatio > LISTING_SOURCE_EXTREME_GROWTH_RATIO;
-    const reviewedExpansion = extremePureGrowth
+    const reviewedExpansion = (extremeGrowth || removalDrift)
       ? reviewedSourceExpansionForTransition({
         observation,
         previousSource,
@@ -548,7 +579,7 @@ export function mergeListingAudit(previousState, rawObservations, now = new Date
         observedAt: nowIso,
       })
       : null;
-    if (identityDrift.length || removalDrift || (extremePureGrowth && !reviewedExpansion)) {
+    if (identityDrift.length || (removalDrift && !reviewedExpansion) || (extremeGrowth && !reviewedExpansion)) {
       const reason = identityDrift.length
         ? `identity drift for ${identityDrift.slice(0, 3).map(row => row.venueSymbol).join(', ')}`
         : removalDrift
@@ -576,8 +607,14 @@ export function mergeListingAudit(previousState, rawObservations, now = new Date
     const pendingRemovals = {};
     const removedRows = [];
     const retainedMissingRows = [];
+    const resetMissingEvidence = reviewedExpansion?.resetMissingEvidence === true
+      ? new Set((reviewedExpansion.allowedMissingVenueSymbols || []).map(normalizedUpper))
+      : new Set();
     for (const row of observedMissingRows) {
-      const firstMissingAt = isoTimestamp(previousPendingRemovals[row.key]);
+      const resetForReviewedTransition = resetMissingEvidence.has(normalizedUpper(row.venueSymbol));
+      const firstMissingAt = resetForReviewedTransition
+        ? null
+        : isoTimestamp(previousPendingRemovals[row.key]);
       // Retries or manual verification runs within the same UTC day are not
       // independent observations. Confirm a delisting only after a later
       // daily catalog pass still cannot find the instrument.
@@ -666,6 +703,11 @@ export function mergeListingAudit(previousState, rawObservations, now = new Date
         previousCount: previousRows.length,
         currentCount: currentRows.length,
         addedCount: addedRows.length,
+        missingCount: observedMissingRows.length,
+        missingVenueSymbols: observedMissingRows.map(row => row.venueSymbol).sort(),
+        missingEvidenceResetAt: observedMissingRows.length && reviewedExpansion.resetMissingEvidence
+          ? nowIso
+          : null,
         matchedCount: observation.catalogEvidence.matchedCount,
         legacyCount: observation.catalogEvidence.legacyCount,
       };

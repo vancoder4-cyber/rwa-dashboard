@@ -57,6 +57,10 @@ export const SECURITY_LISTING_REGISTRY = Object.freeze({
   // Reviewed 2026-09-07 against The Coca-Cola Company's official
   // shareowner record. Venue metadata must still admit KO as a security first.
   KO: Object.freeze({ category:'equity', status:'public', name:'The Coca-Cola Company', listedOn:'1919-09-05', aliases:Object.freeze([]) }),
+  // Reliance Industries disclosed final exchange approval on 2026-10-27 and
+  // public trading from 2026-10-28 under NSE symbol JPL. Venue derivatives
+  // may retain the pre-IPO product code JIO, so keep that alias lifecycle-only.
+  JPL: Object.freeze({ category:'equity', status:'public', name:'Jio Platforms Limited', listedOn:'2026-10-28', aliases:Object.freeze(['JIO']) }),
   OPENAI: Object.freeze({ category:'pre-ipo', status:'pre-ipo', name:'OpenAI (Pre-IPO)', listedOn:null, aliases:Object.freeze([]) }),
   ANTHROPIC: Object.freeze({ category:'pre-ipo', status:'pre-ipo', name:'Anthropic (Pre-IPO)', listedOn:null, aliases:Object.freeze([]) }),
   SHEIN: Object.freeze({ category:'pre-ipo', status:'pre-ipo', name:'SHEIN (Pre-IPO)', listedOn:null, aliases:Object.freeze([]) }),
