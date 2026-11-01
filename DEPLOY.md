@@ -102,7 +102,7 @@ It fails unless the current production alias resolves to the unique successful P
 
 For a Bitget Spot transport release, verify the Git-origin Preview before any writer run:
 
-- call `/api/bitget-market?type=spot-catalog` twice and require HTTP 200, `catalogStatus=full`, non-empty exact instruments, `coverage.instruments` equality and a second Vercel CDN `HIT`/`STALE`; the function must be deployed in `sin1`;
+- call `/api/bitget-market?type=spot-catalog` twice and require HTTP 200, `catalogStatus=full`, non-empty exact instruments, `coverage.instruments` equality, `catalogEvidence.status=full`, method `bitget-reality-stock-info-exact-intersection-v1`, equal Reality candidate/matched counts, stock-info count not below matched count, and a second Vercel CDN `HIT`/`STALE`; the function must be deployed in `sin1`;
 - call `type=spot-snapshot` and require the same Full catalog even if `tickerStatus` is Partial/Unavailable. Market-only symbols must be absent, and a zero-ticker response must be `no-store` without changing the independently cached catalog;
 - run `DASHBOARD_URL=<preview> npm run audit:listings` and require `spot:bitget` Full, then run `audit:data`/`audit:health` and browser-check the Bitget Spot venue and Spot anomaly field states. Do not initialize or invoke the authenticated Listing writer until these read-only checks pass.
 

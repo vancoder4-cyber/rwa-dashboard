@@ -42,7 +42,7 @@ trade.xyz 当前专用 `xyz` DEX universe 有 5 个 `perpCategories` 空缺：`U
 
 | Venue | 身份依据 |
 |---|---|
-| Bitget | Reality catalog 的 `isReality=YES`；legacy feed 只允许已审计贵金属/FX token |
+| Bitget | 官方 v3 Spot instruments 的 `isReality=YES` 必须与官方 Reality `stock-info` 目录按 exact symbol 全量交叉一致；legacy feed 只允许已审计贵金属/FX token |
 | Kraken | `asset_class=tokenized_asset` 且 wrapper 为官方 xStocks；另允许已审计贵金属 token |
 | Binance | `B` suffix 只是候选，underlying 还必须出现在官方 TradFi catalog；PAXG/XAUT 单独允许 |
 | Gate.io | 不再仅凭 `X/ON` suffix 放行；必须是精确审计 wrapper，或 2026-08-14 逐 pair 审计的 `PAXG_USDT` / `XAUT_USDT` legacy commodity；未知 suffix 只能作为待复核候选 |
@@ -325,7 +325,7 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 
 - Hyperliquid/trade.xyz market identity：`https://api.hyperliquid.xyz/info` 的 `perpCategories` 与 `metaAndAssetCtxs`。
 - Bitget perpetual/Reality catalogs：`/api/v3/market/instruments`。
-- Bitget Spot 在 Dashboard 内只通过固定 `sin1` 同源路由 `/api/bitget-market` 采集。`type=spot-catalog` 只读取固定官方 v3 `category=SPOT` instruments，并独立缓存身份目录；Listing Audit 不依赖 ticker。`type=spot-snapshot` 在相同官方目录上附加固定 v3 Reality 与 v2 Spot ticker，但所有行情行必须 inner join 当前 online USD/USDT catalog，ticker 不得反向准入。Catalog 缺失必须 502/no-store；ticker 全失败时仍保留 Full catalog、明确 ticker Unavailable 且 snapshot no-store，不能把空行情解释为下架、零成交或无异动。
+- Bitget Spot 在 Dashboard 内只通过固定 `sin1` 同源路由 `/api/bitget-market` 采集。`type=spot-catalog` 同时读取固定官方 v3 `category=SPOT` instruments 与无需鉴权的 Reality `stock-info` 全量目录；每一个 online USD/USDT `isReality=YES` instrument 都必须在 `stock-info` 中有唯一 exact-symbol 匹配，否则整份目录 502/no-store，不能把不完整交集发布为 Full。非 Reality 行仍须通过下游精确 legacy allowlist。代理只发布字段投影与固定方法/计数 evidence，Listing collector 再按实际数组重建内部 `catalogEvidence`，任意上游自报标记不能触发扩容准入。Listing Audit 不依赖 ticker。`type=spot-snapshot` 在相同已交叉验证目录上附加固定 v3 Reality 与 v2 Spot ticker，但所有行情行必须 inner join 当前 catalog，ticker 不得反向准入。Ticker 全失败时仍保留 Full catalog、明确 ticker Unavailable 且 snapshot no-store，不能把空行情解释为下架、零成交或无异动。
 - Bitget SOFTBANK 精确合约身份：2026-09-07 `USDT-FUTURES` 官方 live catalog 中的 `SOFTBANKUSDT + baseCoin=SOFTBANK + isRwa=YES + symbolType=stock + status=online`；公司法律名称和东京代码 9984：[SoftBank Group 官方股票资料](https://group.softbank/en/ir/stock/info) 与 [JPX 2026 行业指数成分资料](https://www.jpx.co.jp/english/markets/indices/factsheets/files/e_003_1_25_fac2_33sector_Information%20and%20Communication.pdf)；首次公开交易日 1994-07-22 另由受监管券商的上市资料复核。不得与东京代码 9434 的 SoftBank Corp. 混淆。
 - Gate futures/spot catalogs：`/api/v4/futures/usdt/contracts` 与 `/api/v4/spot/currency_pairs`。
 - Binance futures/spot catalogs：`/fapi/v1/exchangeInfo` 与 `/api/v3/exchangeInfo`。
@@ -387,7 +387,7 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 ### 现货量价异动
 
 - `spotVolumePriceAnomalies` 以**精确现货 listing**为观察单位，不按裸 ticker 或 canonical asset 合并。listing 主键固定为 `spot:venue:venueSymbol`，身份键固定为 `category:canonical`；同一 underlying 的 USD/USDT 或不同 wrapper 必须保留为不同观察行。交易所官方产品 catalog/type 是准入依据；ticker、名称、价格相似或已有合约同名均不能证明是 RWA。跨 category 同 canonical 冲突时整体 quarantine，不能让 Crypto 同名资产进入历史或告警。
-- Bitget 的身份目录与可选行情可用性必须分离：Listing Audit 固定读取 `spot-catalog`；Spot 量价异动和浏览器读取 `spot-snapshot`。后者 ticker Partial/Unavailable 只能降低字段/来源状态，不能缩小、扩充或替换官方 catalog，也不能影响前者的独立 CDN identity continuity。
+- Bitget 的身份目录与可选行情可用性必须分离：Listing Audit 固定读取经 instruments + Reality `stock-info` exact-symbol 双目录验证的 `spot-catalog`；Spot 量价异动和浏览器读取 `spot-snapshot`。后者 ticker Partial/Unavailable 只能降低字段/来源状态，不能缩小、扩充或替换官方 catalog，也不能影响前者的独立 CDN identity continuity。
 - 每行先应用 `currentVolumeUsd >= 500000` 的硬过滤，再按 OR 关系判断：`currentVolumeUsd / yesterdayVolumeUsd >= 3.0`，或 `priceChange24hPct >= 15`。边界值包含在内；跌幅 `<= -15%` 不属于本版“涨幅”告警。前一日成交量缺失、非正数、不可比或时间戳不是前一个已封存 UTC day 时，成交量条件不可用；真实 0 必须保留为 0，但比例保持 null 且不得触发 volume，不能把 0 与缺失互换。价格条件仍可在 Day 1 独立触发。
 - “昨日”是前一个已封存 UTC-date 桶里、同一 exact listing 的 rolling-24h USD turnover 锚点，不宣称为交易所 UTC 自然日成交量。当前与昨日的 listing key、identity、quote/单位和采集方法 fingerprint 必须一致；任一变化都重新 Warming。历史同一 UTC 日重试只能覆盖，不得追加伪观察；只保留最近 8 个 UTC 日，足以得到一个前日锚点并允许连续性检查。
 - 成交量必须是 quote/USD turnover，不得把 base shares/tokens 当成美元。Gate 使用 `quote_volume`，Binance 使用 `quoteVolume`，Bitget Reality 使用 `platformTurnover24h`（不得回退到底层传统市场 `turnover24h`），OKX Spot 使用 `volCcy24h`；Kraken 可用 `v[1] × p[1]` 估算 USD turnover 并标 Estimated。缺失、负数、NaN、过期或不支持字段保持 null，不能通过 `|| 0` 进入过滤、比例或排序。
@@ -426,9 +426,10 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 
 - 检测频率与展示周期分离：服务端每天读取一次官方目录并做 diff；RWA Signal Radar 默认展示滚动 7 天，允许切换滚动 30 天。不得为了“周视图”把检测降低为每周一次。
 - 覆盖必须恰好对应当前产品范围的十个独立 source：Perpetual 的 trade.xyz、Bitget、Gate、Binance、OKX，以及 Spot 的 Bitget、Gate、Kraken、Binance、OKX。主键是 `market:venue:venueSymbol`；不能以裸 canonical ticker 合并不同交易标的。
-- `spot:bitget` 只允许从固定 `/api/bitget-market?type=spot-catalog` 得到的官方 v3 instruments 建立 Full source；`spot-snapshot` 的 ticker 状态不是 Listing source coverage。目录不可用时必须保留 Unavailable/last-good 语义，不能用 ticker、旧客户端表或空数组替代。
+- `spot:bitget` 只允许从固定 `/api/bitget-market?type=spot-catalog` 得到的官方 v3 instruments + Reality `stock-info` exact-symbol 全量交叉验证结果建立 Full source；内部 observation 必须携带由 collector 重建、与 admitted rows 计数完全一致的结构化 evidence。`spot-snapshot` 的 ticker 状态不是 Listing source coverage。任一目录不可用、重复、空值或存在未匹配 Reality candidate 时必须保留 Unavailable/last-good 语义，不能用 ticker、旧客户端表、部分交集或空数组替代。
 - 交易场所的临时交易模式不是 listing lifecycle。Kraken 官方目录中处于 `post_only`、`limit_only` 或 `cancel_only` 的精确 pair 仍保留 catalog membership，并映射为 instrument `official_status=suspended`，不得据此生成 `delisted`；只有 `online` instrument 可以进入可执行套利 route，因此临时模式对目录/身份对账可见，但对下游执行必须 fail closed。
 - 每个 source 的首次成功读取只建立基线，不生成 New。只有完整、无重复且通过类别漂移检查的官方 catalog 才能替换该 source 的 last-good 基线；Unavailable/Partial 不得清空基线，也不得制造假下架。单次缺失先记为 pending removal，至少跨两个不同 UTC 日的完整观测仍缺失后才记下架，同日重试不算第二次观测。通过官方身份门控的合理纯新增必须生成提醒，不能被普通 10% 缩表保护吞掉；包含删除的显著漂移及同时超过 50 个、50% 的极端纯增长继续隔离复核。新增、下架、重新上线必须分别记录，页面“竞品新上线资产”只显示新增和重新上线。
+- 极端纯增长没有通用放行开关。唯一的已审核例外是 Bitget 2026-10-27 公告的 Reality 3,000+ 扩容：只在 2026-10-27 至 2026-11-15，把 `spot:bitget` 从 500–800 条 last-good 纯新增到 3,000–3,500 条时使用一次；必须携带服务端重建的 `bitget-reality-stock-info-exact-intersection-v1` Full 证据，最终 admitted 数与 observation 精确相等、Reality 候选全部命中独立官方 `stock-info` 目录、legacy 数量单独计数且所有行均为 `verified + eligible`。接受后把固定 expansion ID 写入 source state，重复使用、任意删除、超出数量/日期窗口、证据缺失或身份未验证都继续 Unavailable，不得通过调高通用 50%/50 条阈值绕过。
 - Readiness 的成员变化对账也必须按 source 回看最近一次可信 Full source run，不能使用紧邻但 Unavailable/Partial、无完整 membership 的日轮次作为基线；恢复 last-good、临时交易模式变化和身份版本承接都不是新的 listing event。
 - 身份门控继续遵循本文件总规则。明确官方 RWA 类型且通过现有通用 admission gate 的标的可标 `verified`；普通 Crypto 类型直接拒绝。Gate Spot 不提供资产类别，只有 2026-08-14 已逐 pair 审计且仍在官方 live catalog 的 `PAXG_USDT`、`XAUT_USDT` 两个 legacy commodity pair 与精确 wrapper 可以直接验证；不得扩成其他 quote 或相似贵金属 ticker。其他新 suffix 即使与另一官方 RWA 目录同 canonical，也只能标 `review-required`，在精确 wrapper 身份确认前不得自动加入行情数据。
 - Listing Audit 只观察和报告，不能写 allowlist、类别、生命周期、baseline 常量或客户端资产表。页面的 `Included` 必须同时匹配当前 Spot/Perpetual 数据中同一 venue 的精确 `venueSymbol` 与 `category:canonical` 身份；仅有相同 canonical underlying 不足以宣称该新 listing 已收录。
@@ -436,7 +437,7 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 - 受 `CRON_SECRET` 保护的 `/api/listing-audit-cron` 是唯一 writer；公开 `/api/listing-changes` 是 GET-only、无 query 的 CDN 缓存 reader，浏览器不能触发目录采集、建立基线或写数据库。`analytics.catalog_change_event` 是唯一、持久的上架生命周期事件权威；可信 `collection_cycle` / `source_run` 决定最近一次成功审计时间和十源覆盖。`catalog_membership` 只能作为已验证的精确身份关联，严禁根据当前或历史 membership 的集合差补造事件。事件必须由 writer 在可信完整目录差分时写入，并携带稳定事件 ID、上一/当前 source run、身份状态及内部证据。`officialListedAt` 只能补充已由差分确认的事件，不能以 `onboardDate` 或相似日期字段单独制造事件。
 - `LISTING_READ_MODE=postgres-authoritative` 时，`/api/listing-changes` 只通过专用最小权限 reader 和 `publication.listing_*_v1` 安全视图恢复最近 45 日事件及最近可信 source-run 覆盖；不得回读 Runtime Cache 来决定历史是否存在。只有 `verified + eligible` 的 listed/relisted 事件可以进入页面与 Push Bot，listed 对外映射为 `changeType=new`，delisted 保留在审计历史但不进入日报。`generatedAt` 必须来自最近一次成功审计，不能使用请求时间。原始证据、连接串、run/cycle 内部 ID 和数据库权限信息不得返回前端。
 - 上架事实与发布身份必须分层：事件证据保持不可变，用于证明当时观察和目录差分；公开事件的 `name/category/canonicalSymbol` 必须来自该事件 instrument version 已绑定的 Dashboard identity version，`venueCategory/lifecycleStatus` 继续保持各自独立口径。旧 event evidence 或 membership 中的 ticker 名称不得覆盖后来经过审核的身份修正，也不得通过改写历史事件行来修正展示。
-- `rwa-listing-audit-v2` Runtime Cache 与 CDN 只作为可丢失的低延迟副本；清空、重新部署或区域逐出不能重置 PostgreSQL 事件历史或制造空基线。紧凑 checkpoint 仍可用于 writer 连续性和回滚期间的旧读取模式，但不再取得事件历史权威。事件以 45 天为默认查询窗口、2,000 条为上限；截断必须降为 Partial 并公开 `history`，不能静默宣称 Full 或“没有新资产”。数据库无可信 source run、迁移/权限失败或事件投影不合法时必须 fail closed 为 Warming/Unavailable，不能以空数组冒充“确认无事件”。
+- `rwa-listing-audit-v2` Runtime Cache 与 CDN 只作为可丢失的低延迟副本；清空、重新部署或区域逐出不能重置 PostgreSQL 事件历史或制造空基线。紧凑 checkpoint 仍可用于 writer 连续性和回滚期间的旧读取模式，但不再取得事件历史权威。事件以 45 天为默认查询窗口、5,000 条为上限；checkpoint 内事件只引用同一原子 bundle 中保留 180 天的 known identity，并对重复 identity evidence 做字典化，保证已复核的大批量扩容不会因副本字节预算静默丢失。截断必须降为 Partial 并公开 `history`，不能静默宣称 Full 或“没有新资产”。数据库无可信 source run、迁移/权限失败或事件投影不合法时必须 fail closed 为 Warming/Unavailable，不能以空数组冒充“确认无事件”。
 - Nasdaq Trader 官方目录的 `etfs` 数组只用于在场所 RWA/security 门控之后细分宽泛 Stock/Equity 类别。当前 Kraken xStocks Listing Audit 依赖该官方 ETF 目录区分 Equity 与 ETF；目录不可用或契约不完整时，该 source 必须 Unavailable，不能把未知 ETF 猜成 Equity。官方 ETF 目录不是 RWA 准入白名单。
 - OKX 的 183 Perpetual（至少 149 SWAP + 34 X-Perp）和 50 Spot（至少 48 UTS + 精确 2 gold）是已审核下限，不是阻止官方新增的永久精确数量。低于任一分项、Crypto/category 泄漏、重复或 market-data join 不完整继续失败；合法增长由 Listing Audit 单独提醒。
 

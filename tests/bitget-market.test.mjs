@@ -52,6 +52,17 @@ function instrument(symbol, baseCoin, extras = {}) {
   };
 }
 
+function stockInfo(symbol, code = 'AAPL', extras = {}) {
+  return {
+    symbol,
+    code,
+    name:`${code} Inc.`,
+    tradingPeriod:['pre_market', 'regular', 'after_hours'],
+    weekendTradable:'yes',
+    ...extras,
+  };
+}
+
 function realityTicker(symbol, extras = {}) {
   return {
     symbol,
@@ -90,16 +101,17 @@ test('Bitget Spot catalog is a fixed sin1 route with a mandatory field-projected
   assert.deepEqual(bitgetMarketConfig, { regions:['sin1'], maxDuration:60 });
   const calls = [];
   await withFetchStub(async url => {
-    calls.push(String(url));
-    return jsonResponse({
-      code:'00000',
-      data:[
-        instrument('RAAPLUSDT', 'RAAPL', { privateField:'must-not-leak' }),
-        instrument('PAXGUSDT', 'PAXG', { isReality:'no' }),
-        instrument('REURUSDT', 'REUR', { quoteCoin:'EUR' }),
-        instrument('ROFFUSDT', 'ROFF', { status:'offline' }),
-      ],
-    });
+    const value = String(url);
+    calls.push(value);
+    if (value.endsWith('/api/v3/reality/market/stock-info')) {
+      return jsonResponse({ code:'00000', data:[stockInfo('RAAPLUSDT'), stockInfo('REXTRAUSDT', 'EXTRA')] });
+    }
+    return jsonResponse({ code:'00000', data:[
+      instrument('RAAPLUSDT', 'RAAPL', { privateField:'must-not-leak' }),
+      instrument('PAXGUSDT', 'PAXG', { isReality:'no' }),
+      instrument('REURUSDT', 'REUR', { quoteCoin:'EUR' }),
+      instrument('ROFFUSDT', 'ROFF', { status:'offline' }),
+    ] });
   }, async () => {
     const response = responseRecorder();
     await bitgetMarketHandler({ method:'GET', query:{ type:'spot-catalog' } }, response);
@@ -107,10 +119,21 @@ test('Bitget Spot catalog is a fixed sin1 route with a mandatory field-projected
     assert.equal(response.payload.catalogStatus, 'full');
     assert.deepEqual(response.payload.instruments.map(row => row.symbol), ['RAAPLUSDT', 'PAXGUSDT']);
     assert.equal(response.payload.instruments[0].privateField, undefined);
+    assert.deepEqual(response.payload.catalogEvidence, {
+      status:'full',
+      method:'bitget-reality-stock-info-exact-intersection-v1',
+      instrumentsCount:2,
+      realityCandidatesCount:1,
+      stockInfoCount:2,
+      matchedCount:1,
+    });
     assert.deepEqual(response.payload.coverage.instruments, { status:'full', observed:2, expected:2 });
     assert.match(response.headers['Vercel-CDN-Cache-Control'], /max-age=120/);
   });
-  assert.deepEqual(calls, ['https://api.bitget.com/api/v3/market/instruments?category=SPOT']);
+  assert.deepEqual(calls, [
+    'https://api.bitget.com/api/v3/market/instruments?category=SPOT',
+    'https://api.bitget.com/api/v3/reality/market/stock-info',
+  ]);
 });
 
 test('Bitget Spot snapshot inner-joins optional market rows to the mandatory catalog', async () => {
@@ -120,6 +143,9 @@ test('Bitget Spot snapshot inner-joins optional market rows to the mandatory cat
     calls.push(value);
     if (value.endsWith('/api/v3/market/instruments?category=SPOT')) {
       return jsonResponse({ code:'00000', data:[instrument('RAAPLUSDT', 'RAAPL'), instrument('PAXGUSDT', 'PAXG', { isReality:'no' })] });
+    }
+    if (value.endsWith('/api/v3/reality/market/stock-info')) {
+      return jsonResponse({ code:'00000', data:[stockInfo('RAAPLUSDT')] });
     }
     if (value.endsWith('/api/v3/market/tickers?category=SPOT')) {
       return jsonResponse({ code:'00000', data:[realityTicker('RAAPLUSDT'), realityTicker('PAXGUSDT'), realityTicker('BTCUSDT')] });
@@ -139,7 +165,7 @@ test('Bitget Spot snapshot inner-joins optional market rows to the mandatory cat
     assert.deepEqual(response.payload.coverage.standardTickers, { status:'full', observed:1, expected:1 });
     assert.match(response.headers['Vercel-CDN-Cache-Control'], /max-age=30/);
   });
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 4);
 });
 
 test('Bitget Spot catalog remains usable when both optional ticker feeds fail', async () => {
@@ -147,6 +173,9 @@ test('Bitget Spot catalog remains usable when both optional ticker feeds fail', 
     const value = String(url);
     if (value.endsWith('/api/v3/market/instruments?category=SPOT')) {
       return jsonResponse({ code:'00000', data:[instrument('RAAPLUSDT', 'RAAPL')] });
+    }
+    if (value.endsWith('/api/v3/reality/market/stock-info')) {
+      return jsonResponse({ code:'00000', data:[stockInfo('RAAPLUSDT')] });
     }
     return jsonResponse({ error:'unavailable' }, 503);
   }, async () => {
@@ -188,7 +217,41 @@ test('Bitget catalog rejects empty or duplicate exact instrument symbols instead
     [instrument('RAAPLUSDT', 'RAAPL'), instrument('raaplusdt', 'RSECOND')],
   ];
   for (const data of invalidCatalogs) {
-    await withFetchStub(async () => jsonResponse({ code:'00000', data }), async () => {
+    await withFetchStub(async url => {
+      if (String(url).endsWith('/api/v3/reality/market/stock-info')) {
+        return jsonResponse({ code:'00000', data:[stockInfo('RAAPLUSDT')] });
+      }
+      return jsonResponse({ code:'00000', data });
+    }, async () => {
+      const response = responseRecorder();
+      await bitgetMarketHandler({ method:'GET', query:{ type:'spot-catalog' } }, response);
+      assert.equal(response.statusCode, 502);
+      assert.equal(response.payload.error, 'Bitget Spot identity catalog unavailable');
+      assert.equal(response.headers['Vercel-CDN-Cache-Control'], 'no-store');
+    });
+  }
+});
+
+test('Bitget Reality admission fails closed unless every candidate exact-matches unique stock-info', async () => {
+  const stockInfoCatalogs = [
+    [stockInfo('RMSFTUSDT', 'MSFT')],
+    [stockInfo('RAAPLUSDT'), stockInfo('raaplusdt')],
+    [stockInfo('', 'AAPL')],
+  ];
+  for (const data of stockInfoCatalogs) {
+    await withFetchStub(async url => {
+      const value = String(url);
+      if (value.endsWith('/api/v3/market/instruments?category=SPOT')) {
+        return jsonResponse({
+          code:'00000',
+          data:[instrument('RAAPLUSDT', 'RAAPL'), instrument('PAXGUSDT', 'PAXG', { isReality:'no' })],
+        });
+      }
+      if (value.endsWith('/api/v3/reality/market/stock-info')) {
+        return jsonResponse({ code:'00000', data });
+      }
+      throw new Error(`Unexpected URL ${value}`);
+    }, async () => {
       const response = responseRecorder();
       await bitgetMarketHandler({ method:'GET', query:{ type:'spot-catalog' } }, response);
       assert.equal(response.statusCode, 502);
@@ -210,6 +273,9 @@ test('duplicate optional ticker symbols downgrade only that profile and keep uni
             instrument('PAXGUSDT', 'PAXG', { isReality:'no' }),
           ],
         });
+      }
+      if (value.endsWith('/api/v3/reality/market/stock-info')) {
+        return jsonResponse({ code:'00000', data:[stockInfo('RAAPLUSDT')] });
       }
       if (value.endsWith('/api/v3/market/tickers?category=SPOT')) {
         const rows = [realityTicker('RAAPLUSDT')];
@@ -262,8 +328,11 @@ test('Spot anomaly consumes the same-origin Bitget snapshot and preserves platfo
 });
 
 test('Listing consumes only the identity catalog and preserves its existing exact-listing contract', async () => {
-  const instruments = Array.from({ length:20 }, (_, index) =>
-    instrument(`RTEST${index}USDT`, `RTEST${index}`));
+  const instruments = [
+    ...Array.from({ length:20 }, (_, index) =>
+      instrument(`RTEST${index}USDT`, `RTEST${index}`)),
+    instrument('PAXGUSDT', 'PAXG', { isReality:'no', symbolType:'metal' }),
+  ];
   const calls = [];
   await withFetchStub(async url => {
     calls.push(String(url));
@@ -272,13 +341,33 @@ test('Listing consumes only the identity catalog and preserves its existing exac
       catalogStatus:'full',
       tickerStatus:'unavailable',
       instruments,
+      catalogEvidence:{
+        status:'full',
+        method:'bitget-reality-stock-info-exact-intersection-v1',
+        instrumentsCount:21,
+        realityCandidatesCount:20,
+        stockInfoCount:20,
+        matchedCount:20,
+      },
       realityTickers:[],
       standardTickers:[],
-      coverage:{ instruments:{ status:'full', observed:20, expected:20 } },
+      coverage:{ instruments:{ status:'full', observed:21, expected:21 } },
     });
   }, async () => {
-    const rows = await collectBitgetSpot('https://preview.example');
-    assert.equal(rows.length, 20);
+    const collection = await collectBitgetSpot('https://preview.example');
+    const rows = collection.listings;
+    assert.equal(rows.length, 21);
+    assert.deepEqual(collection.catalogEvidence, {
+      status:'full',
+      method:'bitget-reality-stock-info-exact-intersection-v1',
+      instrumentsCount:21,
+      realityCandidatesCount:20,
+      stockInfoCount:20,
+      matchedCount:20,
+      admittedCount:21,
+      admittedRealityCount:20,
+      legacyCount:1,
+    });
     assert.deepEqual(rows[0], {
       market:'spot',
       venue:'bitget',
@@ -294,6 +383,40 @@ test('Listing consumes only the identity catalog and preserves its existing exac
     });
   });
   assert.deepEqual(calls, ['https://preview.example/api/bitget-market?type=spot-catalog']);
+});
+
+test('Listing rejects proxy-declared cross-verification evidence that is missing or inconsistent', async () => {
+  const instruments = Array.from({ length:20 }, (_, index) =>
+    instrument(`RTEST${index}USDT`, `RTEST${index}`));
+  const validEvidence = {
+    status:'full',
+    method:'bitget-reality-stock-info-exact-intersection-v1',
+    instrumentsCount:20,
+    realityCandidatesCount:20,
+    stockInfoCount:20,
+    matchedCount:20,
+  };
+  for (const catalogEvidence of [
+    undefined,
+    { ...validEvidence, status:'partial' },
+    { ...validEvidence, method:'untrusted' },
+    { ...validEvidence, instrumentsCount:19 },
+    { ...validEvidence, matchedCount:19 },
+    { ...validEvidence, stockInfoCount:19 },
+  ]) {
+    await withFetchStub(async () => jsonResponse({
+      schemaVersion:1,
+      catalogStatus:'full',
+      instruments,
+      catalogEvidence,
+      coverage:{ instruments:{ status:'full', observed:20, expected:20 } },
+    }), async () => {
+      await assert.rejects(
+        collectBitgetSpot('https://preview.example'),
+        /Bitget Reality cross-verification evidence unavailable/,
+      );
+    });
+  }
 });
 
 test('Listing, Spot anomaly and browser use fixed Bitget routes without direct catalog/ticker discovery', async () => {

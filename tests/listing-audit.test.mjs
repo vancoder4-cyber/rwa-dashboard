@@ -11,6 +11,7 @@ import {
   normalizeListingObservation,
 } from '../api/_lib/listing-audit.js';
 import listingAuditCronHandler from '../api/listing-audit-cron.js';
+import { prepareListingAuditCheckpoint } from '../api/_lib/listing-audit-checkpoint.js';
 import listingChangesHandler, {
   compactListingAuditBundle,
   hydrateListingAuditSnapshot,
@@ -547,6 +548,94 @@ test('listing audit admits bounded official growth but quarantines destructive o
   assert.equal(invalid.state.sources['perp:gate'].listingKeys.length, 10);
 });
 
+test('listing audit admits the reviewed Bitget 3000+ expansion only with exact dual-catalog evidence', () => {
+  const baselineRows = Array.from({ length:600 }, (_, index) => row('spot:bitget', `BG${String(index).padStart(4, '0')}`));
+  const expandedRows = Array.from({ length:3_019 }, (_, index) => row('spot:bitget', `BG${String(index).padStart(4, '0')}`));
+  const catalogEvidence = {
+    status:'full',
+    method:'bitget-reality-stock-info-exact-intersection-v1',
+    instrumentsCount:3_019,
+    realityCandidatesCount:3_017,
+    stockInfoCount:3_017,
+    matchedCount:3_017,
+    admittedCount:3_019,
+    admittedRealityCount:3_017,
+    legacyCount:2,
+  };
+  const baseline = mergeListingAudit(null, fullObservations({
+    'spot:bitget': { market:'spot', venue:'bitget', status:'full', listings:baselineRows },
+  }), new Date('2026-10-31T00:45:00Z'));
+
+  const reviewed = mergeListingAudit(baseline.state, fullObservations({
+    'spot:bitget': {
+      market:'spot', venue:'bitget', status:'full', listings:expandedRows, catalogEvidence,
+    },
+  }), new Date('2026-11-01T00:45:00Z'));
+  const reviewedSummary = reviewed.snapshot.sources.find(source => source.sourceKey === 'spot:bitget');
+  assert.equal(reviewedSummary.status, 'full');
+  assert.equal(reviewedSummary.added, 2_419);
+  assert.deepEqual(reviewed.state.sources['spot:bitget'].reviewedExpansionIds, [
+    'bitget-reality-3000-2026-10-27',
+  ]);
+  assert.deepEqual(
+    reviewed.state.sources['spot:bitget'].reviewedExpansionEvidence['bitget-reality-3000-2026-10-27'],
+    {
+      acceptedAt:'2026-11-01T00:45:00.000Z',
+      method:catalogEvidence.method,
+      previousCount:600,
+      currentCount:3_019,
+      addedCount:2_419,
+      matchedCount:3_017,
+      legacyCount:2,
+    },
+  );
+  assert.equal(reviewed.newEvents.length, 2_419);
+
+  const missingEvidence = mergeListingAudit(baseline.state, fullObservations({
+    'spot:bitget': { market:'spot', venue:'bitget', status:'full', listings:expandedRows },
+  }), new Date('2026-11-01T00:45:00Z'));
+  assert.equal(
+    missingEvidence.snapshot.sources.find(source => source.sourceKey === 'spot:bitget').status,
+    'unavailable',
+  );
+
+  const invalidEvidence = mergeListingAudit(baseline.state, fullObservations({
+    'spot:bitget': {
+      market:'spot', venue:'bitget', status:'full', listings:expandedRows,
+      catalogEvidence:{ ...catalogEvidence, matchedCount:3_016 },
+    },
+  }), new Date('2026-11-01T00:45:00Z'));
+  assert.equal(
+    invalidEvidence.snapshot.sources.find(source => source.sourceKey === 'spot:bitget').status,
+    'unavailable',
+  );
+
+  const consumedState = structuredClone(baseline.state);
+  consumedState.sources['spot:bitget'].reviewedExpansionIds = ['bitget-reality-3000-2026-10-27'];
+  const reused = mergeListingAudit(consumedState, fullObservations({
+    'spot:bitget': {
+      market:'spot', venue:'bitget', status:'full', listings:expandedRows, catalogEvidence,
+    },
+  }), new Date('2026-11-01T00:45:00Z'));
+  assert.equal(
+    reused.snapshot.sources.find(source => source.sourceKey === 'spot:bitget').status,
+    'unavailable',
+  );
+
+  const unverifiedRows = expandedRows.map((entry, index) => index === 3_018
+    ? { ...entry, identityStatus:'review-required' }
+    : entry);
+  const unverified = mergeListingAudit(baseline.state, fullObservations({
+    'spot:bitget': {
+      market:'spot', venue:'bitget', status:'full', listings:unverifiedRows, catalogEvidence,
+    },
+  }), new Date('2026-11-01T00:45:00Z'));
+  assert.equal(
+    unverified.snapshot.sources.find(source => source.sourceKey === 'spot:bitget').status,
+    'unavailable',
+  );
+});
+
 test('listing audit keeps active review reminders and closes them when exact identity becomes verified', () => {
   const candidate = { ...row('spot:gate', 'FUTURE'), identityStatus:'review-required' };
   const first = mergeListingAudit(null, fullObservations({
@@ -771,7 +860,7 @@ test('compacted ten-source persistence keeps one event copy and stays below the 
     'perp:gate':380,
     'perp:binance':165,
     'perp:okx':192,
-    'spot:bitget':652,
+    'spot:bitget':3_019,
     'spot:gate':58,
     'spot:kraken':166,
     'spot:binance':69,
@@ -819,6 +908,8 @@ test('compacted ten-source persistence keeps one event copy and stays below the 
   assert.deepEqual(hydratedState.known['spot:kraken:B0-KRAKEN-SPOT'], merged.state.known['spot:kraken:B0-KRAKEN-SPOT']);
   assert.deepEqual(hydratedState.events, merged.state.events);
   const bundleBytes = Buffer.byteLength(JSON.stringify(bundle), 'utf8');
+  const preparedCheckpoint = prepareListingAuditCheckpoint(bundle);
+  assert.equal(preparedCheckpoint.payloadBytes, bundleBytes);
   assert.ok(
     bundleBytes < 1_750_000,
     `realistic ten-source baseline plus maximum retained history must fit the writer budget; got ${bundleBytes} bytes ` +
@@ -827,12 +918,12 @@ test('compacted ten-source persistence keeps one event copy and stays below the 
   );
 });
 
-test('listing audit exposes an explicit Partial history state when the event safety cap is exceeded', () => {
+test('listing audit exposes an explicit Partial history state when the 5,000-event safety cap is exceeded', () => {
   const first = mergeListingAudit(null, fullObservations(), new Date('2026-08-14T00:45:00Z'));
   const previous = structuredClone(first.state);
   delete previous.sources['spot:okx'];
   delete previous.known['spot:okx:AAPL-OKX-SPOT'];
-  previous.events = Array.from({ length:2_005 }, (_, index) => ({
+  previous.events = Array.from({ length:5_005 }, (_, index) => ({
     eventId:`new:spot:okx:SAFE-${index}:2026-08-14`,
     listingKey:`spot:okx:SAFE-${index}`,
     changeType:'new',
@@ -852,8 +943,32 @@ test('listing audit exposes an explicit Partial history state when the event saf
     identityEvidence:'official test fixture',
     inclusionStatus:'eligible',
   }));
+  for (const event of previous.events) {
+    previous.known[event.listingKey] = {
+      key:event.listingKey,
+      sourceKey:'spot:okx',
+      market:'spot',
+      venue:'okx',
+      venueSymbol:event.venueSymbol,
+      canonicalSymbol:event.canonicalSymbol,
+      category:event.category,
+      venueCategory:event.venueCategory,
+      lifecycleStatus:event.lifecycleStatus,
+      officialListedAt:event.officialListedAt,
+      officialStatus:'online',
+      name:event.name,
+      identityStatus:event.identityStatus,
+      identityEvidence:event.identityEvidence,
+      inclusionStatus:'removed',
+      everSeen:true,
+      active:false,
+      firstSeenAt:event.detectedAt,
+      lastSeenAt:event.detectedAt,
+      removedAt:event.detectedAt,
+    };
+  }
   const capped = mergeListingAudit(previous, fullObservations(), new Date('2026-08-15T00:45:00Z'));
-  assert.equal(capped.state.events.length, 2_000);
+  assert.equal(capped.state.events.length, 5_000);
   assert.equal(capped.snapshot.status, 'partial');
   assert.equal(capped.snapshot.coverage.warmingSources, 1,
     'history truncation must remain visible even while a newly recovered source establishes its first baseline');

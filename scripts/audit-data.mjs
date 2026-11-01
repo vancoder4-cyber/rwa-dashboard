@@ -68,14 +68,29 @@ if (new Set(okxSpotInstruments.map(row => row.canonicalSymbol)).size < 50) {
   throw new Error('OKX spot canonical coverage regressed below 50 assets');
 }
 
-const bitgetSpotListings = await collectBitgetSpot(baseUrl, Date.now() + 35_000);
+const bitgetSpotCollection = await collectBitgetSpot(baseUrl, Date.now() + 35_000);
+const bitgetSpotListings = bitgetSpotCollection.listings;
+const bitgetCollectionEvidence = bitgetSpotCollection.catalogEvidence;
+if (bitgetCollectionEvidence?.status !== 'full' ||
+    bitgetCollectionEvidence?.method !== 'bitget-reality-stock-info-exact-intersection-v1' ||
+    Number(bitgetCollectionEvidence?.admittedCount) !== bitgetSpotListings.length ||
+    Number(bitgetCollectionEvidence?.admittedRealityCount) + Number(bitgetCollectionEvidence?.legacyCount) !== bitgetSpotListings.length ||
+    Number(bitgetCollectionEvidence?.matchedCount) < Number(bitgetCollectionEvidence?.admittedRealityCount)) {
+  throw new Error('Bitget Spot collector did not preserve exact dual-catalog verification evidence');
+}
 const bitgetSpot = await getJson('/api/bitget-market?type=spot-snapshot', { timeoutMs:35_000 });
 const bitgetInstruments = Array.isArray(bitgetSpot.instruments) ? bitgetSpot.instruments : [];
 const bitgetInstrumentSymbols = bitgetInstruments.map(row => String(row?.symbol || '').trim().toUpperCase());
 const bitgetCoverage = bitgetSpot?.coverage?.instruments;
+const bitgetProxyEvidence = bitgetSpot?.catalogEvidence;
 if (bitgetSpot.schemaVersion !== 1 || bitgetSpot.catalogStatus !== 'full' || !bitgetInstruments.length ||
     bitgetCoverage?.status !== 'full' || Number(bitgetCoverage.observed) !== bitgetInstruments.length ||
     Number(bitgetCoverage.expected) !== bitgetInstruments.length ||
+    bitgetProxyEvidence?.status !== 'full' ||
+    bitgetProxyEvidence?.method !== 'bitget-reality-stock-info-exact-intersection-v1' ||
+    Number(bitgetProxyEvidence?.instrumentsCount) !== bitgetInstruments.length ||
+    Number(bitgetProxyEvidence?.matchedCount) !== Number(bitgetProxyEvidence?.realityCandidatesCount) ||
+    Number(bitgetProxyEvidence?.stockInfoCount) < Number(bitgetProxyEvidence?.matchedCount) ||
     bitgetInstrumentSymbols.some(symbol => !symbol) ||
     new Set(bitgetInstrumentSymbols).size !== bitgetInstrumentSymbols.length) {
   throw new Error('Bitget Spot proxy did not return one complete, unique identity catalog');

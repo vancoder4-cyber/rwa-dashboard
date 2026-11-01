@@ -18,6 +18,7 @@ import {
 import { validateUsMarketDirectoryPayload } from './us-market-directory.js';
 
 const BITGET_BASE = 'https://api.bitget.com';
+const BITGET_REALITY_VERIFICATION_METHOD = 'bitget-reality-stock-info-exact-intersection-v1';
 const KRAKEN_BASE = 'https://api.kraken.com/0/public';
 const SOURCE_TIMEOUT_MS = 25_000;
 const SECURITY_CATEGORIES = new Set(['equity', 'etf', 'pre-ipo']);
@@ -61,7 +62,10 @@ const SOURCE_BOUNDS = Object.freeze({
   'perp:gate': [20, 500],
   'perp:binance': [20, 500],
   'perp:okx': [20, 500],
-  'spot:bitget': [20, 1_500],
+  // Bitget's reviewed Reality catalog exceeded 3,000 official stock-token
+  // instruments in October 2026. Growth admission is still independently
+  // guarded by Listing Audit's one-way dual-catalog expansion policy.
+  'spot:bitget': [20, 3_500],
   'spot:gate': [1, 500],
   'spot:kraken': [10, 500],
   'spot:binance': [2, 500],
@@ -422,6 +426,19 @@ export async function collectBitgetSpot(baseUrl, deadlineAt = null) {
       Number(coverage?.expected) !== instruments.length || !instruments.length) {
     throw new TypeError('Bitget admitted Spot catalog unavailable');
   }
+  const realityCandidatesCount = instruments
+    .filter(instrument => normalized(instrument?.isReality).toLowerCase() === 'yes').length;
+  const evidence = payload?.catalogEvidence;
+  if (evidence?.status !== 'full' ||
+      evidence?.method !== BITGET_REALITY_VERIFICATION_METHOD ||
+      Number(evidence?.instrumentsCount) !== instruments.length ||
+      Number(evidence?.realityCandidatesCount) !== realityCandidatesCount ||
+      Number(evidence?.matchedCount) !== realityCandidatesCount ||
+      !Number.isSafeInteger(Number(evidence?.stockInfoCount)) ||
+      Number(evidence?.stockInfoCount) < realityCandidatesCount ||
+      realityCandidatesCount < 1) {
+    throw new TypeError('Bitget Reality cross-verification evidence unavailable');
+  }
   const rows = new Map();
   for (const instrument of instruments) {
     if (instrument?.status !== 'online' || !['USD', 'USDT'].includes(normalizedUpper(instrument?.quoteCoin))) continue;
@@ -455,7 +472,29 @@ export async function collectBitgetSpot(baseUrl, deadlineAt = null) {
     });
     rows.set(realityRow.venueSymbol, realityRow);
   }
-  return assertCatalogBounds('spot', 'bitget', [...rows.values()]);
+  const listings = assertCatalogBounds('spot', 'bitget', [...rows.values()]);
+  const admittedRealityCount = listings
+    .filter(row => row?.marketDataProfile === 'bitget-reality').length;
+  const legacyCount = listings
+    .filter(row => row?.marketDataProfile === 'bitget-standard').length;
+  if (admittedRealityCount + legacyCount !== listings.length ||
+      admittedRealityCount > realityCandidatesCount) {
+    throw new TypeError('Bitget admitted Spot catalog evidence mismatch');
+  }
+  return {
+    listings,
+    catalogEvidence:{
+      status:'full',
+      method:BITGET_REALITY_VERIFICATION_METHOD,
+      instrumentsCount:instruments.length,
+      realityCandidatesCount,
+      stockInfoCount:Number(evidence.stockInfoCount),
+      matchedCount:realityCandidatesCount,
+      admittedCount:listings.length,
+      admittedRealityCount,
+      legacyCount,
+    },
+  };
 }
 
 async function collectGateSpot(baseUrl, deadlineAt = null) {
@@ -635,6 +674,7 @@ export async function collectListingSourceObservations(baseUrl) {
         status: 'full',
         listings: Array.isArray(value) ? value : value.listings,
         rawPairs: value?.rawPairs,
+        catalogEvidence:value?.catalogEvidence,
         reason: null,
       };
     } catch (error) {
@@ -681,6 +721,7 @@ export async function collectVerifiedSpotListingSourceObservations(baseUrl, { de
         status: 'full',
         listings: (Array.isArray(value) ? value : value.listings)
           .filter(row => row?.identityStatus === 'verified'),
+        catalogEvidence:value?.catalogEvidence,
         reason: null,
       };
     } catch (error) {
