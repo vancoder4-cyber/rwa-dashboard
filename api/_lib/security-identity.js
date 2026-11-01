@@ -79,6 +79,31 @@ export const SECURITY_LISTING_REGISTRY = Object.freeze({
 // security; they are never a standalone RWA allowlist or a ticker alias to the
 // referenced company.
 export const REVIEWED_ETF_IDENTITIES = Object.freeze({
+  BITX: Object.freeze({
+    category:'etf',
+    name:'2x Bitcoin ETF',
+    listedOn:'2023-06-27',
+  }),
+  IJR: Object.freeze({
+    category:'etf',
+    name:'iShares Core S&P Small-Cap ETF',
+    listedOn:'2000-05-22',
+  }),
+  JPST: Object.freeze({
+    category:'etf',
+    name:'JPMorgan Ultra-Short Income ETF',
+    listedOn:'2017-05-17',
+  }),
+  NLR: Object.freeze({
+    category:'etf',
+    name:'VanEck Uranium and Nuclear ETF',
+    listedOn:'2007-08-13',
+  }),
+  SCHF: Object.freeze({
+    category:'etf',
+    name:'Schwab International Equity ETF',
+    listedOn:'2009-11-03',
+  }),
   SKDD: Object.freeze({
     category:'etf',
     name:'GraniteShares 2x Short SK Hynix Daily ETF',
@@ -88,6 +113,26 @@ export const REVIEWED_ETF_IDENTITIES = Object.freeze({
     category:'etf',
     name:'GraniteShares 2x Long SK Hynix Daily ETF',
     listedOn:'2026-07-14',
+  }),
+  VGK: Object.freeze({
+    category:'etf',
+    name:'Vanguard FTSE Europe ETF',
+    listedOn:'2005-03-04',
+  }),
+  VT: Object.freeze({
+    category:'etf',
+    name:'Vanguard Total World Stock ETF',
+    listedOn:'2008-06-24',
+  }),
+  VUG: Object.freeze({
+    category:'etf',
+    name:'Vanguard Morningstar Growth ETF',
+    listedOn:'2004-01-26',
+  }),
+  XOP: Object.freeze({
+    category:'etf',
+    name:'State Street SPDR S&P Oil & Gas Exploration & Production ETF',
+    listedOn:'2006-06-19',
   }),
 });
 
@@ -139,6 +184,7 @@ export const SECURITY_ETF_UNDERLYINGS = Object.freeze([
   'SHLD','SMH','SNXX','SOXL','SOXS','SOXX','SPMO','SPY','SPXU','SPYX','SQQQ','TAN','TIP','TLT','TMF','TNA','TQQQ',
   'TZA','UNG','UPRO','URA','URNM','USFR','USO','UVXY','VGT','VNQ','VOO','VTI','VTV','VXUS','XLK',
   'XBI','XLE','XLU','XLV','YANG','YINN','EWT','DRAM','KORU','KSTR','LYTE','NCLD','EWH','DFEN','MUU','SKDD','SKUU',
+  'BITX','IJR','JPST','NLR','SCHF','VGK','VT','VUG','XOP',
 ]);
 const SECURITY_ETF_SET = new Set(SECURITY_ETF_UNDERLYINGS);
 

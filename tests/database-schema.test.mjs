@@ -69,9 +69,10 @@ test('migration files are ordered, immutable-checksummed, and parse into stateme
     '0018_bitget_softbank_identity.sql',
     '0019_reviewed_rwa_identity_corrections.sql',
     '0020_jio_jpl_public_identity.sql',
+    '0021_reviewed_us_etf_identity_corrections.sql',
   ]);
   assert.deepEqual(migrations.map(row => row.version), [
-    '0001', '0002', '0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013', '0014', '0015', '0016', '0017', '0018', '0019', '0020',
+    '0001', '0002', '0003', '0004', '0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013', '0014', '0015', '0016', '0017', '0018', '0019', '0020', '0021',
   ]);
   for (const migration of migrations) {
     assert.match(migration.filename, MIGRATION_FILE_PATTERN);
@@ -293,6 +294,59 @@ test('JIO to JPL forward migration rebinds exact history and repairs publication
   assert.match(sql, /legacy pre-ipo:JIO identity remains current/);
   assert.doesNotMatch(sql, /INSERT INTO analytics\.catalog_change_event/);
   assert.doesNotMatch(sql, /DELETE FROM analytics\.catalog_change_event/);
+  assert.doesNotMatch(sql, /INSERT INTO ingest\.catalog_membership/);
+  assert.doesNotMatch(sql, /\b(?:LIKE|ILIKE)\b|\bsimilarity\s*\(/i);
+});
+
+test('reviewed US ETF migration is exact, idempotent, fingerprint-complete, and event-count neutral', async () => {
+  const sql = await readFile(path.join(MIGRATION_DIRECTORY, '0021_reviewed_us_etf_identity_corrections.sql'), 'utf8');
+  const compact = compactSql(sql);
+  const reviewedEtfs = [
+    ['BITX', '2x Bitcoin ETF'],
+    ['IJR', 'iShares Core S&P Small-Cap ETF'],
+    ['JPST', 'JPMorgan Ultra-Short Income ETF'],
+    ['NLR', 'VanEck Uranium and Nuclear ETF'],
+    ['SCHF', 'Schwab International Equity ETF'],
+    ['VGK', 'Vanguard FTSE Europe ETF'],
+    ['VT', 'Vanguard Total World Stock ETF'],
+    ['VUG', 'Vanguard Morningstar Growth ETF'],
+    ['XOP', 'State Street SPDR S&P Oil & Gas Exploration & Production ETF'],
+  ];
+
+  for (const [canonical, displayName] of reviewedEtfs) {
+    assert.ok(
+      compact.includes(`('${canonical}', '${displayName}')`),
+      `${canonical} must have its exact reviewed ETF display name`,
+    );
+  }
+  assert.match(sql, /count\(\*\) FROM reviewed_us_etf_identity_correction\) <> 9/);
+  assert.match(sql, /CREATE TEMP TABLE reviewed_us_etf_identity_correction/);
+  assert.match(sql, /SELECT 'etf:' \|\| correction\.canonical_underlying/);
+  assert.match(sql, /correction\.display_name, 'unknown', 'verified'/,
+    'new durable identities must use the same stable market-origin input as the catalog writer');
+  assert.match(sql, /ON CONFLICT \(asset_key\) DO NOTHING/);
+  assert.match(sql, /WHERE NOT EXISTS \([\s\S]*current\.valid_to IS NULL/);
+  assert.match(sql, /old_asset\.asset_key = 'equity:' \|\| correction\.canonical_underlying/);
+  assert.match(sql, /old_asset_version\.category = 'equity'/);
+  assert.match(sql, /SET asset_version_id = target_asset_version\.asset_version_id/);
+  assert.ok(
+    (sql.match(/identity_fingerprint = encode\(digest/g) || []).length >= 3,
+    'both durable asset and instrument fingerprints must be recomputed',
+  );
+  assert.match(sql, /SET valid_to = clock_timestamp\(\)/);
+  assert.match(sql, /NOT EXISTS \([\s\S]*instrument_version\.asset_version_id = old_asset_version\.asset_version_id/);
+  assert.match(sql, /an instrument version remains bound to a reviewed legacy Equity identity/);
+  assert.match(sql, /a reviewed legacy Equity asset version remains current/);
+  assert.match(sql, /a reviewed US ETF instrument fingerprint is stale/);
+  assert.match(sql, /instrument_version\.valid_from < target_asset_version\.valid_from/);
+  assert.match(sql, /a reviewed US ETF instrument predates its target asset version/);
+  assert.doesNotMatch(sql, /INSERT INTO identity\.instrument(?:_version)?\b/,
+    'the repair may only rebind already-admitted instrument versions');
+
+  assert.match(sql, /LOCK TABLE analytics\.catalog_change_event IN SHARE MODE/);
+  assert.match(sql, /SELECT count\(\*\)::bigint AS event_count[\s\S]*FROM analytics\.catalog_change_event/);
+  assert.match(sql, /reviewed US ETF migration changed catalog lifecycle event count/);
+  assert.doesNotMatch(sql, /(?:INSERT INTO|UPDATE|DELETE FROM|TRUNCATE(?: TABLE)?)\s+analytics\.catalog_change_event/i);
   assert.doesNotMatch(sql, /INSERT INTO ingest\.catalog_membership/);
   assert.doesNotMatch(sql, /\b(?:LIKE|ILIKE)\b|\bsimilarity\s*\(/i);
 });

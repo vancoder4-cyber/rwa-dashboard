@@ -217,6 +217,21 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
   assert.deepEqual(normalizeSignalIdentity('MUU', 'equity'), { symbol:'MUU', category:'etf' });
   assert.deepEqual(normalizeSignalIdentity('SKDD', 'equity', { venue:'okx' }), { symbol:'SKDD', category:'etf' });
   assert.deepEqual(normalizeSignalIdentity('SKUU', 'equity', { venue:'okx' }), { symbol:'SKUU', category:'etf' });
+  const reviewedBitgetEtfs = ['BITX','IJR','JPST','NLR','SCHF','VGK','VT','VUG','XOP'];
+  for (const symbol of reviewedBitgetEtfs) {
+    assert.deepEqual(
+      normalizeSignalIdentity(symbol, 'equity', { venue:'bitget' }),
+      { symbol, category:'etf' },
+      `${symbol} must refine Bitget's broad equity class to ETF`,
+    );
+  }
+  assert.equal(normalizeSignalIdentity('BITX', 'crypto', { venue:'bitget' }), null,
+    'same-ticker crypto products must still fail the security category gate');
+  assert.deepEqual(
+    normalizeSignalIdentity('BITXCOIN', 'equity', { venue:'bitget' }),
+    { symbol:'BITXCOIN', category:'equity' },
+    'ETF refinement must not expand to ticker lookalikes outside the exact whitelist',
+  );
   assert.deepEqual(normalizeSignalIdentity('SPYX', 'equity'), { symbol:'SPYX', category:'etf' });
   assert.deepEqual(normalizeSignalIdentity('QQQX', 'equity'), { symbol:'QQQX', category:'equity' });
   assert.deepEqual(normalizeSignalIdentity('SPYX', 'equity', { venue:'gate' }), { symbol:'SPY', category:'etf' });
@@ -238,9 +253,25 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
   assert.equal(categoryFromOfficialSignalType('crypto_etf_token'), null);
   assert.equal(categoryFromOfficialSignalType('ETFCOIN'), null);
   assert.deepEqual(REVIEWED_ETF_IDENTITIES, {
+    BITX:{ category:'etf', name:'2x Bitcoin ETF', listedOn:'2023-06-27' },
+    IJR:{ category:'etf', name:'iShares Core S&P Small-Cap ETF', listedOn:'2000-05-22' },
+    JPST:{ category:'etf', name:'JPMorgan Ultra-Short Income ETF', listedOn:'2017-05-17' },
+    NLR:{ category:'etf', name:'VanEck Uranium and Nuclear ETF', listedOn:'2007-08-13' },
+    SCHF:{ category:'etf', name:'Schwab International Equity ETF', listedOn:'2009-11-03' },
     SKDD:{ category:'etf', name:'GraniteShares 2x Short SK Hynix Daily ETF', listedOn:'2026-07-14' },
     SKUU:{ category:'etf', name:'GraniteShares 2x Long SK Hynix Daily ETF', listedOn:'2026-07-14' },
+    VGK:{ category:'etf', name:'Vanguard FTSE Europe ETF', listedOn:'2005-03-04' },
+    VT:{ category:'etf', name:'Vanguard Total World Stock ETF', listedOn:'2008-06-24' },
+    VUG:{ category:'etf', name:'Vanguard Morningstar Growth ETF', listedOn:'2004-01-26' },
+    XOP:{ category:'etf', name:'State Street SPDR S&P Oil & Gas Exploration & Production ETF', listedOn:'2006-06-19' },
   });
+  for (const symbol of reviewedBitgetEtfs) {
+    assert.equal(
+      securityDisplayName(symbol),
+      REVIEWED_ETF_IDENTITIES[symbol].name,
+      `${symbol} must use its reviewed official ETF display name`,
+    );
+  }
   assert.deepEqual(REVIEWED_SECURITY_DISPLAY_NAMES, {
     SOXS:'Direxion Daily Semiconductor Bear 3X ETF',
   });
