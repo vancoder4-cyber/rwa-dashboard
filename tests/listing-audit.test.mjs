@@ -315,16 +315,60 @@ test('reviewed Binance exact alias correction updates the same contract without 
   });
   assert.equal(corrected.state.known[listingKey].canonicalSymbol, 'LENOVO');
   assert.equal(corrected.state.known[listingKey].name, 'Lenovo Group Limited');
-  assert.deepEqual(REVIEWED_EXACT_CANONICAL_CORRECTIONS, [{
+  assert.deepEqual(REVIEWED_EXACT_CANONICAL_CORRECTIONS.find(row => row.venueSymbol === 'HK0992USDT'), {
     sourceKey:'perp:binance',
     venueSymbol:'HK0992USDT',
     previousCanonicalSymbol:'HK0992',
     canonicalSymbol:'LENOVO',
+    previousCategory:'equity',
     category:'equity',
+    previousVenueCategory:'equity',
     venueCategory:'equity',
     previousLifecycleStatus:null,
     lifecycleStatus:'public',
-  }]);
+  });
+});
+
+test('reviewed H100 and private-company corrections are exact, one-way, and event-neutral', () => {
+  const cases = REVIEWED_EXACT_CANONICAL_CORRECTIONS.filter(correction =>
+    ['H100_USDT', 'MOONSHOTUSDT', 'MOONSHOT-USDT-SWAP', 'OURAUSDT', 'OURA-USDT-SWAP']
+      .includes(correction.venueSymbol));
+  assert.equal(cases.length, 5);
+  for (const correction of cases) {
+    const [market, venue] = correction.sourceKey.split(':');
+    const legacy = {
+      market,
+      venue,
+      venueSymbol:correction.venueSymbol,
+      canonicalSymbol:correction.previousCanonicalSymbol,
+      category:correction.previousCategory,
+      venueCategory:correction.previousVenueCategory,
+      lifecycleStatus:correction.previousLifecycleStatus,
+      identityStatus:'verified',
+      identityEvidence:'reviewed legacy production baseline',
+    };
+    const corrected = {
+      ...legacy,
+      canonicalSymbol:correction.canonicalSymbol,
+      category:correction.category,
+      venueCategory:correction.venueCategory,
+      lifecycleStatus:correction.lifecycleStatus,
+    };
+    const normalizedLegacy = normalizeListingObservation(legacy);
+    const normalizedCorrected = normalizeListingObservation(corrected);
+    assert.equal(isReviewedExactCanonicalCorrection(normalizedLegacy, normalizedCorrected), true);
+    const baseline = mergeListingAudit(null, fullObservations({
+      [correction.sourceKey]:{ market, venue, status:'full', listings:[legacy] },
+    }), new Date('2026-10-31T00:45:00Z'));
+    const merged = mergeListingAudit(baseline.state, fullObservations({
+      [correction.sourceKey]:{ market, venue, status:'full', listings:[corrected] },
+    }), new Date('2026-11-01T00:45:00Z'));
+    assert.deepEqual(merged.newEvents, [], `${correction.venueSymbol} must not create a listing event`);
+    assert.equal(merged.snapshot.sources.find(row => row.sourceKey === correction.sourceKey).status, 'full');
+    assert.equal(merged.state.known[`${correction.sourceKey}:${correction.venueSymbol}`].category, correction.category);
+    assert.equal(isReviewedExactCanonicalCorrection(normalizedCorrected, normalizedLegacy), false,
+      'reverse correction must fail closed');
+  }
 });
 
 test('exact canonical correction bypass rejects reverse, cross-venue and widened variants', () => {

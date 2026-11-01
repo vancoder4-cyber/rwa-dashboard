@@ -72,6 +72,19 @@ function addUtcDays(date, days) {
   return next;
 }
 
+export function recentOccWeekdayDates(anchorDate, count = 7) {
+  const cursor = new Date(anchorDate);
+  const requested = Math.min(Math.max(Math.trunc(Number(count) || 0), 0), 31);
+  if (Number.isNaN(cursor.getTime()) || requested === 0) return [];
+  const reportDates = [];
+  while (reportDates.length < requested) {
+    const weekday = cursor.getUTCDay();
+    if (weekday !== 0 && weekday !== 6) reportDates.push(yyyymmdd(cursor));
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+  }
+  return reportDates;
+}
+
 export function occDateToIso(value) {
   const raw = String(value || '');
   if (!/^\d{8}$/.test(raw)) return null;
@@ -267,7 +280,7 @@ export async function findFirstNonEmptyOccReport(reportDates, loadReportText) {
 
 async function findLatestOccDay() {
   const candidate = addUtcDays(new Date(), -1);
-  const reportDates = Array.from({ length:7 }, (_, offset) => yyyymmdd(addUtcDays(candidate, -offset)));
+  const reportDates = recentOccWeekdayDates(candidate, 7);
   const report = await findFirstNonEmptyOccReport(
     reportDates,
     reportDate => fetchText(occUrl('D', reportDate), 6000, 0),
@@ -278,7 +291,7 @@ async function findLatestOccDay() {
 
 async function findPreviousOccDay(reportDate) {
   const current = new Date(`${reportDate.slice(0, 4)}-${reportDate.slice(4, 6)}-${reportDate.slice(6, 8)}T12:00:00Z`);
-  const reportDates = Array.from({ length:7 }, (_, index) => yyyymmdd(addUtcDays(current, -(index + 1))));
+  const reportDates = recentOccWeekdayDates(addUtcDays(current, -1), 7);
   const report = await findFirstNonEmptyOccReport(
     reportDates,
     previousReportDate => fetchText(occUrl('D', previousReportDate), 6000, 0),

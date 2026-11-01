@@ -63,7 +63,9 @@ export const SECURITY_LISTING_REGISTRY = Object.freeze({
   ANDURIL: Object.freeze({ category:'pre-ipo', status:'pre-ipo', name:'Anduril Industries (Pre-IPO)', listedOn:null, aliases:Object.freeze([]) }),
   KALSHI: Object.freeze({ category:'pre-ipo', status:'pre-ipo', name:'Kalshi (Pre-IPO)', listedOn:null, aliases:Object.freeze([]) }),
   KIMI: Object.freeze({ category:'pre-ipo', status:'pre-ipo', name:'Moonshot AI / Kimi (Pre-IPO)', listedOn:null, aliases:Object.freeze([]) }),
+  MOONSHOT: Object.freeze({ category:'pre-ipo', status:'pre-ipo', name:'Moonshot AI (Pre-IPO)', listedOn:null, aliases:Object.freeze([]) }),
   NEURALINK: Object.freeze({ category:'pre-ipo', status:'pre-ipo', name:'Neuralink (Pre-IPO)', listedOn:null, aliases:Object.freeze([]) }),
+  OURA: Object.freeze({ category:'pre-ipo', status:'pre-ipo', name:'Oura Inc. (Pre-IPO)', listedOn:null, aliases:Object.freeze([]) }),
   POLYMARKET: Object.freeze({ category:'pre-ipo', status:'pre-ipo', name:'Polymarket (Pre-IPO)', listedOn:null, aliases:Object.freeze([]) }),
   UNITREE: Object.freeze({ category:'equity', status:'public', name:'Unitree Robotics', listedOn:'2026-08-19', aliases:Object.freeze([]) }),
 });
@@ -210,6 +212,14 @@ export function normalizeSignalIdentity(symbol, category, { allowBinanceBstock =
   let raw = String(symbol || '').trim().toUpperCase();
   let resolvedCategory = normalizedCategory(category);
   if (!/^[A-Z0-9.-]{1,30}$/.test(raw) || !CATEGORY_SET.has(resolvedCategory)) return null;
+
+  // Gate currently publishes H100 inside its broad `indices` contract class,
+  // while the exact product is the reviewed NVIDIA H100 compute-rental
+  // commodity. Keep the correction exact and venue-scoped; no other Gate
+  // index or H100 lookalike is reclassified.
+  if (String(venue).toLowerCase() === 'gate' && raw === 'H100' && resolvedCategory === 'index') {
+    resolvedCategory = 'commodity';
+  }
 
   if (allowBinanceBstock && BINANCE_BSTOCK_UNDERLYING[raw]) {
     raw = BINANCE_BSTOCK_UNDERLYING[raw];

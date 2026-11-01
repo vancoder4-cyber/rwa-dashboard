@@ -690,6 +690,33 @@ test('verified identity guard rejects category/canonical drift but permits non-i
   assert.match(metadataGuard.text, /current_asset_version\.category = 'equity'/);
   assert.match(metadataGuard.text, /incoming\.category = 'etf'/);
   assert.deepEqual(metadataGuard.params[2], ['SKDD', 'SKUU']);
+  assert.match(metadataGuard.text, /correction\.source_key = source\.source_key/);
+  assert.match(metadataGuard.text, /correction\.official_product_key = instrument\.official_product_key/);
+  assert.match(metadataGuard.text, /correction\.previous_asset_key = current_asset\.asset_key/);
+  assert.match(metadataGuard.text, /membership\.normalized_attributes/);
+  assert.match(metadataGuard.text, /membership_version\.instrument_id = current\.instrument_id/);
+  assert.match(metadataGuard.text, /membership\.presence_status = 'present'/);
+  assert.match(metadataGuard.text, /ORDER BY membership\.observed_at DESC, membership\.source_run_id DESC/);
+  assert.match(metadataGuard.text, /correction\.previous_venue_category IS NOT DISTINCT FROM/);
+  assert.match(metadataGuard.text, /previous_membership\.normalized_attributes->>'venueCategory'/);
+  assert.match(metadataGuard.text, /correction\.previous_lifecycle_status IS NOT DISTINCT FROM/);
+  assert.match(metadataGuard.text, /previous_membership\.normalized_attributes->>'lifecycleStatus'/);
+  const exactCorrections = JSON.parse(metadataGuard.params[3]);
+  assert.deepEqual(exactCorrections.find(row => row.official_product_key === 'H100_USDT'), {
+    source_key:'perp:gate',
+    official_product_key:'H100_USDT',
+    previous_asset_key:'index:H100',
+    previous_category:'index',
+    previous_canonical_underlying:'H100',
+    previous_venue_category:'index',
+    previous_lifecycle_status:null,
+    asset_key:'commodity:H100',
+    category:'commodity',
+    canonical_underlying:'H100',
+    venue_category:'index',
+    lifecycle_status:null,
+  });
+  assert.equal(exactCorrections.filter(row => ['MOONSHOT', 'OURA'].includes(row.canonical_underlying)).length, 4);
   assert.doesNotMatch(metadataGuard.text, /incoming\.(?:display_name|name|quote_currency|official_status|asset_fingerprint|instrument_fingerprint)/);
   const metadataPayload = JSON.parse(metadataGuard.params[0]);
   const metadataGuardRow = metadataPayload.find(row => row.official_product_key === 'AAPL-GATE-PERP');
@@ -811,9 +838,19 @@ test('verified identity conflict diagnostics are read-only, bounded, and expose 
       assert.match(calls[2].text, /incoming\.lifecycle_status = 'public'/);
       assert.match(calls[2].text, /incoming\.canonical_underlying = ANY\(\$2::text\[\]\)/);
       assert.match(calls[2].text, /current_asset_version\.category = 'pre-ipo'/);
+      assert.match(calls[2].text, /incoming\.canonical_underlying = ANY\(\$3::text\[\]\)/);
+      assert.match(calls[2].text, /correction\.official_product_key = instrument\.official_product_key/);
+      assert.match(calls[2].text, /membership_version\.instrument_id = current\.instrument_id/);
+      assert.match(calls[2].text, /correction\.previous_venue_category IS NOT DISTINCT FROM/);
+      assert.match(calls[2].text, /previous_membership\.normalized_attributes->>'venueCategory'/);
+      assert.match(calls[2].text, /correction\.previous_lifecycle_status IS NOT DISTINCT FROM/);
+      assert.match(calls[2].text, /previous_membership\.normalized_attributes->>'lifecycleStatus'/);
       const incoming = JSON.parse(calls[2].params[0]);
       assert.ok(incoming.length > 0);
       assert.ok(calls[2].params[1].includes('UNITREE'));
+      assert.deepEqual(calls[2].params[2], ['SKDD', 'SKUU']);
+      assert.equal(JSON.parse(calls[2].params[3]).some(row =>
+        row.source_key === 'perp:okx' && row.official_product_key === 'OURA-USDT-SWAP'), true);
       return queries.map((_query, index) => index === 2 ? [{
         source_key:'perp:gate',
         official_product_key:'AAPL-GATE-PERP',

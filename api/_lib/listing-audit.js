@@ -35,20 +35,82 @@ export const REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS = Object.freeze([
   'UNITREE',
 ]);
 export const REVIEWED_ETF_CATEGORY_CORRECTIONS = Object.freeze(Object.keys(REVIEWED_ETF_IDENTITIES));
-// Exact venue-product aliases whose official security identity was corrected
-// after an earlier Runtime Cache baseline had already been established. These
-// entries are deliberately one-way and product-scoped: they update identity
-// metadata for the unchanged listing key and never create a listing event.
+// Exact venue products whose reviewed identity was corrected after an earlier
+// Runtime Cache baseline had already been established. These entries are
+// deliberately one-way and product-scoped: they update identity metadata for
+// the unchanged listing key and never create a listing event.
 export const REVIEWED_EXACT_CANONICAL_CORRECTIONS = Object.freeze([
   Object.freeze({
     sourceKey: 'perp:binance',
     venueSymbol: 'HK0992USDT',
     previousCanonicalSymbol: 'HK0992',
     canonicalSymbol: 'LENOVO',
+    previousCategory: 'equity',
     category: 'equity',
+    previousVenueCategory: 'equity',
     venueCategory: 'equity',
     previousLifecycleStatus: null,
     lifecycleStatus: 'public',
+  }),
+  Object.freeze({
+    sourceKey: 'perp:gate',
+    venueSymbol: 'H100_USDT',
+    previousCanonicalSymbol: 'H100',
+    canonicalSymbol: 'H100',
+    previousCategory: 'index',
+    category: 'commodity',
+    previousVenueCategory: 'index',
+    venueCategory: 'index',
+    previousLifecycleStatus: null,
+    lifecycleStatus: null,
+  }),
+  Object.freeze({
+    sourceKey: 'perp:bitget',
+    venueSymbol: 'MOONSHOTUSDT',
+    previousCanonicalSymbol: 'MOONSHOT',
+    canonicalSymbol: 'MOONSHOT',
+    previousCategory: 'equity',
+    category: 'pre-ipo',
+    previousVenueCategory: 'equity',
+    venueCategory: 'equity',
+    previousLifecycleStatus: null,
+    lifecycleStatus: 'pre-ipo',
+  }),
+  Object.freeze({
+    sourceKey: 'perp:okx',
+    venueSymbol: 'MOONSHOT-USDT-SWAP',
+    previousCanonicalSymbol: 'MOONSHOT',
+    canonicalSymbol: 'MOONSHOT',
+    previousCategory: 'equity',
+    category: 'pre-ipo',
+    previousVenueCategory: 'equity',
+    venueCategory: 'equity',
+    previousLifecycleStatus: null,
+    lifecycleStatus: 'pre-ipo',
+  }),
+  Object.freeze({
+    sourceKey: 'perp:bitget',
+    venueSymbol: 'OURAUSDT',
+    previousCanonicalSymbol: 'OURA',
+    canonicalSymbol: 'OURA',
+    previousCategory: 'equity',
+    category: 'pre-ipo',
+    previousVenueCategory: 'equity',
+    venueCategory: 'equity',
+    previousLifecycleStatus: null,
+    lifecycleStatus: 'pre-ipo',
+  }),
+  Object.freeze({
+    sourceKey: 'perp:okx',
+    venueSymbol: 'OURA-USDT-SWAP',
+    previousCanonicalSymbol: 'OURA',
+    canonicalSymbol: 'OURA',
+    previousCategory: 'equity',
+    category: 'pre-ipo',
+    previousVenueCategory: 'equity',
+    venueCategory: 'equity',
+    previousLifecycleStatus: null,
+    lifecycleStatus: 'pre-ipo',
   }),
 ]);
 
@@ -279,12 +341,12 @@ export function isReviewedExactCanonicalCorrection(previousRow, currentRow) {
     currentVenueSymbol === correction.venueSymbol &&
     previousCanonicalSymbol === correction.previousCanonicalSymbol &&
     canonicalSymbol === correction.canonicalSymbol &&
-    previousCategory === correction.category &&
+    previousCategory === correction.previousCategory &&
     category === correction.category &&
-    previousVenueCategory === correction.venueCategory &&
+    previousVenueCategory === correction.previousVenueCategory &&
     venueCategory === correction.venueCategory &&
     previousLifecycleStatus === normalized(correction.previousLifecycleStatus).toLowerCase() &&
-    lifecycleStatus === correction.lifecycleStatus
+    lifecycleStatus === normalized(correction.lifecycleStatus).toLowerCase()
   );
 }
 

@@ -2709,8 +2709,16 @@ const SECURITY_LISTING_REGISTRY = Object.freeze({
     category:'pre-ipo', status:'pre-ipo', name:'Moonshot AI / Kimi (Pre-IPO)', exchange:'', listedOn:'',
     aliases:Object.freeze([])
   }),
+  MOONSHOT: Object.freeze({
+    category:'pre-ipo', status:'pre-ipo', name:'Moonshot AI (Pre-IPO)', exchange:'', listedOn:'',
+    aliases:Object.freeze([])
+  }),
   NEURALINK: Object.freeze({
     category:'pre-ipo', status:'pre-ipo', name:'Neuralink (Pre-IPO)', exchange:'', listedOn:'',
+    aliases:Object.freeze([])
+  }),
+  OURA: Object.freeze({
+    category:'pre-ipo', status:'pre-ipo', name:'Oura Inc. (Pre-IPO)', exchange:'', listedOn:'',
     aliases:Object.freeze([])
   }),
   POLYMARKET: Object.freeze({
@@ -2878,6 +2886,9 @@ function normalizeOfficialRwaSymbol(symbol, officialType, name = '', venue = '')
   // can never authorize this rewrite on another venue.
   const verifiedUnderlying = venue === 'gate' ? TOKENIZED_ETF_WRAPPERS[raw] : '';
   let category = verifiedUnderlying ? 'etf' : categoryFromOfficial(officialType, symbol, name);
+  // Gate's exact H100 product uses the broad `indices` venue class, but the
+  // reviewed underlying is compute-rental capacity, not an equity index.
+  if (venue === 'gate' && raw === 'H100' && category === 'index') category = 'commodity';
   // Bitget and OKX sometimes publish equity indices in a broad stock(s)
   // product class. Refine only exact audited underlyings after the venue gate.
   if (['bitget','okx'].includes(venue) && ['equity','etf','pre-ipo'].includes(category) &&
@@ -4133,7 +4144,11 @@ async function fetchGate() {
     const contract = meta.name || '';
     const t = tickerMap[contract] || {};
     const venueBase = contract.replace(/_USDT$/i, '').toUpperCase();
-    const normalized = normalizeOfficialRwaSymbol(venueBase, isExplicitTrue(meta.is_pre_market) ? 'PREMARKET' : meta.contract_type, '', 'gate');
+    const gateOfficialCategory = categoryForOfficialType(meta.contract_type);
+    const gateIdentityType = gateOfficialCategory === 'equity' && isExplicitTrue(meta.is_pre_market)
+      ? 'PREMARKET'
+      : meta.contract_type;
+    const normalized = normalizeOfficialRwaSymbol(venueBase, gateIdentityType, '', 'gate');
     const base = normalized.symbol;
 
     if (EXCLUDED_SYMBOLS.has(base)) continue;
@@ -11264,6 +11279,8 @@ const GATE_SPOT_BASE   = _isDev ? 'https://api.gateio.ws/api/v4/spot'   : '/api/
 // Binance's official market-data-only endpoint is preferred for public spot data.
 const KRAKEN_SPOT_BASE = 'https://api.kraken.com/0/public';
 const BINANCE_SPOT_BASE= 'https://data-api.binance.vision/api/v3';
+// Catalog and ticker discovery use the fixed sin1 same-origin snapshot below.
+// The direct host remains only for bounded, per-symbol optional depth reads.
 const BITGET_SPOT_BASE = 'https://api.bitget.com';
 
 // ── Gate.io Spot Fetch ──
@@ -11577,13 +11594,24 @@ async function _fetchKrakenXStocks() {
 // Reality instruments are the identity authority shared by Bitget and Gate.
 // Keep that catalog independent from optional ticker feeds so a market outage
 // cannot silently shrink Gate's dynamic wrapper universe.
-async function fetchBitgetRealityCatalog() {
-  const instrumentsRes = await fetchSpotResource(`${BITGET_SPOT_BASE}/api/v3/market/instruments?category=SPOT`);
-  if (!instrumentsRes.ok) throw new Error(`Bitget Reality catalog HTTP ${instrumentsRes.status}`);
-  const instrumentsJson = await instrumentsRes.json();
-  if (instrumentsJson.code !== '00000') throw new Error(`API ${instrumentsJson.code}: ${instrumentsJson.msg}`);
+async function fetchBitgetSpotSnapshot() {
+  const response = await fetchSpotResource('/api/bitget-market?type=spot-snapshot', 20000);
+  if (!response.ok) throw new Error(`Bitget Spot snapshot HTTP ${response.status}`);
+  const snapshot = await response.json();
+  const instruments = Array.isArray(snapshot?.instruments) ? snapshot.instruments : [];
+  if (snapshot?.schemaVersion !== 1 || snapshot?.catalogStatus !== 'full' ||
+      snapshot?.coverage?.instruments?.status !== 'full' ||
+      Number(snapshot?.coverage?.instruments?.observed) !== instruments.length ||
+      Number(snapshot?.coverage?.instruments?.expected) !== instruments.length || !instruments.length) {
+    throw new Error('Bitget Spot snapshot has no authoritative identity catalog');
+  }
+  return snapshot;
+}
+
+async function fetchBitgetRealityCatalog(snapshotPromise = fetchBitgetSpotSnapshot()) {
+  const snapshot = await snapshotPromise;
   const catalog = [];
-  for (const instrument of instrumentsJson.data || []) {
+  for (const instrument of snapshot.instruments) {
     if (instrument.status !== 'online' || String(instrument.isReality || '').toLowerCase() !== 'yes' || instrument.quoteCoin !== 'USDT') continue;
     const pair = String(instrument.symbol || '').toUpperCase();
     const venueBase = String(instrument.baseCoin || '').toUpperCase();
@@ -11603,30 +11631,18 @@ async function fetchBitgetRealityCatalog() {
   return catalog;
 }
 
-async function fetchSpotRwaBitget(generation = spotRefreshGeneration, realityCatalogPromise = fetchBitgetRealityCatalog()) {
-  // Start market feeds immediately, but only the official instruments request
-  // determines whether the shared identity catalog is available.
-  const realityTickersPromise = fetchSpotResource(`${BITGET_SPOT_BASE}/api/v3/market/tickers?category=SPOT`);
-  const legacyTickersPromise = fetchSpotResource(`${BITGET_SPOT_BASE}/api/v2/spot/market/tickers`);
-  const marketFeedsPromise = Promise.allSettled([
-    realityTickersPromise,
-    legacyTickersPromise,
-  ]);
-  const realityCatalog = await realityCatalogPromise;
-  const [realityTickersResult, legacyTickersResult] = await marketFeedsPromise;
+async function fetchSpotRwaBitget(
+  generation = spotRefreshGeneration,
+  realityCatalogPromise = null,
+  snapshotPromise = null,
+) {
+  const sharedSnapshotPromise = snapshotPromise || fetchBitgetSpotSnapshot();
+  const sharedCatalogPromise = realityCatalogPromise || fetchBitgetRealityCatalog(sharedSnapshotPromise);
+  const [realityCatalog, snapshot] = await Promise.all([sharedCatalogPromise, sharedSnapshotPromise]);
 
   const realityTickerMap = {};
-  if (realityTickersResult.status === 'fulfilled' && realityTickersResult.value.ok) {
-    try {
-      const json = await realityTickersResult.value.json();
-      if (json.code === '00000') {
-        (json.data || []).forEach(t => { realityTickerMap[String(t.symbol || '').toUpperCase()] = t; });
-      } else {
-        console.warn(`[Spot] Bitget Reality ticker API ${json.code}: ${json.msg}`);
-      }
-    } catch (error) {
-      console.warn('[Spot] Bitget Reality ticker payload unavailable:', error);
-    }
+  if (Array.isArray(snapshot.realityTickers) && snapshot.realityTickers.length) {
+    snapshot.realityTickers.forEach(t => { realityTickerMap[String(t.symbol || '').toUpperCase()] = t; });
   } else {
     console.warn('[Spot] Bitget Reality ticker feed unavailable; keeping official listings with Unavailable market fields');
   }
@@ -11658,15 +11674,7 @@ async function fetchSpotRwaBitget(generation = spotRefreshGeneration, realityCat
   }
 
   // Keep the legacy v2 feed for tokenized metals and other non-Reality RWA.
-  let legacyTickers = [];
-  if (legacyTickersResult.status === 'fulfilled' && legacyTickersResult.value.ok) {
-    try {
-      const json = await legacyTickersResult.value.json();
-      if (json.code === '00000') legacyTickers = json.data || [];
-    } catch (error) {
-      console.warn('[Spot] Bitget legacy ticker payload unavailable:', error);
-    }
-  }
+  const legacyTickers = Array.isArray(snapshot.standardTickers) ? snapshot.standardTickers : [];
   const legacyAssets = [];
   const realityPairs = new Set(assets.map(a => a.pair));
   for (const t of legacyTickers) {
@@ -11803,7 +11811,6 @@ async function fetchSpotRwaOkx() {
   if (!instruments.length) throw new Error('OKX Unified Tokenized Stocks catalog is empty');
   const tickerMap = new Map(okxSnapshotRows(snapshot, 'tickers').map(row => [row.instId, row]));
   const exactGoldPairs = Object.freeze({
-    'PAXG-USD':{ base:'PAXG', quote:'USD' },
     'PAXG-USDT':{ base:'PAXG', quote:'USDT' },
     'XAUT-USDT':{ base:'XAUT', quote:'USDT' },
   });
@@ -11816,10 +11823,11 @@ async function fetchSpotRwaOkx() {
       String(instrument.instCategory) === '3' && quote === 'USDT' && /^X[A-Z0-9.-]{1,29}$/.test(venueBase);
     const goldPair = exactGoldPairs[venueSymbol];
     const isExactGold = instrument.state === 'live' && instrument.instType === 'SPOT' &&
-      String(instrument.instCategory) === '1' && goldPair?.base === venueBase && goldPair?.quote === quote;
+      ['', '1', '4'].includes(String(instrument.instCategory ?? '').trim()) &&
+      goldPair?.base === venueBase && goldPair?.quote === quote;
     // Only strip the wrapper X after the official Stock category gate. XRP,
     // XLM and every other category-1 crypto remain excluded. PAXG/XAUT are
-    // three exact, globally audited tokenized-gold pair exceptions only.
+    // two exact, globally audited tokenized-gold pair exceptions only.
     if (!isUnifiedStock && !isExactGold) continue;
     const rawUnderlying = isUnifiedStock ? venueBase.slice(1) : venueBase;
     const category = isUnifiedStock ? securityCategoryForUnderlying(rawUnderlying, 'equity') : 'commodity';
@@ -12121,7 +12129,8 @@ async function refreshSpotArbData(force = false) {
     // Bitget, Kraken, Binance and OKX are independent and start together.
     // Gate waits only for Bitget Reality identity registration, not for the
     // Bitget ticker feeds, other venues or any order-book depth request.
-    const bitgetIdentityPromise = fetchBitgetRealityCatalog();
+    const bitgetSnapshotPromise = fetchBitgetSpotSnapshot();
+    const bitgetIdentityPromise = fetchBitgetRealityCatalog(bitgetSnapshotPromise);
     const independentFetchers = {
       kraken:() => fetchSpotRwaKraken(refreshGeneration),
       binance:() => fetchSpotRwaBinance(refreshGeneration),
@@ -12132,7 +12141,11 @@ async function refreshSpotArbData(force = false) {
       applyVenueResult(venue, result);
     });
     const bitgetPromise = (async () => {
-      const bitgetResult = await settleSpotVenue('bitget', () => fetchSpotRwaBitget(refreshGeneration, bitgetIdentityPromise));
+      const bitgetResult = await settleSpotVenue('bitget', () => fetchSpotRwaBitget(
+        refreshGeneration,
+        bitgetIdentityPromise,
+        bitgetSnapshotPromise,
+      ));
       applyVenueResult('bitget', bitgetResult);
     })();
     const gatePromise = (async () => {

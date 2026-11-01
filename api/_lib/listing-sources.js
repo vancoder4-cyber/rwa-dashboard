@@ -413,8 +413,15 @@ async function collectOkxPerp(baseUrl) {
   return assertCatalogBounds('perp', 'okx', rows);
 }
 
-async function collectBitgetSpot(deadlineAt = null) {
-  const instruments = await fetchBitget('/api/v3/market/instruments?category=SPOT', { deadlineAt });
+export async function collectBitgetSpot(baseUrl, deadlineAt = null) {
+  const payload = await fetchSameOrigin(baseUrl, '/api/bitget-market?type=spot-catalog', { deadlineAt });
+  const instruments = Array.isArray(payload?.instruments) ? payload.instruments : [];
+  const coverage = payload?.coverage?.instruments;
+  if (payload?.schemaVersion !== 1 || payload?.catalogStatus !== 'full' ||
+      coverage?.status !== 'full' || Number(coverage?.observed) !== instruments.length ||
+      Number(coverage?.expected) !== instruments.length || !instruments.length) {
+    throw new TypeError('Bitget admitted Spot catalog unavailable');
+  }
   const rows = new Map();
   for (const instrument of instruments) {
     if (instrument?.status !== 'online' || !['USD', 'USDT'].includes(normalizedUpper(instrument?.quoteCoin))) continue;
@@ -613,7 +620,7 @@ export async function collectListingSourceObservations(baseUrl) {
     ['perp', 'gate', () => collectGatePerp(baseUrl)],
     ['perp', 'binance', () => collectBinancePerp(baseUrl)],
     ['perp', 'okx', () => collectOkxPerp(baseUrl)],
-    ['spot', 'bitget', () => collectBitgetSpot()],
+    ['spot', 'bitget', () => collectBitgetSpot(baseUrl)],
     ['spot', 'gate', () => collectGateSpot(baseUrl)],
     ['spot', 'kraken', () => collectKrakenSpot(baseUrl)],
     ['spot', 'binance', () => collectBinanceSpot(baseUrl)],
@@ -659,7 +666,7 @@ export async function collectListingSourceObservations(baseUrl) {
 // drift into separate ticker-based identity rules.
 export async function collectVerifiedSpotListingSourceObservations(baseUrl, { deadlineAt = null } = {}) {
   const definitions = [
-    ['spot', 'bitget', () => collectBitgetSpot(deadlineAt)],
+    ['spot', 'bitget', () => collectBitgetSpot(baseUrl, deadlineAt)],
     ['spot', 'gate', () => collectGateSpot(baseUrl, deadlineAt)],
     ['spot', 'kraken', () => collectKrakenSpot(baseUrl, deadlineAt)],
     ['spot', 'binance', () => collectBinanceSpot(baseUrl, deadlineAt)],

@@ -70,6 +70,8 @@ annualized funding = funding rate × (24 / intervalHours) × 365
 
 The ten catalog source keys are executable constants at `api/_lib/listing-audit.js:11-22`. These ten catalogs—and only these catalogs—enter the Phase 1 database shadow write.
 
+Bitget Spot transport is split without changing the data contract: `api/bitget-market.js` runs in `sin1`; `spot-catalog` publishes only the fixed official v3 instruments identity catalog, while `spot-snapshot` attaches optional field-projected v3/v2 tickers after an exact catalog join. Listing Audit uses the catalog route; Browser and Spot anomaly share the snapshot route. This is an egress/cache change only: no identity admission, exact listing key, source key, formula/method/cohort version, public Listing/Signal schema, retention, writer/read mode, database table or persisted representation changes. Phase 1 PostgreSQL shadow therefore receives the same accepted `spot:bitget` exact memberships; identical re-fetch behavior and lifecycle diff semantics remain unchanged.
+
 ### 2.2 Traditional and reference sources
 
 | Dataset | Authority/current code | Measurement |
@@ -399,6 +401,8 @@ Producer: `api/_lib/spot-volume-price-anomaly.js`; formula `rwa-spot-volume-pric
 | Perp coverage | Exact current contracts joined only by matching `category:canonical` |
 
 Volume fields are quote/USD turnover: Gate `quote_volume`, Binance `quoteVolume`, Bitget Reality `platformTurnover24h`, OKX `volCcy24h`; Kraken is estimated as `v[1] × p[1]`. Kraken's `o` is UTC-midnight open, not rolling-24h open, so Kraken price change is Unavailable and cannot trigger price (`api/_lib/spot-volume-price-anomaly.js:7-19`, `:661-730`).
+
+Bitget's ticker availability is not identity availability. `spot-snapshot` may return a Full catalog with Partial/Unavailable ticker coverage; those missing fields downgrade the Spot source and cannot create, remove or reclassify a listing. Listing lifecycle continuity independently consumes the cached identity-only `spot-catalog` route.
 
 Namespace `rwa-signal-spot-volume-price-history-v1` retains eight UTC daily anchors. A Partial five-source snapshot may display verified alerts but may not say “No anomalies.” The bounded payload uses a PostgreSQL checkpoint plus Runtime Cache replica; the later typed target remains exact Spot daily anchors plus versioned events.
 

@@ -1,4 +1,5 @@
 import { getJsonWithRetry } from './_lib/http.mjs';
+import { canonicalOkxSpotSymbol, OKX_SPOT_GOLD_EXCEPTIONS } from '../api/_lib/okx.js';
 
 const baseUrl = String(process.env.DASHBOARD_URL || 'https://avenir-rwa-analyst.vercel.app').replace(/\/$/, '');
 
@@ -45,12 +46,19 @@ for (const field of ['tickers','marks','openInterest','funding']) {
 
 const okxSpot = await getJson('/api/okx-market?type=spot-snapshot', { timeoutMs:30_000 });
 const okxSpotInstruments = Array.isArray(okxSpot.instruments) ? okxSpot.instruments : [];
-if (okxSpotInstruments.length < 51) throw new Error(`OKX spot catalog regressed below 51 listings: ${okxSpotInstruments.length}`);
-const exactOkxGold = new Set(['PAXG-USD','PAXG-USDT','XAUT-USDT']);
+if (okxSpotInstruments.length < 50) throw new Error(`OKX spot catalog regressed below 50 listings: ${okxSpotInstruments.length}`);
+const exactOkxGold = new Set(Object.keys(OKX_SPOT_GOLD_EXCEPTIONS));
+const admittedOkxGold = new Set();
 for (const row of okxSpotInstruments) {
-  const isUts = row.state === 'live' && row.instType === 'SPOT' && String(row.instCategory) === '3' && row.quoteCcy === 'USDT';
-  const isGold = exactOkxGold.has(row.instId);
-  if (!isUts && !isGold) throw new Error(`OKX crypto spot leaked into RWA catalog: ${row.instId}`);
+  const instId = String(row?.instId || '').trim().toUpperCase();
+  const canonical = canonicalOkxSpotSymbol(row);
+  const isUts = canonical !== null && String(row.instCategory ?? '').trim() === '3' && !exactOkxGold.has(instId);
+  const isGold = canonical !== null && exactOkxGold.has(instId);
+  if (isGold) admittedOkxGold.add(instId);
+  if (!isUts && !isGold) throw new Error(`OKX crypto spot leaked into RWA catalog: ${instId || '(missing instId)'}`);
+}
+if (admittedOkxGold.size !== exactOkxGold.size || [...exactOkxGold].some(instId => !admittedOkxGold.has(instId))) {
+  throw new Error(`OKX gold coverage regressed: expected ${[...exactOkxGold].join('/')}, received ${[...admittedOkxGold].join('/') || 'none'}`);
 }
 if (okxSpotInstruments.some(row => ['XRP-USDT','XLM-USDT','CAT-USDT','LIT-USDT'].includes(row.instId))) {
   throw new Error('OKX same-ticker crypto collision entered the spot catalog');

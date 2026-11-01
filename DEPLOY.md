@@ -92,14 +92,20 @@ npm run audit:deployment
 
 It fails unless the current production alias resolves to the unique successful Production URL registered by `vercel[bot]` for current `main`, the lightweight runtime contract reports the expected Vercel project/deployment and exact GitHub repository identity, and the published `index.html`/`i18n.js` SHA-256 hashes equal the files in that commit. A local CLI deployment has no matching `vercel[bot]` Production record/URL and therefore fails closed.
 
+For a Bitget Spot transport release, verify the Git-origin Preview before any writer run:
+
+- call `/api/bitget-market?type=spot-catalog` twice and require HTTP 200, `catalogStatus=full`, non-empty exact instruments, `coverage.instruments` equality and a second Vercel CDN `HIT`/`STALE`; the function must be deployed in `sin1`;
+- call `type=spot-snapshot` and require the same Full catalog even if `tickerStatus` is Partial/Unavailable. Market-only symbols must be absent, and a zero-ticker response must be `no-store` without changing the independently cached catalog;
+- run `DASHBOARD_URL=<preview> npm run audit:listings` and require `spot:bitget` Full, then run `audit:data`/`audit:health` and browser-check the Bitget Spot venue and Spot anomaly field states. Do not initialize or invoke the authenticated Listing writer until these read-only checks pass.
+
 For an OKX-affecting release, the Preview and final production artifact must satisfy all of these checks:
 
 - Perpetuals report 183 OKX listings: 149 SWAP + 34 X-Perp, representing 149 OKX canonical underlyings. A canonical aggregate such as AAPL retains both contract listings instead of overwriting one.
-- Spot reports 51 OKX listings: 48 Unified Tokenized Stocks + exactly `PAXG-USD`, `PAXG-USDT`, `XAUT-USDT`, representing 50 canonical assets.
+- Spot reports at least 50 OKX listings: at least 48 Unified Tokenized Stocks + exactly `PAXG-USDT` and `XAUT-USDT`, representing at least 50 canonical assets. Those two exact pairs may report official `instCategory` `1`, `4` or empty, but must still be live SPOT rows with exact base/quote; delisted `PAXG-USD` is rejected.
 - `instCategory=1` Crypto rows such as CAT/LIT/QNT are absent; the UTS wrapper `X` is removed only after the official category-3 gate; ordinary dated FUTURES and OI-only expired rows are absent.
 - `/api/okx-market?type=perp-snapshot` and `type=spot-snapshot` return catalog-joined coverage and stable shared-cache behavior. Missing fields remain null; generic OKX fees and derived derivative USD volume show Estimated, while unsupported fee fields show Unavailable.
 - Top 30 accepts only confirmed complete daily candles for Full 30d coverage. Binance and trade.xyz use one fixed server-owned catalog/Top-80 snapshot each, with no browser-selected symbol/time query; trade.xyz `base volume × close` remains Estimated even at 720 completed hours. Partial history or `24h×30` fallback is labeled Partial/Estimated, and the loading copy names OKX in both English and Chinese.
-- `GET /api/health` includes OKX in the five-venue probes and agrees with the 1,079 Perpetual / 973 Spot listing baselines.
+- `GET /api/health` includes OKX in the five-venue probes and agrees with the 1,079 Perpetual / 972 Spot listing baselines.
 - `GET /api/us-market-directory` returns a stable official directory with at least 8,000 unique Equity/ETF symbols, includes AAPL/QQQ/BABA/TSM and keeps BABA in the additive ADR list. Do not require any ticker to remain absent forever. A legitimate U.S.-listed security ticker such as the `BTC` ETF may remain in the directory; browser rows still require the earlier Equity/ETF identity gate, so Crypto BTC and Pre-IPO identities must not receive the tag.
 
 In the browser, switch `EN → 中文 → EN`, open OKX Perpetuals, Spot, Top 30, Signal Radar and one Asset Intelligence Drawer, and confirm that ticker/venue identity, selected tabs, filters and loaded data do not change with language. In both Perpetual and Spot, toggle `US-listed / 美股`; every remaining asset row must carry the same US tag, category + market filtering must use AND, and non-U.S./crypto collisions must remain excluded.

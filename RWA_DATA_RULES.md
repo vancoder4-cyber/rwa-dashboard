@@ -46,7 +46,7 @@ trade.xyz 当前专用 `xyz` DEX universe 有 5 个 `perpCategories` 空缺：`U
 | Kraken | `asset_class=tokenized_asset` 且 wrapper 为官方 xStocks；另允许已审计贵金属 token |
 | Binance | `B` suffix 只是候选，underlying 还必须出现在官方 TradFi catalog；PAXG/XAUT 单独允许 |
 | Gate.io | 不再仅凭 `X/ON` suffix 放行；必须是精确审计 wrapper，或 2026-08-14 逐 pair 审计的 `PAXG_USDT` / `XAUT_USDT` legacy commodity；未知 suffix 只能作为待复核候选 |
-| OKX | Unified Tokenized Stocks 必须为 `state=live + instType=SPOT + instCategory=3 + quoteCcy=USDT`，再从官方大写 `X` wrapper 精确剥一层；`PAXG-USD`、`PAXG-USDT`、`XAUT-USDT` 是唯一 `instCategory=1` 精确例外 |
+| OKX | Unified Tokenized Stocks 必须为 `state=live + instType=SPOT + instCategory=3 + quoteCcy=USDT`，再从官方大写 `X` wrapper 精确剥一层；`PAXG-USDT`、`XAUT-USDT` 是仅有的黄金精确例外，只接受官方 `instCategory` 为 `1`、`4` 或空值，并继续强制 live/SPOT/base/quote 精确一致；已下架 `PAXG-USD` 不再准入 |
 
 ## 4. 同名 crypto 的处理
 
@@ -61,10 +61,10 @@ trade.xyz 当前专用 `xyz` DEX universe 有 5 个 `perpCategories` 空缺：`U
 
 这条规则说明：**同一个裸 ticker 可以在一个场所是股票、在另一个场所是 crypto；准入必须绑定 venue metadata。**
 
-### OKX `instCategory=1`
+### OKX Crypto 默认拒绝与黄金精确例外
 
 - OKX 官方 `instCategory=1` 表示 Crypto，Perp 与 Spot 默认一律拒绝；证券 registry、名称、价格相似度、`groupId` 或裸 ticker 都不能反向放行。
-- 唯一例外是已按 pair、base/quote 和审计日期锁定的 `PAXG-USD`、`PAXG-USDT`、`XAUT-USDT` 三个黄金现货交易对；例外不得扩大为其他 PAXG/XAUT quote，也不得扩大为所有“gold-like” ticker。
+- 唯一例外是已按 pair、base/quote 和审计日期锁定的 `PAXG-USDT`、`XAUT-USDT` 两个黄金现货交易对；这两个精确 pair 可接受官方 `instCategory` `1`、`4` 或空值，但仍必须为 live SPOT 且 base/quote 完全匹配。例外不得扩大为已下架的 `PAXG-USD`、其他 PAXG/XAUT quote，也不得扩大为所有“gold-like” ticker。
 - 当前官方目录中 `CAT` 现货和 `LIT` 现货/永续均为 `instCategory=1` Crypto，不能误认 Caterpillar 或 Global X Lithium ETF。这两组应保留为生产身份冲突 sentinel。
 
 ### Spot wrapper
@@ -104,14 +104,14 @@ trade.xyz 当前专用 `xyz` DEX universe 有 5 个 `perpCategories` 空缺：`U
 - `CBRS/CBRSB/CBRSON/CBRSX/sCBRS`：统一为已上市的 Cerebras Equity。
 - `QNT/QNTX/QNTSTOCK/QNTB`：统一为已上市的 Quantinuum Equity，但只有场所先确认 security 后才应用 alias。
 - `MINIMAX/ZHIPU/CXMT`：已上市 Equity。
-- `OPENAI/ANTHROPIC/SHEIN/ANDURIL/KALSHI/KIMI/NEURALINK/POLYMARKET`：Pre-IPO；后五项由 Gate 官方 `stocks + is_pre_market=true` catalog 交叉审计纳入。
+- `OPENAI/ANTHROPIC/SHEIN/ANDURIL/KALSHI/KIMI/MOONSHOT/NEURALINK/OURA/POLYMARKET`：Pre-IPO；场所宽泛 `stock/equity` 类别不能被解释为已经公开上市。`MOONSHOT` 暂时保持独立 canonical，不凭名称把它与 `KIMI` 合并；`OURA` 以 2026-09-21 的 S-1/A、仍无公开交易数据及公司尚未宣布完成 IPO 为依据保持 Pre-IPO。
 - `UNITREE`：上海证券交易所公告确认 2026-08-19 起在科创板上市交易（证券代码 688836），因此为已上市 Equity / `public`；场所仍可使用 `UNITREE` 等产品代码，不能继续沿用 Pre-IPO 生命周期。
 - `EWH/DFEN`：全局 ETF 类别修正；Gate 的 `QQQX/SPYX/TQQQX/SLVON` 是仅在 Gate 官方 RWA catalog 门控后生效的 ETF wrapper，不能作为全局 ticker 类别修正。
 - `SKDD/SKUU`：GraniteShares 2x Short/Long SK Hynix Daily ETF。两者是 Nasdaq 上市的每日杠杆 ETF，参考标的是 SK Hynix ADR `SKHY`；它们不是 SK Hynix 普通股，也绝不能 alias 成 `SKHY/SKHYNIX`。只有场所先以官方 RWA/security catalog 准入后，才可把宽泛 Stock/Equity 类别细化为 ETF。
 - `BYDUSDT/HK0992USDT`：Binance 2026-09-07 官方上线公告分别确认标的是 BYD Company Limited H 股（HKEX 1211）与 Lenovo Group Limited（HKEX 0992）。前者 canonical 为 `BYD`；后者只有在场所已确认 `HK_EQUITY`/TradFi security 后才把精确 venue code `HK0992` 归一为 `LENOVO`，名称固定为 `Lenovo Group Limited`。这条 exact alias 不得扩展成通用 `HKdddd` 解析。
 - `SOFTBANKUSDT`：Bitget 2026-09-07 官方 live catalog 将精确产品标为 `isRwa=YES + symbolType=stock + status=online`，因此在该场所门控后 canonical 为 `SOFTBANK`、名称固定为 `SoftBank Group Corp.`、类别为 Equity、公司阶段为 `public`。标的是东京证券交易所代码 9984 的 SoftBank Group Corp.，不是代码 9434 的 SoftBank Corp.；裸 `SOFTBANK` 名称或其他场所同名 ticker 不能独立放行。
 - `KO-USD_UM_XPERP-310912/SOXS-USD_UM_XPERP-310912`：OKX 2026-09-07 官方 live `FUTURES + ruleType=xperp + instCategory=3` 目录及上线公告分别确认 `KO` 为 The Coca-Cola Company Equity、`SOXS` 为 Direxion Daily Semiconductor Bear 3X ETF；官方 `listTime` 分别为 08:45/08:30 UTC。名称只在场所 security 门控后由 Dashboard 身份系统细化，不能按裸 ticker 放行；`listTime` 只能补充目录差分已经确认的事件，不能单独制造 New。
-- `H100`：计算资源类 Commodity，不是股票指数。
+- `H100`：计算资源类 Commodity，不是股票指数。Gate 精确 `H100_USDT` 虽使用宽泛 `indices` 产品类，canonical category 仍按已审计的 compute-rental underlying 精确纠正为 Commodity；`venueCategory` 继续保留 Index，且该例外不得扩展到其他 Gate 指数。
 - 已公开上市的公司不能因为场所残留 `is_pre_market` 就继续显示为 Pre-IPO。
 
 “已上市”以交易所开始公开交易为准；递表、审核通过或发行注册都不等于已经上市。Pre-IPO 集合应保持小而明确，并定期核对上市事件。
@@ -124,7 +124,9 @@ trade.xyz 当前专用 `xyz` DEX universe 有 5 个 `perpCategories` 空缺：`U
 
 `UNITREE` 本次生命周期修正的官方依据是上海证券交易所 2026-08-18 发布的[上市交易公告](https://www.sse.com.cn/disclosure/announcement/listing/ipo/c/c_20260818_10829204.shtml)：股票自 2026-08-19 起上市交易。该修正更新既有精确产品的身份版本，不产生 New/Re-listed；某交易所后来新增一个精确 `venueSymbol` 时，仍由正常目录差分独立产生该场所的 listed 事件。
 
-Durable catalog 中的同一官方产品只有在 canonical underlying 完全不变、旧类别为 `pre-ipo`、新类别为 `equity`、新 `lifecycleStatus=public`，且 canonical 已进入 `REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS` 的有日期官方依据白名单时，才允许做版本化的单向公司生命周期分类纠正。这不是 New/Re-listed 事件。另一个同样狭窄的例外是：已经由场所官方 security catalog 准入、canonical 完全不变、原始 `venueCategory` 为宽泛 Equity/ETF，且 canonical 位于 `REVIEWED_ETF_CATEGORY_CORRECTIONS` 的标的，允许从旧 `equity` 身份单向纠正为 `etf`；截至 2026-09-03 该白名单仅有 `SKDD/SKUU`。此外，已经由官方 security catalog 证明、且 exact `sourceKey + venueSymbol` 完全不变的场所代码可以通过 `REVIEWED_EXACT_CANONICAL_CORRECTIONS` 做一次单向 canonical alias 修正；截至 2026-09-07 只允许 `perp:binance + HK0992USDT + HK0992 -> LENOVO`，旧 Runtime Checkpoint 必须是 `category=equity + venueCategory=equity + lifecycleStatus=null`，新身份必须是相同产品类别且 `lifecycleStatus=public`。这种 identity metadata 修正不得生成额外 New/Re-listed；该精确产品原有的真实 listed 事件只更新名称、canonical 和公司阶段。反向修正、换场所、换精确产品、非白名单标的，以及其他 ticker、canonical underlying、Commodity、Index、FX 或 Bond 的变化仍然是硬身份冲突，必须阻止发布并人工核对；新增白名单项必须同时补官方来源、防反向测试和“不生成额外 New/Re-listed”测试。
+Durable catalog 中的同一官方产品只有在 canonical underlying 完全不变、旧类别为 `pre-ipo`、新类别为 `equity`、新 `lifecycleStatus=public`，且 canonical 已进入 `REVIEWED_PUBLIC_LIFECYCLE_CORRECTIONS` 的有日期官方依据白名单时，才允许做版本化的单向公司生命周期分类纠正。这不是 New/Re-listed 事件。另一个同样狭窄的例外是：已经由场所官方 security catalog 准入、canonical 完全不变、原始 `venueCategory` 为宽泛 Equity/ETF，且 canonical 位于 `REVIEWED_ETF_CATEGORY_CORRECTIONS` 的标的，允许从旧 `equity` 身份单向纠正为 `etf`；截至 2026-09-03 该白名单仅有 `SKDD/SKUU`。此外，已经由官方 security catalog 证明、且 exact `sourceKey + venueSymbol` 完全不变的产品可以通过 `REVIEWED_EXACT_CANONICAL_CORRECTIONS` 做一次单向身份修正；截至 2026-11-01 只允许：`perp:binance + HK0992USDT + HK0992/equity -> LENOVO/equity`、`perp:gate + H100_USDT + H100/index -> H100/commodity`、Bitget/OKX 的精确 `MOONSHOT` 与 `OURA` 合约从宽泛 Equity 细化为 Pre-IPO。每条记录都同时固定旧/新 canonical、category、venueCategory 与 lifecycle；不得只按裸 ticker 放行。这种 identity metadata 修正不得生成额外 New/Re-listed；该精确产品原有的真实事件只补充审核后的公开身份。反向修正、换场所、换精确产品、非白名单标的，以及其他身份变化仍然是硬冲突，必须阻止发布并人工核对；新增白名单项必须同时补官方来源、防反向测试和“不生成额外 New/Re-listed”测试。
+
+`OURA` 本次生命周期复核依据为发行主体 Oura Inc. 2026-09-21 提交的 [S-1/A](https://www.sec.gov/Archives/edgar/data/2133022/000119312526396051/d119865ds1a.htm)：文件仍说明拟议 IPO、发行前不存在公开市场；截至 2026-11-01 Nasdaq 的 OURA 页面仍无交易数据，公司 newsroom 也未宣布 IPO 定价或完成。`MOONSHOT` 的场所产品同时存在明确 Pre-IPO 元数据与宽泛 Stock 元数据，中心 registry 以更具体的私募公司生命周期统一细化，但在取得同一证券身份的直接证据前不 alias 到 `KIMI`。
 
 `SKDD/SKUU` 纠正依据为 GraniteShares 官方产品页与 Nasdaq Trader 2026-07-13 的 ETP 上市通知：两只 ETF 自 2026-07-14 开始交易。OKX 2026-09-02 的公告只证明精确产品 `SKDD-USD_UM_XPERP-310829` 于 2026-09-03 06:00 UTC 下架；它不能改变 `SKDD-USDT-SWAP` 的独立在架状态，也不能把身份纠正伪造成上架/重新上架事件。官方来源：<https://graniteshares.com/etfs/skdd/>、<https://graniteshares.com/etfs/skuu/>、<https://www.nasdaqtrader.com/TraderNews.aspx?id=ETP2026-113>、<https://www.okx.com/en-us/help/okx-to-delist-x-perp-for-skddusd>。
 
@@ -212,13 +214,13 @@ Bitget 当前同时返回 `isRwa=YES` 和 `symbolType=crypto`，但该产品对�
 
 ### OKX tokenized gold
 
-截至 2026-08-08，OKX Spot 的 `PAXG-USD`、`PAXG-USDT` 与 `XAUT-USDT` 虽由通用目录标为 `instCategory=1`，但 OKX 官方 listing/资产说明确认其为黄金支持 token，因此作为三个精确 pair 例外纳入。两条 PAXG pair 是同一个 canonical `PAXG`；listing 数与 canonical 数不能混用。
+截至 2026-11-01，OKX 已于 2026-09-18 下架 `PAXG-USD`；当前只保留 `PAXG-USDT` 与 `XAUT-USDT` 两个精确黄金 pair。它们仅在官方 `instCategory` 为 `1`、`4` 或空值，且 `state=live + instType=SPOT + base/quote` 与 pair 完全一致时准入；其他 PAXG/XAUT quote 与所有相似 ticker 继续拒绝。listing 数与 canonical 数必须分开统计。
 
 ### 宽泛 Stock 类别中的指数
 
 截至 2026-08-25，Bitget 官方 RWA catalog 将 `SP500`、`NDX100`、`JP225` 标为 `stock`，OKX Stocks catalog 将 `KR200` 纳入同一宽泛类别。`JP225` 同时由 Gate 官方 `JPN225_USDT + contract_type=indices` 与 trade.xyz 官方 `xyz:JP225 + indices` 交叉确认。它们仅在通过 Bitget/OKX 各自官方 RWA admission gate 后，按这四个精确 ticker 改标为 Index；crypto 类别或其他场所的同名 ticker 仍然拒绝。
 
-## 11. 2026-08-08 基线
+## 11. 2026-08-08 基线（2026-11-01 更新 OKX Gold）
 
 该数字只用于发现突然缺失或暴增，不应被当成永久硬编码：
 
@@ -233,9 +235,9 @@ Bitget 当前同时返回 `isRwa=YES` 和 `symbolType=crypto`，但该产品对�
 | Spot | Binance | 68 |
 | Spot | Bitget | 627 |
 | Spot | Kraken | 167 |
-| Spot | OKX | 51 |
+| Spot | OKX | 50 |
 
-合约合计 1,079 listings、469 个跨场所 canonical assets；现货合计 973 listings。OKX 合约的 183 listings = 149 个 SWAP + 34 个 X-Perp，归并为 149 个 OKX canonical underlyings；同一个 underlying 的 SWAP 与 X-Perp 是两个独立 listing，不能互相覆盖。OKX 现货的 51 listings = 48 个 UTS + 3 个精确黄金 pair，归并为 50 个 canonical assets（PAXG 有两个 quote pair）。
+合约合计 1,079 listings、469 个跨场所 canonical assets；现货合计 972 listings。OKX 合约的 183 listings = 149 个 SWAP + 34 个 X-Perp，归并为 149 个 OKX canonical underlyings；同一个 underlying 的 SWAP 与 X-Perp 是两个独立 listing，不能互相覆盖。OKX 现货的 50 listings = 48 个 UTS + 2 个精确黄金 pair，归并为 50 个 canonical assets。
 
 ## 12. 维护约定
 
@@ -323,6 +325,7 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 
 - Hyperliquid/trade.xyz market identity：`https://api.hyperliquid.xyz/info` 的 `perpCategories` 与 `metaAndAssetCtxs`。
 - Bitget perpetual/Reality catalogs：`/api/v3/market/instruments`。
+- Bitget Spot 在 Dashboard 内只通过固定 `sin1` 同源路由 `/api/bitget-market` 采集。`type=spot-catalog` 只读取固定官方 v3 `category=SPOT` instruments，并独立缓存身份目录；Listing Audit 不依赖 ticker。`type=spot-snapshot` 在相同官方目录上附加固定 v3 Reality 与 v2 Spot ticker，但所有行情行必须 inner join 当前 online USD/USDT catalog，ticker 不得反向准入。Catalog 缺失必须 502/no-store；ticker 全失败时仍保留 Full catalog、明确 ticker Unavailable 且 snapshot no-store，不能把空行情解释为下架、零成交或无异动。
 - Bitget SOFTBANK 精确合约身份：2026-09-07 `USDT-FUTURES` 官方 live catalog 中的 `SOFTBANKUSDT + baseCoin=SOFTBANK + isRwa=YES + symbolType=stock + status=online`；公司法律名称和东京代码 9984：[SoftBank Group 官方股票资料](https://group.softbank/en/ir/stock/info) 与 [JPX 2026 行业指数成分资料](https://www.jpx.co.jp/english/markets/indices/factsheets/files/e_003_1_25_fac2_33sector_Information%20and%20Communication.pdf)；首次公开交易日 1994-07-22 另由受监管券商的上市资料复核。不得与东京代码 9434 的 SoftBank Corp. 混淆。
 - Gate futures/spot catalogs：`/api/v4/futures/usdt/contracts` 与 `/api/v4/spot/currency_pairs`。
 - Binance futures/spot catalogs：`/fapi/v1/exchangeInfo` 与 `/api/v3/exchangeInfo`。
@@ -384,6 +387,7 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 ### 现货量价异动
 
 - `spotVolumePriceAnomalies` 以**精确现货 listing**为观察单位，不按裸 ticker 或 canonical asset 合并。listing 主键固定为 `spot:venue:venueSymbol`，身份键固定为 `category:canonical`；同一 underlying 的 USD/USDT 或不同 wrapper 必须保留为不同观察行。交易所官方产品 catalog/type 是准入依据；ticker、名称、价格相似或已有合约同名均不能证明是 RWA。跨 category 同 canonical 冲突时整体 quarantine，不能让 Crypto 同名资产进入历史或告警。
+- Bitget 的身份目录与可选行情可用性必须分离：Listing Audit 固定读取 `spot-catalog`；Spot 量价异动和浏览器读取 `spot-snapshot`。后者 ticker Partial/Unavailable 只能降低字段/来源状态，不能缩小、扩充或替换官方 catalog，也不能影响前者的独立 CDN identity continuity。
 - 每行先应用 `currentVolumeUsd >= 500000` 的硬过滤，再按 OR 关系判断：`currentVolumeUsd / yesterdayVolumeUsd >= 3.0`，或 `priceChange24hPct >= 15`。边界值包含在内；跌幅 `<= -15%` 不属于本版“涨幅”告警。前一日成交量缺失、非正数、不可比或时间戳不是前一个已封存 UTC day 时，成交量条件不可用；真实 0 必须保留为 0，但比例保持 null 且不得触发 volume，不能把 0 与缺失互换。价格条件仍可在 Day 1 独立触发。
 - “昨日”是前一个已封存 UTC-date 桶里、同一 exact listing 的 rolling-24h USD turnover 锚点，不宣称为交易所 UTC 自然日成交量。当前与昨日的 listing key、identity、quote/单位和采集方法 fingerprint 必须一致；任一变化都重新 Warming。历史同一 UTC 日重试只能覆盖，不得追加伪观察；只保留最近 8 个 UTC 日，足以得到一个前日锚点并允许连续性检查。
 - 成交量必须是 quote/USD turnover，不得把 base shares/tokens 当成美元。Gate 使用 `quote_volume`，Binance 使用 `quoteVolume`，Bitget Reality 使用 `platformTurnover24h`（不得回退到底层传统市场 `turnover24h`），OKX Spot 使用 `volCcy24h`；Kraken 可用 `v[1] × p[1]` 估算 USD turnover 并标 Estimated。缺失、负数、NaN、过期或不支持字段保持 null，不能通过 `|| 0` 进入过滤、比例或排序。
@@ -422,6 +426,7 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 
 - 检测频率与展示周期分离：服务端每天读取一次官方目录并做 diff；RWA Signal Radar 默认展示滚动 7 天，允许切换滚动 30 天。不得为了“周视图”把检测降低为每周一次。
 - 覆盖必须恰好对应当前产品范围的十个独立 source：Perpetual 的 trade.xyz、Bitget、Gate、Binance、OKX，以及 Spot 的 Bitget、Gate、Kraken、Binance、OKX。主键是 `market:venue:venueSymbol`；不能以裸 canonical ticker 合并不同交易标的。
+- `spot:bitget` 只允许从固定 `/api/bitget-market?type=spot-catalog` 得到的官方 v3 instruments 建立 Full source；`spot-snapshot` 的 ticker 状态不是 Listing source coverage。目录不可用时必须保留 Unavailable/last-good 语义，不能用 ticker、旧客户端表或空数组替代。
 - 交易场所的临时交易模式不是 listing lifecycle。Kraken 官方目录中处于 `post_only`、`limit_only` 或 `cancel_only` 的精确 pair 仍保留 catalog membership，并映射为 instrument `official_status=suspended`，不得据此生成 `delisted`；只有 `online` instrument 可以进入可执行套利 route，因此临时模式对目录/身份对账可见，但对下游执行必须 fail closed。
 - 每个 source 的首次成功读取只建立基线，不生成 New。只有完整、无重复且通过类别漂移检查的官方 catalog 才能替换该 source 的 last-good 基线；Unavailable/Partial 不得清空基线，也不得制造假下架。单次缺失先记为 pending removal，至少跨两个不同 UTC 日的完整观测仍缺失后才记下架，同日重试不算第二次观测。通过官方身份门控的合理纯新增必须生成提醒，不能被普通 10% 缩表保护吞掉；包含删除的显著漂移及同时超过 50 个、50% 的极端纯增长继续隔离复核。新增、下架、重新上线必须分别记录，页面“竞品新上线资产”只显示新增和重新上线。
 - Readiness 的成员变化对账也必须按 source 回看最近一次可信 Full source run，不能使用紧邻但 Unavailable/Partial、无完整 membership 的日轮次作为基线；恢复 last-good、临时交易模式变化和身份版本承接都不是新的 listing event。
@@ -433,7 +438,7 @@ Perp 与 Spot 的每个 venue 都保存 last-good snapshot。刷新失败时允�
 - 上架事实与发布身份必须分层：事件证据保持不可变，用于证明当时观察和目录差分；公开事件的 `name/category/canonicalSymbol` 必须来自该事件 instrument version 已绑定的 Dashboard identity version，`venueCategory/lifecycleStatus` 继续保持各自独立口径。旧 event evidence 或 membership 中的 ticker 名称不得覆盖后来经过审核的身份修正，也不得通过改写历史事件行来修正展示。
 - `rwa-listing-audit-v2` Runtime Cache 与 CDN 只作为可丢失的低延迟副本；清空、重新部署或区域逐出不能重置 PostgreSQL 事件历史或制造空基线。紧凑 checkpoint 仍可用于 writer 连续性和回滚期间的旧读取模式，但不再取得事件历史权威。事件以 45 天为默认查询窗口、2,000 条为上限；截断必须降为 Partial 并公开 `history`，不能静默宣称 Full 或“没有新资产”。数据库无可信 source run、迁移/权限失败或事件投影不合法时必须 fail closed 为 Warming/Unavailable，不能以空数组冒充“确认无事件”。
 - Nasdaq Trader 官方目录的 `etfs` 数组只用于在场所 RWA/security 门控之后细分宽泛 Stock/Equity 类别。当前 Kraken xStocks Listing Audit 依赖该官方 ETF 目录区分 Equity 与 ETF；目录不可用或契约不完整时，该 source 必须 Unavailable，不能把未知 ETF 猜成 Equity。官方 ETF 目录不是 RWA 准入白名单。
-- OKX 的 183 Perpetual（至少 149 SWAP + 34 X-Perp）和 51 Spot（至少 48 UTS + 精确 3 gold）是已审核下限，不是阻止官方新增的永久精确数量。低于任一分项、Crypto/category 泄漏、重复或 market-data join 不完整继续失败；合法增长由 Listing Audit 单独提醒。
+- OKX 的 183 Perpetual（至少 149 SWAP + 34 X-Perp）和 50 Spot（至少 48 UTS + 精确 2 gold）是已审核下限，不是阻止官方新增的永久精确数量。低于任一分项、Crypto/category 泄漏、重复或 market-data join 不完整继续失败；合法增长由 Listing Audit 单独提醒。
 
 ## 20. 数据库 Phase 0 / Phase 1 与 Listing 事件权威边界
 

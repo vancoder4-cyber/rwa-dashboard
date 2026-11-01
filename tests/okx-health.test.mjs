@@ -58,10 +58,9 @@ function makeSpotSnapshot() {
     };
   });
   const gold = [
-    { instId:'PAXG-USD', baseCcy:'PAXG', quoteCcy:'USD', canonicalSymbol:'PAXG' },
-    { instId:'PAXG-USDT', baseCcy:'PAXG', quoteCcy:'USDT', canonicalSymbol:'PAXG' },
-    { instId:'XAUT-USDT', baseCcy:'XAUT', quoteCcy:'USDT', canonicalSymbol:'XAUT' },
-  ].map(row => ({ ...row, instType:'SPOT', state:'live', instCategory:'1' }));
+    { instId:'PAXG-USDT', baseCcy:'PAXG', quoteCcy:'USDT', canonicalSymbol:'PAXG', instCategory:'1' },
+    { instId:'XAUT-USDT', baseCcy:'XAUT', quoteCcy:'USDT', canonicalSymbol:'XAUT', instCategory:'4' },
+  ].map(row => ({ ...row, instType:'SPOT', state:'live' }));
   const instruments = [...uts, ...gold];
   return {
     instruments,
@@ -104,9 +103,9 @@ test('OKX health validators require the complete official catalog and market joi
 
   const spot = validateOkxSpotSnapshot(makeSpotSnapshot());
   assert.equal(spot.valid, true);
-  assert.equal(spot.listingCount, 51);
+  assert.equal(spot.listingCount, 50);
   assert.equal(spot.utsListings, 48);
-  assert.equal(spot.goldListings, 3);
+  assert.equal(spot.goldListings, 2);
   assert.equal(spot.coverage.tickers.valid, true);
 });
 

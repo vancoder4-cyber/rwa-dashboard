@@ -54,6 +54,7 @@ import tradfiActivityHandler, {
   parseNasdaqHistoricalRow,
   parseOccReport,
   rankTraditionalRows,
+  recentOccWeekdayDates,
   summarizeTraditionalAlignment,
   traditionalTotalValueState,
 } from '../api/tradfi-activity.js';
@@ -200,6 +201,10 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
   assert.equal(securityDisplayName('SOXS'), 'Direxion Daily Semiconductor Bear 3X ETF');
   assert.deepEqual(normalizeSignalIdentity('OPENAI', 'equity'), { symbol:'OPENAI', category:'pre-ipo' });
   assert.deepEqual(normalizeSignalIdentity('ANTHROPIC', 'equity'), { symbol:'ANTHROPIC', category:'pre-ipo' });
+  assert.deepEqual(normalizeSignalIdentity('MOONSHOT', 'equity', { venue:'bitget' }), { symbol:'MOONSHOT', category:'pre-ipo' });
+  assert.deepEqual(normalizeSignalIdentity('OURA', 'equity', { venue:'okx' }), { symbol:'OURA', category:'pre-ipo' });
+  assert.deepEqual(normalizeSignalIdentity('H100', 'index', { venue:'gate' }), { symbol:'H100', category:'commodity' });
+  assert.deepEqual(normalizeSignalIdentity('H100', 'index', { venue:'tradexyz' }), { symbol:'H100', category:'index' });
   assert.deepEqual(normalizeSignalIdentity('SHEIN', 'equity', { venue:'bitget' }), { symbol:'SHEIN', category:'pre-ipo' });
   assert.deepEqual(normalizeSignalIdentity('SHEIN', 'pre-ipo', { venue:'tradexyz' }), { symbol:'SHEIN', category:'pre-ipo' });
   assert.deepEqual(normalizeSignalIdentity('AAPLB', 'equity', { allowBinanceBstock:true }), { symbol:'AAPL', category:'equity' });
@@ -260,6 +265,12 @@ test('signal lifecycle, wrapper, and official-type identity rules match the clie
   assert.deepEqual(clientCanonicals, Object.keys(SECURITY_LISTING_REGISTRY).sort());
   assert.deepEqual(SECURITY_LISTING_REGISTRY.SHEIN, {
     category:'pre-ipo', status:'pre-ipo', name:'SHEIN (Pre-IPO)', listedOn:null, aliases:[],
+  });
+  assert.deepEqual(SECURITY_LISTING_REGISTRY.MOONSHOT, {
+    category:'pre-ipo', status:'pre-ipo', name:'Moonshot AI (Pre-IPO)', listedOn:null, aliases:[],
+  });
+  assert.deepEqual(SECURITY_LISTING_REGISTRY.OURA, {
+    category:'pre-ipo', status:'pre-ipo', name:'Oura Inc. (Pre-IPO)', listedOn:null, aliases:[],
   });
   assert.deepEqual(SECURITY_LISTING_REGISTRY.UNITREE, {
     category:'equity', status:'public', name:'Unitree Robotics', listedOn:'2026-08-19', aliases:[],
@@ -583,6 +594,7 @@ test('Gate OI uses total_size and never treats long-only position_size as total 
         { name:'TSLA_USDT', contract_type:'stocks' },
         { name:'NVDA_USDT', contract_type:'stocks', quanto_multiplier:'0' },
         { name:'META_USDT', contract_type:'stocks', quanto_multiplier:'1' },
+        { name:'H100_USDT', contract_type:'indices', is_pre_market:true, quanto_multiplier:'1' },
       ],
       tickers:[
         { contract:'AAPL_USDT', total_size:'10', mark_price:'200', last:'190', position_size:'999999' },
@@ -590,6 +602,7 @@ test('Gate OI uses total_size and never treats long-only position_size as total 
         { contract:'TSLA_USDT', total_size:'10', mark_price:'250' },
         { contract:'NVDA_USDT', total_size:'10', mark_price:'250' },
         { contract:'META_USDT', total_size:'10', mark_price:'0', last:'500' },
+        { contract:'H100_USDT', total_size:'10', mark_price:'2' },
       ],
     },
   };
@@ -606,6 +619,37 @@ test('Gate OI uses total_size and never treats long-only position_size as total 
     assert.equal(gateRows[symbol].openInterestMethod, null);
     assert.equal(gateRows[symbol].openInterestStatus, 'unavailable');
   }
+  assert.equal(gateRows.H100.category, 'commodity');
+  assert.equal(gateRows.H100.openInterestUsd, 20);
+});
+
+test('reviewed H100, MOONSHOT and OURA identities aggregate without cross-venue conflicts', () => {
+  const inputs = [
+    ['H100', 'index', 'gate', 'H100_USDT'],
+    ['H100', 'commodity', 'okx', 'H100-USDT-SWAP'],
+    ['MOONSHOT', 'pre-ipo', 'gate', 'MOONSHOT_USDT'],
+    ['MOONSHOT', 'equity', 'bitget', 'MOONSHOTUSDT'],
+    ['OURA', 'pre-ipo', 'tradexyz', 'XYZ:OURA'],
+    ['OURA', 'equity', 'okx', 'OURA-USDT-SWAP'],
+  ].map(([symbol, category, venue, venueSymbol]) => {
+    const identity = normalizeSignalIdentity(symbol, category, { venue });
+    return {
+      ...identity,
+      venue,
+      venueSymbol,
+      priceUsd:1,
+      volume24hUsd:1,
+      openInterestUsd:1,
+      fundingRate:0,
+      fundingIntervalHours:8,
+    };
+  });
+  const aggregated = aggregateSignalListings(inputs);
+  assert.deepEqual(aggregated.conflicts, []);
+  assert.deepEqual(
+    aggregated.assets.map(asset => `${asset.category}:${asset.symbol}`).sort(),
+    ['commodity:H100', 'pre-ipo:MOONSHOT', 'pre-ipo:OURA'],
+  );
 });
 
 test('Binance positioning enrichment targets come from uncapped triggered states, not ranked rows', () => {
@@ -1167,6 +1211,17 @@ test('adjusted OCC roots are excluded from standard 100-share notional', () => {
   assert.equal(report.adjustedTotals.AAPL, 5);
 });
 
+test('OCC report candidates skip weekends before probing the official endpoint', () => {
+  assert.deepEqual(
+    recentOccWeekdayDates(new Date('2026-10-31T12:00:00Z'), 4),
+    ['20261030', '20261029', '20261028', '20261027'],
+  );
+  assert.deepEqual(
+    recentOccWeekdayDates(new Date('2026-11-01T12:00:00Z'), 2),
+    ['20261030', '20261029'],
+  );
+});
+
 test('OCC report discovery skips official empty days but never hides request failures', async () => {
   const emptyReport = 'Group\tSymbol\tEx.\tCustomer\tFirm\tCustomer/Firm Totals\tMkt Maker\tTotal';
   const validReport = [
@@ -1175,23 +1230,23 @@ test('OCC report discovery skips official empty days but never hides request fai
     'Symbol\tTotal\t\t1\t0\t1\t9\t10',
   ].join('\n');
   const calls = [];
-  const found = await findFirstNonEmptyOccReport(['20260808', '20260807'], async reportDate => {
+  const found = await findFirstNonEmptyOccReport(['20260807', '20260806'], async reportDate => {
     calls.push(reportDate);
-    return reportDate === '20260808' ? emptyReport : validReport;
+    return reportDate === '20260807' ? emptyReport : validReport;
   });
-  assert.equal(found.reportDate, '20260807');
+  assert.equal(found.reportDate, '20260806');
   assert.equal(found.standardTotals.AAPL, 10);
-  assert.deepEqual(calls, ['20260808', '20260807']);
+  assert.deepEqual(calls, ['20260807', '20260806']);
 
   const failedCalls = [];
   await assert.rejects(
-    findFirstNonEmptyOccReport(['20260808', '20260807'], async reportDate => {
+    findFirstNonEmptyOccReport(['20260807', '20260806'], async reportDate => {
       failedCalls.push(reportDate);
       throw new Error('OCC network failure');
     }),
     /OCC network failure/,
   );
-  assert.deepEqual(failedCalls, ['20260808']);
+  assert.deepEqual(failedCalls, ['20260807']);
 });
 
 test('traditional estimated amounts use same-session share and standard-option notionals', () => {
@@ -1996,10 +2051,11 @@ test('Spot cold load streams venue catalogs while optional depth enrichment stay
   );
   assert.match(refreshSource, /const applyVenueResult = \(venue, result\) =>/);
   assert.match(refreshSource, /const refreshGeneration = \+\+spotRefreshGeneration/);
-  assert.match(refreshSource, /const bitgetIdentityPromise = fetchBitgetRealityCatalog\(\)/);
+  assert.match(refreshSource, /const bitgetSnapshotPromise = fetchBitgetSpotSnapshot\(\)/);
+  assert.match(refreshSource, /const bitgetIdentityPromise = fetchBitgetRealityCatalog\(bitgetSnapshotPromise\)/);
   assert.match(refreshSource, /independentFetchers = \{[\s\S]*?kraken:[\s\S]*?binance:[\s\S]*?okx:/);
   assert.match(refreshSource, /applyVenueResult\(venue, result\)/);
-  assert.match(refreshSource, /settleSpotVenue\('bitget', \(\) => fetchSpotRwaBitget\(refreshGeneration, bitgetIdentityPromise\)\)/);
+  assert.match(refreshSource, /settleSpotVenue\('bitget', \(\) => fetchSpotRwaBitget\([\s\S]*?bitgetIdentityPromise,[\s\S]*?bitgetSnapshotPromise,[\s\S]*?\)\)/);
   assert.match(refreshSource, /await bitgetIdentityPromise[\s\S]*?settleSpotVenue\('gate', \(\) => fetchSpotRwaGate\(refreshGeneration\)\)/);
   assert.match(refreshSource, /Bitget Reality identity dependency unavailable/);
   assert.doesNotMatch(refreshSource, /remainingResults = await Promise\.allSettled/);
@@ -2021,10 +2077,10 @@ test('Spot cold load streams venue catalogs while optional depth enrichment stay
   assert.match(depthSource, /generation !== spotRefreshGeneration/);
   assert.match(depthSource, /spotDepthEnhancementInFlight\[venue\] = \{ generation, run \}/);
 
-  const bitgetSource = sourceBetween(html, 'async function fetchBitgetRealityCatalog()', '// ── Binance Spot Fetch ──');
+  const bitgetSource = sourceBetween(html, 'async function fetchBitgetSpotSnapshot()', '// ── Binance Spot Fetch ──');
   assert.match(bitgetSource, /registerSpotAssetMeta\(coin, underlying, 'Reality'/);
-  assert.match(bitgetSource, /const marketFeedsPromise = Promise\.allSettled\(\[\s*realityTickersPromise,\s*legacyTickersPromise/);
-  assert.match(bitgetSource, /const realityCatalog = await realityCatalogPromise;\s*const \[realityTickersResult, legacyTickersResult\] = await marketFeedsPromise/);
+  assert.match(bitgetSource, /fetchSpotResource\('\/api\/bitget-market\?type=spot-snapshot', 20000\)/);
+  assert.match(bitgetSource, /Promise\.all\(\[sharedCatalogPromise, sharedSnapshotPromise\]\)/);
   assert.match(bitgetSource, /keeping official listings with Unavailable market fields/);
 
   const referenceSource = sourceBetween(html, 'async function fetchReferencePrices(symbols)', 'function getRefPrice(coin)');
