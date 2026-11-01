@@ -13,6 +13,7 @@ import {
   LISTING_PG_PUBLICATION_LEASE_KEY,
   LISTING_PG_PUBLICATION_LEASE_SECONDS,
   LISTING_PG_STALE_RETRY_ERROR_CODE,
+  LISTING_PG_TRANSACTION_JSON_MAX_BYTES,
   LISTING_PG_VERIFIED_IDENTITY_CONFLICT_ERROR_CODE,
   acquireListingAuditPublicationLease,
   archiveListingAuditArtifacts,
@@ -142,6 +143,14 @@ function pgCalls(batch, artifacts = []) {
     },
   }, batch, artifacts);
   return calls;
+}
+
+function stagedRows(calls, tableName) {
+  const staging = calls.find(call => call.text.includes(`CREATE TEMP TABLE ${tableName}`));
+  assert.ok(staging, `${tableName} must be staged inside the transaction`);
+  assert.match(staging.text, /ON COMMIT DROP/);
+  assert.equal(staging.params.length, 1);
+  return JSON.parse(staging.params[0]);
 }
 
 function sameDayRetry({
@@ -418,7 +427,7 @@ test('Unavailable and invalid Crypto observations fail closed without identity o
   assert.match(carryForward.text, /current\.contract_multiplier/);
   assert.doesNotMatch(carryForward.text, /FROM carried_instrument_versions AS carried\s+WHERE NOT EXISTS/,
     'the replacement insert must consume the UPDATE RETURNING rows instead of re-reading the old MVCC snapshot');
-  const replacementKeys = new Set(JSON.parse(carryForward.params[0]).map(row => row.source_key));
+  const replacementKeys = new Set(stagedRows(calls, 'listing_membership_input').map(row => row.source_key));
   assert.equal(replacementKeys.has('spot:okx'), false,
     'an unavailable source must be carried from its exact last-good identity, not treated as refreshed');
 });
@@ -520,8 +529,7 @@ test('same-day Unavailable and identity-normalization rejects preserve last-good
       const replacementSources = JSON.parse(deletion.params.at(-1));
       assert.equal(replacementSources.some(row => row.source_key === sequence.sourceKey), false, label);
     }
-    const membershipInsert = calls.find(call => call.text.includes('INSERT INTO ingest.catalog_membership'));
-    const incomingMemberships = JSON.parse(membershipInsert.params.at(-1));
+    const incomingMemberships = stagedRows(calls, 'listing_membership_input');
     assert.equal(incomingMemberships.some(row => row.source_key === sequence.sourceKey), false, label);
   }
 });
@@ -683,13 +691,13 @@ test('verified identity guard rejects category/canonical drift but permits non-i
   assert.match(metadataGuard.text, /current_asset_version\.category <> incoming\.category/);
   assert.match(metadataGuard.text, /current_asset_version\.canonical_underlying <> incoming\.canonical_underlying/);
   assert.match(metadataGuard.text, /incoming\.lifecycle_status = 'public'/);
-  assert.match(metadataGuard.text, /incoming\.canonical_underlying = ANY\(\$2::text\[\]\)/);
+  assert.match(metadataGuard.text, /incoming\.canonical_underlying = ANY\(\$1::text\[\]\)/);
   assert.match(metadataGuard.text, /current_asset_version\.category = 'pre-ipo'/);
-  assert.ok(metadataGuard.params[1].includes('UNITREE'));
-  assert.match(metadataGuard.text, /incoming\.canonical_underlying = ANY\(\$3::text\[\]\)/);
+  assert.ok(metadataGuard.params[0].includes('UNITREE'));
+  assert.match(metadataGuard.text, /incoming\.canonical_underlying = ANY\(\$2::text\[\]\)/);
   assert.match(metadataGuard.text, /current_asset_version\.category = 'equity'/);
   assert.match(metadataGuard.text, /incoming\.category = 'etf'/);
-  assert.deepEqual(metadataGuard.params[2], ['SKDD', 'SKUU']);
+  assert.deepEqual(metadataGuard.params[1], ['SKDD', 'SKUU']);
   assert.match(metadataGuard.text, /correction\.source_key = source\.source_key/);
   assert.match(metadataGuard.text, /correction\.official_product_key = instrument\.official_product_key/);
   assert.match(metadataGuard.text, /correction\.previous_asset_key = current_asset\.asset_key/);
@@ -701,7 +709,7 @@ test('verified identity guard rejects category/canonical drift but permits non-i
   assert.match(metadataGuard.text, /previous_membership\.normalized_attributes->>'venueCategory'/);
   assert.match(metadataGuard.text, /correction\.previous_lifecycle_status IS NOT DISTINCT FROM/);
   assert.match(metadataGuard.text, /previous_membership\.normalized_attributes->>'lifecycleStatus'/);
-  const exactCorrections = JSON.parse(metadataGuard.params[3]);
+  const exactCorrections = JSON.parse(metadataGuard.params[2]);
   assert.deepEqual(exactCorrections.find(row => row.official_product_key === 'H100_USDT'), {
     source_key:'perp:gate',
     official_product_key:'H100_USDT',
@@ -734,7 +742,7 @@ test('verified identity guard rejects category/canonical drift but permits non-i
     },
   ]);
   assert.doesNotMatch(metadataGuard.text, /incoming\.(?:display_name|name|quote_currency|official_status|asset_fingerprint|instrument_fingerprint)/);
-  const metadataPayload = JSON.parse(metadataGuard.params[0]);
+  const metadataPayload = stagedRows(metadataCalls, 'listing_membership_input');
   const metadataGuardRow = metadataPayload.find(row => row.official_product_key === 'AAPL-GATE-PERP');
   assert.deepEqual(
     Object.fromEntries([
@@ -770,9 +778,11 @@ test('verified identity guard rejects category/canonical drift but permits non-i
   reviewedLifecycleMembership.canonicalUnderlying = 'UNITREE';
   reviewedLifecycleMembership.venueCategory = 'equity';
   reviewedLifecycleMembership.lifecycleStatus = 'public';
-  const reviewedLifecycleGuard = pgCalls(reviewedLifecycleBatch)
+  const reviewedLifecycleCalls = pgCalls(reviewedLifecycleBatch);
+  const reviewedLifecycleGuard = reviewedLifecycleCalls
     .find(call => call.text.includes('verified_identity_guard'));
-  const reviewedLifecycleRow = JSON.parse(reviewedLifecycleGuard.params[0])
+  assert.ok(reviewedLifecycleGuard);
+  const reviewedLifecycleRow = stagedRows(reviewedLifecycleCalls, 'listing_membership_input')
     .find(row => row.official_product_key === 'AAPL-GATE-PERP');
   assert.deepEqual({
     assetKey:reviewedLifecycleRow.asset_key,
@@ -793,9 +803,10 @@ test('verified identity guard rejects category/canonical drift but permits non-i
   conflictingMembership.assetKey = 'etf:MSFT';
   conflictingMembership.category = 'etf';
   conflictingMembership.canonicalUnderlying = 'MSFT';
-  const conflictingGuard = pgCalls(conflictingBatch).find(call => call.text.includes('verified_identity_guard'));
+  const conflictingCalls = pgCalls(conflictingBatch);
+  const conflictingGuard = conflictingCalls.find(call => call.text.includes('verified_identity_guard'));
   assert.match(conflictingGuard.text, /ingest\.reject_verified_catalog_identity_conflict\(\)/);
-  const conflictingGuardRow = JSON.parse(conflictingGuard.params[0])
+  const conflictingGuardRow = stagedRows(conflictingCalls, 'listing_membership_input')
     .find(row => row.official_product_key === 'AAPL-GATE-PERP');
   assert.deepEqual(
     Object.fromEntries([
@@ -920,7 +931,7 @@ test('trusted same-day retries replace exact evidence and membership before rein
 
     const replacementSources = JSON.parse(calls[membershipDeleteIndex].params.at(-1));
     assert.equal(replacementSources.some(row => row.source_key === sequence.sourceKey), true);
-    const incomingMemberships = JSON.parse(calls[membershipInsertIndex].params.at(-1));
+    const incomingMemberships = stagedRows(calls, 'listing_membership_input');
     assert.deepEqual(
       incomingMemberships.filter(row => row.source_key === sequence.sourceKey)
         .map(row => row.official_product_key),
@@ -988,7 +999,7 @@ test('a later trusted exact listing resolves its open review while preserving ve
   const resolveReviewIndex = verifiedCalls.findIndex(call =>
     call.text.includes('UPDATE identity.review_case AS review') && call.text.includes("status = 'verified'"));
   assert.ok(resolveReviewIndex > membershipInsertIndex);
-  const resolveInput = JSON.parse(verifiedCalls[resolveReviewIndex].params[0]);
+  const resolveInput = stagedRows(verifiedCalls, 'listing_membership_input');
   assert.equal(resolveInput.some(row => row.official_product_key === 'FUTURE-GATE-PERP'), true);
   assert.match(verifiedCalls[resolveReviewIndex].text, /resolved_asset_id = asset_version\.asset_id/);
   assert.match(verifiedCalls[resolveReviewIndex].text, /resolved_instrument_id = instrument\.instrument_id/);
@@ -1158,6 +1169,117 @@ test('same-day replacement is deterministic and one Serializable transaction rol
   assert.equal(stored.checksum, actualChecksum);
 });
 
+test('production-scale Bitget expansion stages 3028 memberships and 2313 events once in one bounded transaction', async () => {
+  const sourceKey = 'spot:bitget';
+  const recoveredRLGHL = listing(sourceKey, 'LGHL', {
+    venueSymbol:'RLGHLUSDT',
+    canonicalSymbol:'LGHL',
+  });
+  const disputedRWBD = listing(sourceKey, 'WBD', {
+    venueSymbol:'RWBDUSDT',
+    canonicalSymbol:'WBD',
+  });
+  const retainedLegacy = Array.from(
+    { length:705 },
+    (_, index) => listing(sourceKey, `OLD${String(index).padStart(4, '0')}`),
+  );
+  const additions = Array.from(
+    { length:2_313 },
+    (_, index) => listing(sourceKey, `NEW${String(index).padStart(4, '0')}`),
+  );
+  const previousRows = [recoveredRLGHL, disputedRWBD, ...retainedLegacy];
+  const currentRows = [recoveredRLGHL, ...retainedLegacy, ...additions];
+  const catalogEvidence = {
+    status:'full',
+    method:'bitget-reality-stock-info-exact-intersection-v1',
+    instrumentsCount:3_019,
+    realityCandidatesCount:3_017,
+    stockInfoCount:3_017,
+    matchedCount:3_017,
+    admittedCount:3_019,
+    admittedRealityCount:3_017,
+    legacyCount:2,
+  };
+  const baselineObservations = fullObservations({
+    [sourceKey]:targetObservation(sourceKey, previousRows),
+  });
+  const baseline = mergeAt(null, baselineObservations, '2026-10-30T00:45:00.000Z');
+  const stalePending = structuredClone(baseline.state);
+  stalePending.sources[sourceKey].pendingRemovals = {
+    [`${sourceKey}:RLGHLUSDT`]:'2026-10-30T00:45:00.000Z',
+  };
+  const expandedObservations = fullObservations({
+    [sourceKey]:targetObservation(sourceKey, currentRows, { catalogEvidence }),
+  });
+  const expanded = mergeAt(stalePending, expandedObservations, '2026-11-01T00:45:00.000Z');
+  const batch = buildListingAuditPgBatch({ observations:expandedObservations, merged:expanded });
+
+  const bitget = sourceRun(batch, sourceKey);
+  assert.equal(bitget.status, 'partial');
+  assert.equal(bitget.pendingRemovalCount, 1);
+  assert.deepEqual(bitget.pendingRemovalVenueSymbols, ['RWBDUSDT']);
+  assert.equal(bitget.memberships.some(row => row.officialVenueSymbol === 'RLGHLUSDT'), true);
+  assert.equal(batch.sourceRuns.reduce((sum, run) => sum + run.memberships.length, 0), 3_028);
+  assert.equal(batch.events.length, 2_313);
+  assert.equal(batch.events.some(event => event.normalizedVenueSymbol === 'RLGHLUSDT'), false);
+  assert.equal(batch.events.some(event =>
+    event.eventType === 'delisted' && event.normalizedVenueSymbol === 'RWBDUSDT'), false);
+
+  let transactionCalls = 0;
+  let calls = [];
+  const checksum = 'e'.repeat(64);
+  const stored = await writeListingAuditPgBatch(batch, storedArtifacts(batch), {
+    runTransaction:async (builder, options) => {
+      transactionCalls += 1;
+      assert.deepEqual(options, { isolationLevel:'Serializable' });
+      calls = builder({ query(text, params = []) { return { text, params }; } });
+      return calls.map(query => query.text.includes("'postgres-catalog-shadow', 'stored'")
+        ? [{
+          sink_name:'postgres-catalog-shadow',
+          row_count:5_351,
+          checksum,
+          membership_count:3_028,
+          lifecycle_count:2_313,
+        }]
+        : []);
+    },
+  });
+  assert.equal(transactionCalls, 1);
+  assert.equal(stored.membershipCount, 3_028);
+  assert.equal(stored.lifecycleCount, 2_313);
+
+  const membershipStage = calls.filter(call =>
+    call.text.includes('CREATE TEMP TABLE listing_membership_input'));
+  const eventStage = calls.filter(call =>
+    call.text.includes('CREATE TEMP TABLE listing_event_input'));
+  assert.equal(membershipStage.length, 1);
+  assert.equal(eventStage.length, 1);
+  assert.match(membershipStage[0].text, /ON COMMIT DROP/);
+  assert.match(eventStage[0].text, /ON COMMIT DROP/);
+  assert.equal(JSON.parse(membershipStage[0].params[0]).length, 3_028);
+  assert.equal(JSON.parse(eventStage[0].params[0]).length, 2_313);
+  assert.equal(calls.flatMap(call => call.params).filter(param =>
+    param === membershipStage[0].params[0]).length, 1);
+  assert.equal(calls.flatMap(call => call.params).filter(param =>
+    param === eventStage[0].params[0]).length, 1);
+  assert.ok(calls.filter(call => call !== membershipStage[0]).every(call =>
+    !call.text.includes('jsonb_to_recordset($1::jsonb) AS incoming') ||
+    !call.params.includes(membershipStage[0].params[0])));
+  assert.ok(calls.filter(call => call !== eventStage[0]).every(call =>
+    !call.params.includes(eventStage[0].params[0])));
+
+  const jsonParameterBytes = calls.flatMap(call => call.params)
+    .filter(param => typeof param === 'string' && /^[\[{]/.test(param))
+    .reduce((sum, param) => sum + Buffer.byteLength(param, 'utf8'), 0);
+  const neonRequestBytes = Buffer.byteLength(JSON.stringify({
+    queries:calls.map(call => ({ query:call.text, params:call.params })),
+  }), 'utf8');
+  assert.ok(jsonParameterBytes < LISTING_PG_TRANSACTION_JSON_MAX_BYTES,
+    `${jsonParameterBytes} JSON parameter bytes must stay below the transaction budget`);
+  assert.ok(neonRequestBytes < LISTING_PG_TRANSACTION_JSON_MAX_BYTES,
+    `${neonRequestBytes} serialized request bytes must stay below the transaction budget`);
+});
+
 test('lifecycle shadow rows exclude review candidates and are empty on baseline and same-day retry', () => {
   const baseline = baselineInput();
   assert.equal(buildListingAuditPgBatch(baseline).events.length, 0);
@@ -1303,7 +1425,7 @@ test('transaction queries are least-privilege, idempotent, exact-case, and inclu
   assert.match(calls[0].text, /^SET LOCAL ROLE rwa_catalog_shadow_writer$/);
   assert.match(calls[1].text, /statement_timeout = '15s'/);
   assert.match(calls[2].text, /lock_timeout = '3s'/);
-  assert.ok(calls.slice(3).every(call => !/\b(?:TRUNCATE|DROP|ALTER)\b/i.test(call.text)));
+  assert.ok(calls.slice(3).every(call => !/^\s*(?:TRUNCATE|DROP|ALTER)\b/im.test(call.text)));
   assert.deepEqual(
     calls.filter(call => /^DELETE FROM /m.test(call.text)).map(call =>
       call.text.match(/^DELETE FROM ([a-z_.]+)/m)?.[1]),
@@ -1316,7 +1438,8 @@ test('transaction queries are least-privilege, idempotent, exact-case, and inclu
   assert.equal(sourcePayload.some(row => row.source_key.endsWith(':official-catalog')), false);
 
   const instrumentInsert = calls.find(call => call.text.includes('INSERT INTO identity.instrument ('));
-  const instrumentPayload = JSON.parse(instrumentInsert.params[0]);
+  assert.match(instrumentInsert.text, /pg_temp\.listing_membership_input/);
+  const instrumentPayload = stagedRows(calls, 'listing_membership_input');
   assert.equal(instrumentPayload.find(row => row.source_key === 'spot:kraken').official_product_key, 'AAPLxUSD');
 
   const membershipInsert = calls.find(call => call.text.includes('INSERT INTO ingest.catalog_membership'));

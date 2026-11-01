@@ -649,6 +649,7 @@ test('database audit verifies Listing checkpoint roles without granting identity
   assert.match(audit, /listing_reader_run_view_select/);
   assert.match(audit, /listing_reader_review_view_select/);
   assert.match(audit, /listing_writer_schema_usage/);
+  assert.match(audit, /writer_database_temp/);
   assert.match(audit, /listing_writer_update/);
   assert.match(audit, /listing_reader_delete/);
   assert.match(audit, /listing_writer_delete/);
