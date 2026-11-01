@@ -56,6 +56,10 @@ function row(sourceKey, symbol = 'AAPL') {
   };
 }
 
+const REVIEWED_BITGET_ETF_SYMBOLS = Object.freeze([
+  'BITX', 'IJR', 'JPST', 'NLR', 'SCHF', 'VGK', 'VT', 'VUG', 'XOP',
+]);
+
 function fullObservations(overrides = {}) {
   return LISTING_SOURCE_KEYS.map(sourceKey => {
     const [market, venue] = sourceKey.split(':');
@@ -481,7 +485,74 @@ test('reviewed SKDD ETF correction survives pending removal and does not synthes
     venueCategory:'equity',
     name:'GraniteShares 2x Short SK Hynix Daily ETF',
   });
-  assert.deepEqual(REVIEWED_ETF_CATEGORY_CORRECTIONS, ['SKDD', 'SKUU']);
+  assert.deepEqual(
+    [...REVIEWED_ETF_CATEGORY_CORRECTIONS].sort(),
+    [...REVIEWED_BITGET_ETF_SYMBOLS, 'SKDD', 'SKUU'].sort(),
+  );
+});
+
+test('reviewed Bitget ETF corrections migrate legacy equity Runtime Cache state without lifecycle events', () => {
+  const bitgetListings = REVIEWED_BITGET_ETF_SYMBOLS.map(symbol => ({
+    ...row('spot:bitget', symbol),
+    venueSymbol:`R${symbol}USDT`,
+    category:'equity',
+    venueCategory:'equity',
+    name:symbol,
+  }));
+  const observations = fullObservations({
+    'spot:bitget':{
+      market:'spot',
+      venue:'bitget',
+      status:'full',
+      listings:bitgetListings,
+    },
+  });
+  const baseline = mergeListingAudit(null, observations, new Date('2026-11-01T00:45:00Z'));
+
+  // Model the exact pre-release Runtime Cache rows: the listing keys were
+  // already active, but Bitget's broad `stock` product class was persisted as
+  // Equity before these issuer-reviewed ETF identities were registered.
+  const legacy = structuredClone(baseline.state);
+  for (const symbol of REVIEWED_BITGET_ETF_SYMBOLS) {
+    const listingKey = `spot:bitget:R${symbol}USDT`;
+    legacy.known[listingKey].category = 'equity';
+    legacy.known[listingKey].venueCategory = 'equity';
+    legacy.known[listingKey].name = symbol;
+    assert.equal(legacy.known[listingKey].active, true);
+  }
+
+  const migrated = mergeListingAudit(legacy, observations, new Date('2026-11-02T00:45:00Z'));
+  assert.deepEqual(migrated.newEvents, [],
+    'an in-place reviewed identity correction must not look new, relisted, or delisted');
+  assert.equal(migrated.snapshot.events.some(event =>
+    REVIEWED_BITGET_ETF_SYMBOLS.includes(event.canonicalSymbol) &&
+    ['new', 'relisted', 'delisted'].includes(event.changeType)), false);
+
+  for (const symbol of REVIEWED_BITGET_ETF_SYMBOLS) {
+    const listingKey = `spot:bitget:R${symbol}USDT`;
+    const corrected = migrated.state.known[listingKey];
+    assert.equal(corrected.active, true);
+    assert.equal(corrected.canonicalSymbol, symbol);
+    assert.equal(corrected.category, 'etf');
+    assert.equal(corrected.venueCategory, 'equity');
+    assert.notEqual(corrected.name, symbol);
+  }
+});
+
+test('reviewed ETF correction remains exact and does not widen to near-match tickers', () => {
+  for (const canonicalSymbol of ['BITXX', 'XBITX', 'BITX1', 'IJRR', 'XVUG']) {
+    const normalized = normalizeListingObservation({
+      market:'spot',
+      venue:'bitget',
+      venueSymbol:`R${canonicalSymbol}USDT`,
+      canonicalSymbol,
+      category:'equity',
+      venueCategory:'equity',
+      identityStatus:'verified',
+    });
+    assert.equal(normalized.category, 'equity', `${canonicalSymbol} must not inherit a reviewed ETF identity`);
+    assert.equal(REVIEWED_ETF_CATEGORY_CORRECTIONS.includes(canonicalSymbol), false);
+  }
 });
 
 test('listing audit distinguishes delisting from a later relisting', () => {

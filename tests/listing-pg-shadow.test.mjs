@@ -79,6 +79,10 @@ function listing(sourceKey, symbol = 'AAPL', overrides = {}) {
   };
 }
 
+const REVIEWED_BITGET_ETF_SYMBOLS = Object.freeze([
+  'BITX', 'IJR', 'JPST', 'NLR', 'SCHF', 'VGK', 'VT', 'VUG', 'XOP',
+]);
+
 function fullObservations(overrides = {}) {
   return LISTING_SOURCE_KEYS.map(sourceKey => {
     const [market, venue] = sourceKey.split(':');
@@ -270,6 +274,50 @@ test('reviewed SK Hynix ETFs persist exact registry names and stable matching fi
     ])).digest('hex'));
   }
   assert.equal(batch.events.length, 0);
+});
+
+test('PostgreSQL identity guard admits only the nine reviewed Bitget Equity-to-ETF corrections', () => {
+  const observations = fullObservations({
+    'spot:bitget':targetObservation('spot:bitget', REVIEWED_BITGET_ETF_SYMBOLS.map(symbol =>
+      listing('spot:bitget', symbol, {
+        venueSymbol:`R${symbol}USDT`,
+        category:'equity',
+        venueCategory:'equity',
+        name:symbol,
+      }))),
+  });
+  const batch = buildListingAuditPgBatch(baselineInput(observations, '2026-11-01T00:45:00.000Z'));
+  const calls = pgCalls(batch);
+  const guard = calls.find(call => call.text.includes('verified_identity_guard'));
+  assert.ok(guard);
+  assert.match(guard.text, /incoming\.canonical_underlying = ANY\(\$2::text\[\]\)/);
+  assert.match(guard.text, /current_asset_version\.canonical_underlying = incoming\.canonical_underlying/);
+  assert.match(guard.text, /current_asset_version\.category = 'equity'/);
+  assert.match(guard.text, /incoming\.category = 'etf'/);
+  assert.doesNotMatch(
+    guard.text,
+    /current_asset_version\.category = 'etf'[\s\S]{0,200}incoming\.category = 'equity'/,
+    'the reviewed correction must remain one-way and reject an ETF-to-Equity reversal',
+  );
+
+  const reviewedAllowlist = guard.params[1];
+  assert.deepEqual(
+    reviewedAllowlist.filter(symbol => REVIEWED_BITGET_ETF_SYMBOLS.includes(symbol)).sort(),
+    [...REVIEWED_BITGET_ETF_SYMBOLS].sort(),
+  );
+  assert.equal(reviewedAllowlist.includes('AAPL'), false,
+    'an arbitrary same-canonical Equity-to-ETF change must not enter the PG bypass');
+  assert.equal(reviewedAllowlist.includes('BITXX'), false,
+    'a near-match ticker must not enter the PG bypass');
+
+  const incoming = stagedRows(calls, 'listing_membership_input')
+    .filter(row => REVIEWED_BITGET_ETF_SYMBOLS.includes(row.canonical_underlying));
+  assert.equal(incoming.length, 9);
+  for (const row of incoming) {
+    assert.equal(row.asset_key, `etf:${row.canonical_underlying}`);
+    assert.equal(row.category, 'etf');
+    assert.equal(row.venue_category, 'equity');
+  }
 });
 
 test('reviewed BYD and Lenovo identities persist issuer names rather than venue codes', () => {
@@ -697,7 +745,10 @@ test('verified identity guard rejects category/canonical drift but permits non-i
   assert.match(metadataGuard.text, /incoming\.canonical_underlying = ANY\(\$2::text\[\]\)/);
   assert.match(metadataGuard.text, /current_asset_version\.category = 'equity'/);
   assert.match(metadataGuard.text, /incoming\.category = 'etf'/);
-  assert.deepEqual(metadataGuard.params[1], ['SKDD', 'SKUU']);
+  assert.deepEqual(
+    [...metadataGuard.params[1]].sort(),
+    [...REVIEWED_BITGET_ETF_SYMBOLS, 'SKDD', 'SKUU'].sort(),
+  );
   assert.match(metadataGuard.text, /correction\.source_key = source\.source_key/);
   assert.match(metadataGuard.text, /correction\.official_product_key = instrument\.official_product_key/);
   assert.match(metadataGuard.text, /correction\.previous_asset_key = current_asset\.asset_key/);
@@ -800,12 +851,14 @@ test('verified identity guard rejects category/canonical drift but permits non-i
 
   const conflictingBatch = structuredClone(sequence.retryBatch);
   const conflictingMembership = sourceRun(conflictingBatch).memberships[0];
-  conflictingMembership.assetKey = 'etf:MSFT';
+  conflictingMembership.assetKey = 'etf:AAPL';
   conflictingMembership.category = 'etf';
-  conflictingMembership.canonicalUnderlying = 'MSFT';
+  conflictingMembership.canonicalUnderlying = 'AAPL';
+  conflictingMembership.venueCategory = 'equity';
   const conflictingCalls = pgCalls(conflictingBatch);
   const conflictingGuard = conflictingCalls.find(call => call.text.includes('verified_identity_guard'));
   assert.match(conflictingGuard.text, /ingest\.reject_verified_catalog_identity_conflict\(\)/);
+  assert.equal(conflictingGuard.params[1].includes('AAPL'), false);
   const conflictingGuardRow = stagedRows(conflictingCalls, 'listing_membership_input')
     .find(row => row.official_product_key === 'AAPL-GATE-PERP');
   assert.deepEqual(
@@ -819,9 +872,9 @@ test('verified identity guard rejects category/canonical drift but permits non-i
     {
       source_key:'perp:gate',
       official_product_key:'AAPL-GATE-PERP',
-      asset_key:'etf:MSFT',
+      asset_key:'etf:AAPL',
       category:'etf',
-      canonical_underlying:'MSFT',
+      canonical_underlying:'AAPL',
     },
   );
 
@@ -837,7 +890,7 @@ test('verified identity guard rejects category/canonical drift but permits non-i
       sourceKey:'perp:gate',
       officialProductKey:'AAPL-GATE-PERP',
       existing:{ assetKey:'equity:AAPL', category:'equity', canonicalUnderlying:'AAPL' },
-      incoming:{ assetKey:'etf:MSFT', category:'etf', canonicalUnderlying:'MSFT' },
+      incoming:{ assetKey:'etf:AAPL', category:'etf', canonicalUnderlying:'AAPL' },
     }],
   });
   assert.equal(rejected.status, 'rejected');
@@ -848,7 +901,7 @@ test('verified identity guard rejects category/canonical drift but permits non-i
     sourceKey:'perp:gate',
     officialProductKey:'AAPL-GATE-PERP',
     existing:{ assetKey:'equity:AAPL', category:'equity', canonicalUnderlying:'AAPL' },
-    incoming:{ assetKey:'etf:MSFT', category:'etf', canonicalUnderlying:'MSFT' },
+    incoming:{ assetKey:'etf:AAPL', category:'etf', canonicalUnderlying:'AAPL' },
   }]);
 });
 
@@ -875,7 +928,10 @@ test('verified identity conflict diagnostics are read-only, bounded, and expose 
       const incoming = JSON.parse(calls[2].params[0]);
       assert.ok(incoming.length > 0);
       assert.ok(calls[2].params[1].includes('UNITREE'));
-      assert.deepEqual(calls[2].params[2], ['SKDD', 'SKUU']);
+      assert.deepEqual(
+        [...calls[2].params[2]].sort(),
+        [...REVIEWED_BITGET_ETF_SYMBOLS, 'SKDD', 'SKUU'].sort(),
+      );
       assert.equal(JSON.parse(calls[2].params[3]).some(row =>
         row.source_key === 'perp:okx' && row.official_product_key === 'OURA-USDT-SWAP'), true);
       return queries.map((_query, index) => index === 2 ? [{

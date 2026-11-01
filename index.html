@@ -2633,6 +2633,9 @@ ETF_SYMBOLS.add('MUU');
 // GraniteShares/Nasdaq official identities: these are daily leveraged ETFs
 // referencing SK Hynix ADR (SKHY), not SK Hynix common equity aliases.
 ['SKDD','SKUU'].forEach(symbol => ETF_SYMBOLS.add(symbol));
+// Issuer-reviewed U.S.-listed ETFs that Bitget exposes through its broad
+// stock class. Keep this exact list aligned with the server identity registry.
+['BITX','IJR','JPST','NLR','SCHF','VGK','VT','VUG','XOP'].forEach(symbol => ETF_SYMBOLS.add(symbol));
 
 // Venue wrapper tickers whose underlying is an ETF even when the venue's broad
 // product class says stock or metal.

@@ -416,6 +416,8 @@ Every product or collector change must declare its database impact in the same p
 
 `db/migrations/*.sql` is the only schema-change path. Applied migration files are immutable and checksum-locked; corrections use a new forward migration. Runtime startup and request handlers never apply schema changes automatically. Expand-contract changes are split across releases: add compatible schema first, migrate/replay and verify it second, switch readers only after explicit approval, and remove obsolete structures only in a later release after rollback compatibility expires.
 
+Migration `0021` is the bounded 2026-11-01 identity repair for `BITX/IJR/JPST/NLR/SCHF/VGK/VT/VUG/XOP`. It may only rebind already-admitted exact security products from legacy Equity asset versions to reviewed ETF versions with the same canonical, preserve immutable lifecycle events, align identity fingerprints and retire unreferenced legacy versions. The application containing the identical one-way allowlist must reach Production before the migration. Verification requires an idempotent second migration run, event-count conservation, zero current legacy bindings and zero Signal Radar cross-category conflicts; rollback stops the affected writers rather than reversing reviewed identity data.
+
 If a feature remains Runtime Cache/CDN/browser-only, its change record must say so and must not imply that an empty Phase 0/1 skeleton is receiving data. A database writer may start only after its typed relation, stable exact identity key, method/version contract, retention/partition policy, replay behavior and failure semantics have all passed the phase-specific Preview gate.
 
 ### 10.2 Environment and release isolation

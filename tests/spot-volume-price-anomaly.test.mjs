@@ -19,6 +19,9 @@ const DAY_MS = 24 * 60 * 60 * 1_000;
 const HOUR_MS = 60 * 60 * 1_000;
 const CURRENT_DAY = Date.UTC(2026, 7, 14);
 const CAPTURED_AT = CURRENT_DAY + 12 * HOUR_MS;
+const REVIEWED_BITGET_ETF_SYMBOLS = Object.freeze([
+  'BITX', 'IJR', 'JPST', 'NLR', 'SCHF', 'VGK', 'VT', 'VUG', 'XOP',
+]);
 
 function spotListing(symbol, currentVolumeUsd, priceChange24hPct, options = {}) {
   const venue = options.venue || 'binance';
@@ -372,6 +375,135 @@ test('Kraken resolves the full 166-listing tokenized universe in one bounded off
     assert.equal(tickerUrls.length, callsBeforeExpiredDeadline,
       'an exhausted shared deadline must stop before another Kraken request starts');
     assert.equal(expired.sources.kraken.status, 'unavailable');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('reviewed Bitget and Kraken ETF identities retain all 18 exact listings without conflicts', async () => {
+  const catalogObservations = [
+    {
+      market:'spot', venue:'bitget', status:'full', reason:null,
+      listings:REVIEWED_BITGET_ETF_SYMBOLS.map(symbol => ({
+        market:'spot',
+        venue:'bitget',
+        venueSymbol:`R${symbol}USDT`,
+        canonicalSymbol:symbol,
+        category:'equity',
+        venueCategory:'equity',
+        identityStatus:'verified',
+        marketDataProfile:'bitget-reality',
+      })),
+    },
+    {
+      market:'spot', venue:'kraken', status:'full', reason:null,
+      listings:REVIEWED_BITGET_ETF_SYMBOLS.map(symbol => ({
+        market:'spot',
+        venue:'kraken',
+        venueSymbol:`${symbol}xUSD`,
+        canonicalSymbol:symbol,
+        category:'etf',
+        venueCategory:'etf',
+        identityStatus:'verified',
+        marketDataProfile:'kraken-tokenized',
+        marketQuerySymbol:`${symbol}xUSD`,
+        marketAliases:[`${symbol}xUSD`, `${symbol}x/USD`],
+      })),
+    },
+  ];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async input => {
+    const url = String(input);
+    if (url.includes('/api/bitget-market?type=spot-snapshot')) {
+      return new Response(JSON.stringify({
+        schemaVersion:1,
+        catalogStatus:'full',
+        realityTickers:REVIEWED_BITGET_ETF_SYMBOLS.map(symbol => ({
+          symbol:`R${symbol}USDT`,
+          platformTurnover24h:'600000',
+          price24hPcnt:'0.01',
+        })),
+        standardTickers:[],
+      }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    if (url.includes('/Ticker?asset_class=tokenized_asset')) {
+      const result = Object.fromEntries(REVIEWED_BITGET_ETF_SYMBOLS.map(symbol => [
+        `${symbol}xUSD`,
+        { v:['0', '100'], p:['0', '6000'], o:'1' },
+      ]));
+      return new Response(JSON.stringify({ error:[], result }), {
+        status:200,
+        headers:{ 'content-type':'application/json' },
+      });
+    }
+    throw new Error(`Unexpected reviewed ETF test URL: ${url}`);
+  };
+  try {
+    const snapshot = await collectSpotMarketSnapshot('https://dashboard.example', { catalogObservations });
+    assert.deepEqual(snapshot.conflicts, []);
+    assert.equal(snapshot.quarantinedListings, 0);
+    assert.equal(snapshot.listings.length, 18);
+    assert.equal(snapshot.sources.bitget.status, 'full');
+    assert.equal(snapshot.sources.kraken.status, 'full');
+    for (const symbol of REVIEWED_BITGET_ETF_SYMBOLS) {
+      const retained = snapshot.listings.filter(row => row.symbol === symbol);
+      assert.equal(retained.length, 2, `${symbol} must retain both exact venue listings`);
+      assert.deepEqual(retained.map(row => row.venue).sort(), ['bitget', 'kraken']);
+      assert.deepEqual([...new Set(retained.map(row => row.category))], ['etf']);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('non-reviewed same-symbol Equity and ETF conflict remains quarantined', async () => {
+  const catalogObservations = [
+    {
+      market:'spot', venue:'bitget', status:'full', reason:null,
+      listings:[{
+        market:'spot', venue:'bitget', venueSymbol:'RAAPLUSDT', canonicalSymbol:'AAPL',
+        category:'equity', venueCategory:'equity', identityStatus:'verified',
+        marketDataProfile:'bitget-reality',
+      }],
+    },
+    {
+      market:'spot', venue:'kraken', status:'full', reason:null,
+      listings:[{
+        market:'spot', venue:'kraken', venueSymbol:'AAPLxUSD', canonicalSymbol:'AAPL',
+        category:'etf', venueCategory:'etf', identityStatus:'verified',
+        marketDataProfile:'kraken-tokenized', marketQuerySymbol:'AAPLxUSD',
+        marketAliases:['AAPLxUSD', 'AAPLx/USD'],
+      }],
+    },
+  ];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async input => {
+    const url = String(input);
+    if (url.includes('/api/bitget-market?type=spot-snapshot')) {
+      return new Response(JSON.stringify({
+        schemaVersion:1,
+        catalogStatus:'full',
+        realityTickers:[{ symbol:'RAAPLUSDT', platformTurnover24h:'600000', price24hPcnt:'0.01' }],
+        standardTickers:[],
+      }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    if (url.includes('/Ticker?asset_class=tokenized_asset')) {
+      return new Response(JSON.stringify({
+        error:[],
+        result:{ AAPLxUSD:{ v:['0', '100'], p:['0', '6000'], o:'1' } },
+      }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    throw new Error(`Unexpected conflict quarantine test URL: ${url}`);
+  };
+  try {
+    const snapshot = await collectSpotMarketSnapshot('https://dashboard.example', { catalogObservations });
+    assert.deepEqual(snapshot.conflicts, [{
+      symbol:'AAPL',
+      categories:['equity', 'etf'],
+      listingKeys:['spot:bitget:RAAPLUSDT', 'spot:kraken:AAPLXUSD'],
+    }]);
+    assert.equal(snapshot.listings.length, 0);
+    assert.equal(snapshot.quarantinedListings, 2);
   } finally {
     globalThis.fetch = originalFetch;
   }
